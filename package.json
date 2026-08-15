@@ -1,0 +1,16 @@
+{
+  "name": "branchline-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @branchline/frontend dev",
+    "build": "pnpm --filter @branchline/frontend build",
+    "preview": "pnpm --filter @branchline/frontend preview",
+    "desktop:dev": "pnpm --filter @branchline/desktop dev",
+    "desktop:build": "pnpm --filter @branchline/desktop build",
+    "typecheck": "pnpm --filter @branchline/frontend exec tsc -b",
+    "rust:check": "cargo check --manifest-path apps/desktop/Cargo.toml",
+    "rust:fmt": "cargo fmt --manifest-path apps/desktop/Cargo.toml -- --check"
+  }
+}

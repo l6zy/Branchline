@@ -1,0 +1,5 @@
+node_modules/
+dist/
+apps/desktop/target/
+.DS_Store
+*.log

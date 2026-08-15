@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Branchline",
+  "version": "0.1.0",
+  "identifier": "com.branchline.git",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @branchline/frontend dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm --filter @branchline/frontend build",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Branchline · Git 工作台",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 650,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

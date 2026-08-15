@@ -1,0 +1,15 @@
+{
+  "name": "@branchline/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "generate:icons": "tauri icon app-icon.svg -o icons",
+    "prebuild": "pnpm generate:icons",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

@@ -165,6 +165,14 @@ pub struct RepositorySubmodule {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryBranchTracking {
+    pub upstream: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryStash {
     pub reference: String,
     pub message: String,
@@ -223,6 +231,7 @@ pub struct RepositorySnapshot {
     pub submodules: Vec<RepositorySubmodule>,
     pub branches: Vec<String>,
     pub remote_branches: Vec<String>,
+    pub branch_tracking: std::collections::HashMap<String, RepositoryBranchTracking>,
     pub tags: Vec<String>,
     pub stashes: Vec<RepositoryStash>,
     pub commit_template: Option<RepositoryCommitTemplate>,

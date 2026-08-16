@@ -16,7 +16,7 @@ export type RepositoryCommit = {
   avatar: string
   time: string
   branches?: string[]
-  status?: 'ahead' | 'merge' | 'local'
+  status?: 'ahead' | 'merge' | 'local' | 'stash'
   files: number
   additions: number
   deletions: number
@@ -136,6 +136,12 @@ export type RepositorySubmodule = {
   branch?: string
 }
 
+export type RepositoryBranchTracking = {
+  upstream?: string
+  ahead: number
+  behind: number
+}
+
 export type RepositorySnapshot = {
   name: string
   path: string
@@ -151,6 +157,7 @@ export type RepositorySnapshot = {
   submodules: RepositorySubmodule[]
   branches: string[]
   remoteBranches: string[]
+  branchTracking: Record<string, RepositoryBranchTracking>
   tags: string[]
   stashes: RepositoryStash[]
   commitTemplate?: RepositoryCommitTemplate

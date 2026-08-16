@@ -108,6 +108,8 @@ function conflictDecorations(doc: EditorState['doc'], payload: ConflictDecoratio
       ...lineRanges(from, separatorStart, `cm-conflict-current${active ? ' cm-conflict-active' : ''}`),
       ...lineRanges(separatorStart, separatorEnd, 'cm-conflict-separator'),
       ...lineRanges(separatorEnd, to, `cm-conflict-incoming${active ? ' cm-conflict-active' : ''}`),
+      Decoration.line({ class: `cm-conflict-marker cm-conflict-marker-current${active ? ' cm-conflict-active' : ''}` }).range(doc.lineAt(from).from),
+      Decoration.line({ class: `cm-conflict-marker cm-conflict-marker-incoming${active ? ' cm-conflict-active' : ''}` }).range(doc.lineAt(Math.max(from, Math.min(block.incomingEnd, to))).from),
     ]
   })
   return Decoration.set(ranges, true)
@@ -132,11 +134,11 @@ const conflictEditorTheme = EditorView.theme({
   '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'color-mix(in srgb, var(--accent) 8%, transparent)' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--accent) 34%, transparent) !important' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--text)' },
-  '.cm-conflict-current': { backgroundColor: 'color-mix(in srgb, #36cfc9 31%, transparent)' },
-  '.cm-conflict-incoming': { backgroundColor: 'color-mix(in srgb, #69b1ff 30%, transparent)' },
+  '.cm-conflict-current': { backgroundColor: 'color-mix(in srgb, #40c8ae 20%, transparent)' },
+  '.cm-conflict-incoming': { backgroundColor: 'color-mix(in srgb, #40a6ff 20%, transparent)' },
   '.cm-conflict-separator': { backgroundColor: 'transparent' },
-  '.cm-conflict-current.cm-conflict-active': { backgroundColor: 'color-mix(in srgb, #36cfc9 41%, transparent)' },
-  '.cm-conflict-incoming.cm-conflict-active': { backgroundColor: 'color-mix(in srgb, #69b1ff 40%, transparent)' },
+  '.cm-conflict-marker-current': { backgroundColor: 'color-mix(in srgb, #40c8ae 50%, transparent)' },
+  '.cm-conflict-marker-incoming': { backgroundColor: 'color-mix(in srgb, #40a6ff 50%, transparent)' },
 })
 
 const conflictHighlightStyle = HighlightStyle.define([

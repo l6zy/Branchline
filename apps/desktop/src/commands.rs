@@ -559,11 +559,14 @@ pub async fn apply_repository_stash(
     pop: bool,
 ) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::apply_repository_stash(&repository_path, &reference, pop)?;
-        git::read_repository(&repository_path)
+        operation_snapshot(
+            &repository_path,
+            git::apply_repository_stash(&repository_path, &reference, pop),
+            "应用 Stash",
+        )
     })
     .await
-    .map_err(|error| task_error("应用 Stash", error))?
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

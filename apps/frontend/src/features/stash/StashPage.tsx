@@ -45,8 +45,11 @@ export function StashPage({ repository, onSnapshot, onNotice }: { repository: Re
     if (!repository) return onNotice('Stash 需要先打开本地仓库')
     setBusy(key)
     try {
-      onSnapshot(await operation())
-      onNotice(notice)
+      const snapshot = await operation()
+      onSnapshot(snapshot)
+      onNotice(snapshot.operation
+        ? `${snapshot.operation.label}：请处理 ${snapshot.operation.conflicts.length} 个冲突文件`
+        : notice)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
     } finally {

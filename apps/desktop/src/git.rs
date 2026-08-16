@@ -1,9 +1,9 @@
 use crate::models::{
     BlameLine, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate,
-    MergeQueueSnapshot, RebasePreview, RepositoryCommit, RepositoryCommitStats,
-    RepositoryCommitTemplate, RepositoryComparison, RepositoryFile, RepositoryOperationState,
-    RepositoryOperationStep, RepositorySnapshot, RepositoryStash, RepositorySubmodule,
-    RepositoryWorktree,
+    MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommit,
+    RepositoryCommitStats, RepositoryCommitTemplate, RepositoryComparison, RepositoryFile,
+    RepositoryOperationState, RepositoryOperationStep, RepositorySnapshot, RepositoryStash,
+    RepositorySubmodule, RepositoryWorktree,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -297,6 +297,8 @@ fn parse_commits(path: &Path) -> Vec<RepositoryCommit> {
                 .collect();
             let message = fields[9].trim().to_string();
             let title = message.lines().next().unwrap_or("无提交信息").to_string();
+            let branches = decorations(fields[8]);
+            let is_stash = branches.iter().any(|reference| reference == "refs/stash");
             Some(RepositoryCommit {
                 id: full_hash.chars().take(7).collect(),
                 full_hash,
@@ -314,8 +316,10 @@ fn parse_commits(path: &Path) -> Vec<RepositoryCommit> {
                 time: fields[7].to_string(),
                 author_time: fields[6].to_string(),
                 commit_time: fields[7].to_string(),
-                branches: decorations(fields[8]),
-                status: if parents.len() > 1 {
+                branches,
+                status: if is_stash {
+                    Some("stash".into())
+                } else if parents.len() > 1 {
                     Some("merge".into())
                 } else {
                     None
@@ -326,6 +330,14 @@ fn parse_commits(path: &Path) -> Vec<RepositoryCommit> {
             })
         })
         .collect();
+    let stash_helper_parents: HashSet<String> = commits
+        .iter()
+        .filter(|commit| commit.status.as_deref() == Some("stash"))
+        .flat_map(|commit| commit.parents.iter().skip(1).cloned())
+        .collect();
+    commits.retain(|commit| {
+        !stash_helper_parents.contains(&commit.full_hash) || !commit.branches.is_empty()
+    });
     assign_lanes(&mut commits);
     commits
 }
@@ -339,6 +351,20 @@ fn collect_numstat(path: &Path, args: &[&str], stats: &mut HashMap<String, (usiz
         let value = stats.entry(columns[2].to_string()).or_default();
         value.0 += columns[0].parse().unwrap_or(0);
         value.1 += columns[1].parse().unwrap_or(0);
+    }
+}
+
+fn porcelain_file_type(code: &str) -> &'static str {
+    if matches!(code, "DD" | "AU" | "UD" | "UA" | "DU" | "AA" | "UU") {
+        "U"
+    } else if code == "??" || code.contains('A') {
+        "A"
+    } else if code.contains('D') {
+        "D"
+    } else if code.contains('R') {
+        "R"
+    } else {
+        "M"
     }
 }
 
@@ -386,17 +412,7 @@ fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
                 .unwrap_or(raw_path)
                 .trim_matches('"')
                 .to_string();
-            let file_type = if code == "??" || code.contains('A') {
-                "A"
-            } else if code.contains('D') {
-                "D"
-            } else if code.contains('R') {
-                "R"
-            } else if code.contains('U') {
-                "U"
-            } else {
-                "M"
-            };
+            let file_type = porcelain_file_type(code);
             let bytes = code.as_bytes();
             let staged = code != "??" && bytes.first().is_some_and(|value| *value != b' ');
             let unstaged = code == "??" || bytes.get(1).is_some_and(|value| *value != b' ');
@@ -843,6 +859,61 @@ fn parse_local_branches(path: &Path) -> Vec<String> {
     .collect()
 }
 
+fn parse_branch_tracking(path: &Path) -> HashMap<String, RepositoryBranchTracking> {
+    let mut result = HashMap::new();
+    let refs = optional_git_output(
+        path,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)\t%(upstream:short)",
+            "refs/heads",
+        ],
+    );
+    for record in refs.lines() {
+        let Some((branch, upstream)) = record.split_once('\t') else {
+            continue;
+        };
+        let branch = branch.trim();
+        let upstream = upstream.trim();
+        if branch.is_empty() {
+            continue;
+        }
+        let (ahead, behind) = if upstream.is_empty() {
+            (0, 0)
+        } else {
+            let range = format!("{branch}...{upstream}");
+            let counts = git_output_owned(
+                path,
+                &[
+                    "rev-list".into(),
+                    "--left-right".into(),
+                    "--count".into(),
+                    range,
+                ],
+            )
+            .unwrap_or_default();
+            let values: Vec<usize> = counts
+                .split_whitespace()
+                .take(2)
+                .map(|value| value.parse().unwrap_or(0))
+                .collect();
+            (
+                values.first().copied().unwrap_or(0),
+                values.get(1).copied().unwrap_or(0),
+            )
+        };
+        result.insert(
+            branch.to_string(),
+            RepositoryBranchTracking {
+                upstream: (!upstream.is_empty()).then_some(upstream.to_string()),
+                ahead,
+                behind,
+            },
+        );
+    }
+    result
+}
+
 fn parse_tags(path: &Path) -> Vec<String> {
     optional_git_output(path, &["tag", "--list", "--sort=-creatordate"])
         .lines()
@@ -1165,6 +1236,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
                 (
                     parse_branches(root_path),
                     parse_remote_branches(root_path),
+                    parse_branch_tracking(root_path),
                     parse_tags(root_path),
                 )
             });
@@ -1186,7 +1258,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
         });
     let (branch, remote_text, ahead, behind) = metadata;
     let (worktrees, submodules) = structure;
-    let (branches, remote_branches, tags) = refs;
+    let (branches, remote_branches, branch_tracking, tags) = refs;
 
     Ok(RepositorySnapshot {
         name,
@@ -1203,6 +1275,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
         submodules,
         branches,
         remote_branches,
+        branch_tracking,
         tags,
         stashes,
         commit_template,
@@ -2005,9 +2078,10 @@ pub fn stage_files(
             continue;
         }
         let target = repository_file_target(&root, file_path)?;
-        if !force && std::fs::read_to_string(&target)
-            .ok()
-            .is_some_and(|content| has_conflict_markers(&content))
+        if !force
+            && std::fs::read_to_string(&target)
+                .ok()
+                .is_some_and(|content| has_conflict_markers(&content))
         {
             return Err(format!("请先处理文件中的全部冲突块：{file_path}"));
         }
@@ -3091,6 +3165,26 @@ mod tests {
         assert_eq!(snapshot.tags, vec!["v0.1.0"]);
         assert_eq!(snapshot.stashes.len(), 1);
         assert!(snapshot.stashes[0].message.contains("测试暂存节点"));
+        let stash_commit = snapshot
+            .commits
+            .iter()
+            .find(|commit| commit.status.as_deref() == Some("stash"))
+            .expect("stash commit in graph");
+        assert!(stash_commit
+            .branches
+            .iter()
+            .any(|reference| reference == "refs/stash"));
+        assert!(stash_commit.parents.len() >= 2);
+        assert!(snapshot
+            .commits
+            .iter()
+            .any(|commit| commit.full_hash == stash_commit.parents[0]));
+        for helper_parent in stash_commit.parents.iter().skip(1) {
+            assert!(!snapshot
+                .commits
+                .iter()
+                .any(|commit| &commit.full_hash == helper_parent));
+        }
 
         let reference = snapshot.stashes[0].reference.clone();
         let stash_files = load_stash_files(&path, &reference).expect("load stash files");
@@ -3555,5 +3649,15 @@ mod tests {
             .expect("read completed rebase")
             .operation
             .is_none());
+    }
+
+    #[test]
+    fn classifies_all_porcelain_unmerged_statuses_as_conflicts() {
+        for status in ["DD", "AU", "UD", "UA", "DU", "AA", "UU"] {
+            assert_eq!(porcelain_file_type(status), "U", "status {status}");
+        }
+        assert_eq!(porcelain_file_type("A "), "A");
+        assert_eq!(porcelain_file_type(" D"), "D");
+        assert_eq!(porcelain_file_type(" M"), "M");
     }
 }

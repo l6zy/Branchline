@@ -5,6 +5,7 @@ import {
   commitRepository,
   createScopedRepositoryStash,
   discardRepositoryFiles,
+  loadRepository,
   stageRepositoryFiles,
   unstageRepositoryFiles,
   type RepositoryFile,
@@ -44,6 +45,7 @@ const fileStatusMeta: Record<string, { label: string; className: string; descrip
   C: { label: '复制', className: 'copied', description: '复制文件' },
   U: { label: '冲突', className: 'conflicted', description: '存在冲突' },
 }
+const UNMERGED_FILE_TYPES = new Set(['U', 'DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])
 
 function getFileStatus(type: string) {
   const code = type.trim().charAt(0).toUpperCase()
@@ -61,10 +63,17 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
   const [widePreview, setWidePreview] = useState(false)
   const appliedTemplateKey = useRef<string | null>(null)
   const files = repository?.files ?? []
-  const isConflictFile = (file: RepositoryFile) => file.type.trim().toUpperCase().includes('U')
-  const conflictFiles = useMemo(() => files.filter(isConflictFile), [files])
-  const stagedFiles = useMemo(() => files.filter((file) => file.staged && !isConflictFile(file)), [files])
-  const unstagedFiles = useMemo(() => files.filter((file) => !isConflictFile(file) && (file.unstaged || (!file.staged && !file.unstaged))), [files])
+  const conflictFilePaths = useMemo(() => {
+    const paths = new Set(repository?.operation?.conflicts ?? [])
+    files.forEach((file) => {
+      const type = file.type.trim().toUpperCase()
+      if (UNMERGED_FILE_TYPES.has(type)) paths.add(file.path)
+    })
+    return paths
+  }, [files, repository?.operation?.conflicts])
+  const conflictFiles = useMemo(() => files.filter((file) => conflictFilePaths.has(file.path)), [conflictFilePaths, files])
+  const stagedFiles = useMemo(() => files.filter((file) => file.staged && !conflictFilePaths.has(file.path)), [conflictFilePaths, files])
+  const unstagedFiles = useMemo(() => files.filter((file) => !conflictFilePaths.has(file.path) && (file.unstaged || (!file.staged && !file.unstaged))), [conflictFilePaths, files])
   const selectedIndex = Math.max(0, files.findIndex((file) => file.path === selectedPath))
 
   useEffect(() => {
@@ -114,8 +123,25 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
       const updatedFiles = mode === 'stage'
         ? await stageRepositoryFiles(repository.path, paths, force)
         : await unstageRepositoryFiles(repository.path, paths)
-      onSnapshot({ ...repository, files: updatedFiles })
-      onNotice(mode === 'stage' ? `已暂存 ${paths.length} 个文件` : `已取消暂存 ${paths.length} 个文件`)
+      if (mode === 'stage' && force) {
+        try {
+          const snapshot = await loadRepository(repository.path)
+          onSnapshot(snapshot)
+          onNotice(snapshot.operation?.conflicts.length
+            ? `已强制暂存，仍有 ${snapshot.operation.conflicts.length} 个冲突文件待处理`
+            : `已强制暂存 ${paths.length} 个冲突文件`)
+        } catch {
+          const remainingConflicts = repository.operation?.conflicts.filter((path) => !pathSet.has(path)) ?? []
+          const operation = repository.operation?.kind === 'conflict' && remainingConflicts.length === 0
+            ? undefined
+            : repository.operation ? { ...repository.operation, conflicts: remainingConflicts } : undefined
+          onSnapshot({ ...repository, files: updatedFiles, operation })
+          onNotice(`已强制暂存 ${paths.length} 个冲突文件，仓库操作状态将在下次刷新时同步`)
+        }
+      } else {
+        onSnapshot({ ...repository, files: updatedFiles })
+        onNotice(mode === 'stage' ? `已暂存 ${paths.length} 个文件` : `已取消暂存 ${paths.length} 个文件`)
+      }
     } catch (error) {
       onSnapshot(previousSnapshot)
       onNotice(error instanceof Error ? error.message : String(error))

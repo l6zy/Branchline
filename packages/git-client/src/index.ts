@@ -1,4 +1,4 @@
-import type { BlameLine, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
+import type { BlameLine, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
 
 export type {
   BlameLine,
@@ -8,6 +8,7 @@ export type {
   MergeCandidate,
   MergeQueueSnapshot,
   RepositoryCommit,
+  RepositoryBranchTracking,
   RepositoryCommitStats,
   RepositoryCommitTemplate,
   RepositoryDiffLine,

@@ -7,8 +7,20 @@ import {
 } from '../../repository'
 
 const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
-const FETCH_INTERVAL = 5 * 60 * 1000
+const AUTO_FETCH_SETTINGS_KEY = 'branchline.autoFetchSettings.v1'
 const NOTICE_DURATION = 5 * 1000
+
+export type AutoFetchSettings = {
+  enabled: boolean
+  intervalMinutes: number
+}
+
+const DEFAULT_AUTO_FETCH_SETTINGS: AutoFetchSettings = {
+  enabled: true,
+  intervalMinutes: 5,
+}
+
+const AUTO_FETCH_INTERVALS = [1, 5, 10, 15, 30]
 
 export type RecentRepository = {
   name: string
@@ -32,6 +44,21 @@ function readRecentRepositories(): RecentRepository[] {
   }
 }
 
+function readAutoFetchSettings(): AutoFetchSettings {
+  try {
+    const value = window.localStorage.getItem(AUTO_FETCH_SETTINGS_KEY)
+    if (!value) return DEFAULT_AUTO_FETCH_SETTINGS
+    const parsed = JSON.parse(value) as Partial<AutoFetchSettings>
+    const intervalMinutes = Number(parsed.intervalMinutes)
+    return {
+      enabled: parsed.enabled !== false,
+      intervalMinutes: AUTO_FETCH_INTERVALS.includes(intervalMinutes) ? intervalMinutes : DEFAULT_AUTO_FETCH_SETTINGS.intervalMinutes,
+    }
+  } catch {
+    return DEFAULT_AUTO_FETCH_SETTINGS
+  }
+}
+
 export function useRepositoryWorkspace() {
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
@@ -40,6 +67,7 @@ export function useRepositoryWorkspace() {
   const [repositoryNotice, setRepositoryNoticeState] = useState<string | null>(null)
   const [noticeVersion, setNoticeVersion] = useState(0)
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null)
+  const [autoFetchSettings, setAutoFetchSettings] = useState<AutoFetchSettings>(readAutoFetchSettings)
   const [repositoryTrail, setRepositoryTrail] = useState<RepositoryParent[]>([])
   const fetchInProgress = useRef(false)
   const initialRestoreStarted = useRef(false)
@@ -224,10 +252,27 @@ export function useRepositoryWorkspace() {
   }, [rememberRepository, repository])
 
   useEffect(() => {
-    if (!repository) return
-    const timer = window.setInterval(() => void fetchNow(true), FETCH_INTERVAL)
+    if (!repository || !autoFetchSettings.enabled) return
+    const timer = window.setInterval(() => void fetchNow(true), autoFetchSettings.intervalMinutes * 60 * 1000)
     return () => window.clearInterval(timer)
-  }, [fetchNow, repository?.path])
+  }, [autoFetchSettings.enabled, autoFetchSettings.intervalMinutes, fetchNow, repository?.path])
+
+  const updateAutoFetchSettings = useCallback((next: Partial<AutoFetchSettings>) => {
+    setAutoFetchSettings((current) => {
+      const updated = {
+        enabled: next.enabled ?? current.enabled,
+        intervalMinutes: next.intervalMinutes !== undefined && AUTO_FETCH_INTERVALS.includes(next.intervalMinutes)
+          ? next.intervalMinutes
+          : current.intervalMinutes,
+      }
+      try {
+        window.localStorage.setItem(AUTO_FETCH_SETTINGS_KEY, JSON.stringify(updated))
+      } catch {
+        // Keep the in-memory setting usable when browser storage is unavailable.
+      }
+      return updated
+    })
+  }, [])
 
   return {
     repository,
@@ -246,5 +291,9 @@ export function useRepositoryWorkspace() {
     openSubmodulePath,
     returnToParentRepository,
     fetchNow,
+    autoFetchEnabled: autoFetchSettings.enabled,
+    fetchIntervalMinutes: autoFetchSettings.intervalMinutes,
+    setAutoFetchEnabled: (enabled: boolean) => updateAutoFetchSettings({ enabled }),
+    setFetchIntervalMinutes: (intervalMinutes: number) => updateAutoFetchSettings({ intervalMinutes }),
   }
 }

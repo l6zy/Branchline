@@ -9,9 +9,24 @@ type IndexedFile = {
   name: string
 }
 
+type FolderNode = {
+  kind: 'folder'
+  path: string
+  name: string
+  children: TreeNode[]
+  count: number
+}
+
+type FileNode = {
+  kind: 'file'
+  item: IndexedFile
+}
+
+type TreeNode = FolderNode | FileNode
+
 type FileListEntry =
-  | { kind: 'folder'; key: string; folder: string; count: number; height: number }
-  | { kind: 'file'; key: string; item: IndexedFile; nested: boolean; height: number }
+  | { kind: 'folder'; key: string; folder: string; name: string; count: number; depth: number; height: number }
+  | { kind: 'file'; key: string; item: IndexedFile; nested: boolean; depth: number; height: number }
 
 type DiffFileListProps = {
   files: RepositoryFile[]
@@ -54,34 +69,56 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
     return {
       file,
       index,
-      folder: segments.slice(0, -1).join('/') || '根目录',
+      folder: segments.slice(0, -1).join('/'),
       name: segments[segments.length - 1] ?? file.path,
     }
   }), [files])
 
-  const groups = useMemo(() => {
-    const result = new Map<string, IndexedFile[]>()
+  const tree = useMemo(() => {
+    const roots: TreeNode[] = []
+    const folders = new Map<string, FolderNode>()
     indexedFiles.forEach((item) => {
-      const group = result.get(item.folder)
-      if (group) group.push(item)
-      else result.set(item.folder, [item])
+      const segments = item.file.path.split('/').filter(Boolean)
+      const folderSegments = segments.slice(0, -1)
+      let parent: FolderNode | null = null
+      for (let segmentIndex = 0; segmentIndex < folderSegments.length; segmentIndex += 1) {
+        const segment = folderSegments[segmentIndex]
+        const path = folderSegments.slice(0, segmentIndex + 1).join('/')
+        let folder = folders.get(path)
+        if (!folder) {
+          folder = { kind: 'folder', path, name: segment, children: [], count: 0 }
+          folders.set(path, folder)
+          if (parent) parent.children.push(folder)
+          else roots.push(folder)
+        }
+        folder.count += 1
+        parent = folder
+      }
+      const fileNode: FileNode = { kind: 'file', item }
+      if (parent) parent.children.push(fileNode)
+      else roots.push(fileNode)
     })
-    return result
+    return roots
   }, [indexedFiles])
 
   const entries = useMemo<FileListEntry[]>(() => {
     if (mode === 'list') {
-      return indexedFiles.map((item) => ({ kind: 'file', key: `file:${item.file.path}`, item, nested: false, height: fileRowHeight }))
+      return indexedFiles.map((item) => ({ kind: 'file', key: `file:${item.file.path}`, item, nested: false, depth: 0, height: fileRowHeight }))
     }
     const result: FileListEntry[] = []
-    groups.forEach((group, folder) => {
-      result.push({ kind: 'folder', key: `folder:${folder}`, folder, count: group.length, height: folderRowHeight })
-      if (!collapsedFolders[folder]) {
-        group.forEach((item) => result.push({ kind: 'file', key: `file:${item.file.path}`, item, nested: true, height: fileRowHeight }))
-      }
-    })
+    const flatten = (nodes: TreeNode[], depth: number) => {
+      nodes.forEach((node) => {
+        if (node.kind === 'folder') {
+          result.push({ kind: 'folder', key: `folder:${node.path}`, folder: node.path, name: node.name, count: node.count, depth, height: folderRowHeight })
+          if (!collapsedFolders[node.path]) flatten(node.children, depth + 1)
+          return
+        }
+        result.push({ kind: 'file', key: `file:${node.item.file.path}`, item: node.item, nested: depth > 0, depth, height: fileRowHeight })
+      })
+    }
+    flatten(tree, 0)
     return result
-  }, [collapsedFolders, fileRowHeight, folderRowHeight, groups, indexedFiles, mode])
+  }, [collapsedFolders, fileRowHeight, folderRowHeight, indexedFiles, mode, tree])
 
   const offsets = useMemo(() => {
     const result = [0]
@@ -146,19 +183,19 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
     <div className="virtual-file-list" style={{ height: totalHeight }}>
       {entries.slice(range.start, range.end).map((entry, localIndex) => {
         const entryIndex = range.start + localIndex
-        const style = { top: offsets[entryIndex], height: entry.height } as CSSProperties
+        const style = { top: offsets[entryIndex], height: entry.height, '--tree-depth': entry.depth } as CSSProperties
         if (entry.kind === 'folder') {
           const collapsed = Boolean(collapsedFolders[entry.folder])
           return <div className="virtual-file-entry folder" key={entry.key} style={style}>
             <button className="file-tree-folder" onClick={() => toggleFolder(entry.folder)} title={collapsed ? `展开 ${entry.folder}` : `收起 ${entry.folder}`}>
-              {collapsed ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}<FolderOpen size={13}/><span>{entry.folder}</span><small>{entry.count}</small>
+              {collapsed ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}<FolderOpen size={13}/><span>{entry.name}</span><small>{entry.count}</small>
             </button>
           </div>
         }
         const { file, index, folder, name } = entry.item
         return <div className="virtual-file-entry" key={entry.key} style={style}>
           <button className={`${activeFile === index ? 'active' : ''} ${entry.nested ? 'nested-file' : ''}`} onClick={() => onSelectFile(index)} onContextMenu={(event) => onFileContextMenu?.(event, file)}>
-            <span className={`file-state ${file.type.toLowerCase()}`}>{file.type}</span><div><strong>{name}</strong><span>{folder === '根目录' ? '' : `${folder}/`}</span></div><span className="stats"><i>+{file.add}</i><b>-{file.del}</b></span>{showOpenIndicator && <ChevronRight size={13}/>} 
+            <span className={`file-state ${file.type.toLowerCase()}`}>{file.type}</span><div><strong>{name}</strong><span>{folder ? `${folder}/` : ''}</span></div><span className="stats"><i>+{file.add}</i><b>-{file.del}</b></span>{showOpenIndicator && <ChevronRight size={13}/>}
           </button>
         </div>
       })}

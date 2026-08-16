@@ -10,7 +10,7 @@ export type GraphSegment = {
   id: string
   path: string
   color: string
-  kind: 'direct' | 'branch' | 'converge'
+  kind: 'direct' | 'branch' | 'converge' | 'stash'
 }
 
 export type CommitGraphRow = {
@@ -29,6 +29,7 @@ type ActivePath = {
   id: number
   target: string
   colorIndex: number
+  stash: boolean
 }
 
 type RowTransition = {
@@ -70,22 +71,30 @@ export function lanePosition(lane: number, laneCount: number, graphWidth: number
   return padding + lane * gap
 }
 
+function cornerRadius(horizontalDistance: number, verticalDistance: number) {
+  return Math.min(6, Math.abs(horizontalDistance) / 2, Math.abs(verticalDistance))
+}
+
 function fullPath(fromX: number, toX: number, rowHeight: number) {
-  if (fromX === toX) return `M ${fromX} 0 L ${toX} ${rowHeight}`
-  const bendY = rowHeight / 2
-  return `M ${fromX} 0 C ${fromX} ${bendY}, ${toX} ${bendY}, ${toX} ${rowHeight}`
+  if (fromX === toX) return `M ${fromX} 0 V ${rowHeight}`
+  const middle = rowHeight / 2
+  const direction = Math.sign(toX - fromX)
+  const radius = cornerRadius(toX - fromX, middle)
+  return `M ${fromX} 0 V ${middle - radius} Q ${fromX} ${middle} ${fromX + direction * radius} ${middle} H ${toX - direction * radius} Q ${toX} ${middle} ${toX} ${middle + radius} V ${rowHeight}`
 }
 
 function incomingPath(fromX: number, nodeX: number, middle: number) {
-  if (fromX === nodeX) return `M ${fromX} 0 L ${nodeX} ${middle}`
-  const bendY = middle / 2
-  return `M ${fromX} 0 C ${fromX} ${bendY}, ${nodeX} ${bendY}, ${nodeX} ${middle}`
+  if (fromX === nodeX) return `M ${fromX} 0 V ${middle}`
+  const direction = Math.sign(nodeX - fromX)
+  const radius = cornerRadius(nodeX - fromX, middle)
+  return `M ${fromX} 0 V ${middle - radius} Q ${fromX} ${middle} ${fromX + direction * radius} ${middle} H ${nodeX}`
 }
 
 function outgoingPath(nodeX: number, toX: number, middle: number, rowHeight: number) {
-  if (nodeX === toX) return `M ${nodeX} ${middle} L ${toX} ${rowHeight}`
-  const bendY = (middle + rowHeight) / 2
-  return `M ${nodeX} ${middle} C ${nodeX} ${bendY}, ${toX} ${bendY}, ${toX} ${rowHeight}`
+  if (nodeX === toX) return `M ${nodeX} ${middle} V ${rowHeight}`
+  const direction = Math.sign(toX - nodeX)
+  const radius = cornerRadius(toX - nodeX, rowHeight - middle)
+  return `M ${nodeX} ${middle} H ${toX - direction * radius} Q ${toX} ${middle} ${toX} ${middle + radius} V ${rowHeight}`
 }
 
 /**
@@ -122,12 +131,14 @@ export function buildCommitGraphLayout(commits: GraphCommit[], graphWidth: numbe
     const incoming = before
       .map((path, lane) => ({ path, lane }))
       .filter(({ path }) => path.target === key)
-    const nodeLane = incoming[0]?.lane ?? before.length
+    const primaryIncoming = incoming.find(({ path }) => !path.stash) ?? incoming[0]
+    const nodeLane = primaryIncoming?.lane ?? before.length
     const occupiedColors = new Set(before.map((path) => path.colorIndex))
-    const nodeColorIndex = incoming[0]?.path.colorIndex ?? nextColorIndex(colorCursor, occupiedColors)
+    const nodeColorIndex = primaryIncoming?.path.colorIndex ?? nextColorIndex(colorCursor, occupiedColors)
 
     const rawParents = commit.parents?.length ? commit.parents : commit.parent ? [commit.parent] : []
-    const parentKeys = rawParents
+    const graphParents = commit.status === 'stash' ? rawParents.slice(0, 1) : rawParents
+    const parentKeys = graphParents
       .map((parent) => resolveCommitKey(parent, aliases))
       .filter((parent): parent is string => Boolean(parent))
       .filter((parent, parentIndex, values) => values.indexOf(parent) === parentIndex)
@@ -141,7 +152,7 @@ export function buildCommitGraphLayout(commits: GraphCommit[], graphWidth: numbe
     const outgoing = parentKeys.map((parent, order) => {
       const colorIndex = order === 0 ? nodeColorIndex : nextColorIndex(colorCursor, outgoingColors)
       outgoingColors.add(colorIndex)
-      return { id: nextPathId++, target: parent, colorIndex }
+      return { id: nextPathId++, target: parent, colorIndex, stash: commit.status === 'stash' }
     })
     if (outgoing.length) {
       // Keep the first-parent path in the commit's current lane. Additional
@@ -171,7 +182,7 @@ export function buildCommitGraphLayout(commits: GraphCommit[], graphWidth: numbe
           id: `incoming-${index}-${path.id}`,
           path: incomingPath(fromX, nodeX, middle),
           color: GRAPH_COLORS[path.colorIndex % GRAPH_COLORS.length],
-          kind: fromLane === nodeLane ? 'direct' : 'converge',
+          kind: path.stash ? 'stash' : fromLane === nodeLane ? 'direct' : 'converge',
         })
         return
       }
@@ -183,7 +194,7 @@ export function buildCommitGraphLayout(commits: GraphCommit[], graphWidth: numbe
         id: `passing-${index}-${path.id}`,
         path: fullPath(fromX, toX, rowHeight),
         color: GRAPH_COLORS[path.colorIndex % GRAPH_COLORS.length],
-        kind: fromLane === toLane ? 'direct' : 'converge',
+        kind: path.stash ? 'stash' : fromLane === toLane ? 'direct' : 'converge',
       })
     })
 
@@ -194,7 +205,7 @@ export function buildCommitGraphLayout(commits: GraphCommit[], graphWidth: numbe
         id: `outgoing-${index}-${path.id}`,
         path: outgoingPath(nodeX, toX, middle, rowHeight),
         color: GRAPH_COLORS[path.colorIndex % GRAPH_COLORS.length],
-        kind: order === 0 && nodeLane === toLane ? 'direct' : 'branch',
+        kind: path.stash ? 'stash' : order === 0 && nodeLane === toLane ? 'direct' : 'branch',
       })
     })
   })

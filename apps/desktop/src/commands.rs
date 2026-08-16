@@ -11,6 +11,24 @@ fn task_error(action: &str, error: impl std::fmt::Display) -> String {
     format!("{action}失败：{error}")
 }
 
+fn operation_snapshot(
+    repository_path: &str,
+    result: Result<(), String>,
+    action: &str,
+) -> Result<RepositorySnapshot, String> {
+    match result {
+        Ok(()) => git::read_repository(repository_path),
+        Err(error) => {
+            let snapshot = git::read_repository(repository_path)?;
+            if snapshot.operation.is_some() {
+                Ok(snapshot)
+            } else {
+                Err(task_error(action, error))
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn load_git_user_config() -> Result<GitUserConfig, String> {
     tauri::async_runtime::spawn_blocking(git::load_git_user_config)
@@ -72,8 +90,9 @@ pub async fn fetch_repository(repository_path: String) -> Result<RepositorySnaps
 pub async fn stage_files(
     repository_path: String,
     file_paths: Vec<String>,
+    force: bool,
 ) -> Result<Vec<RepositoryFile>, String> {
-    tauri::async_runtime::spawn_blocking(move || git::stage_files(&repository_path, &file_paths))
+    tauri::async_runtime::spawn_blocking(move || git::stage_files(&repository_path, &file_paths, force))
         .await
         .map_err(|error| task_error("暂存文件", error))?
 }
@@ -86,6 +105,18 @@ pub async fn unstage_files(
     tauri::async_runtime::spawn_blocking(move || git::unstage_files(&repository_path, &file_paths))
         .await
         .map_err(|error| task_error("取消暂存", error))?
+}
+
+#[tauri::command]
+pub async fn discard_worktree_files(
+    repository_path: String,
+    file_paths: Vec<String>,
+) -> Result<Vec<RepositoryFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::discard_worktree_files(&repository_path, &file_paths)
+    })
+    .await
+    .map_err(|error| task_error("丢弃改动", error))?
 }
 
 #[tauri::command]
@@ -130,6 +161,61 @@ pub async fn resolve_gitlink_conflicts_local(repository_path: String) -> Result<
     })
     .await
     .map_err(|error| task_error("解决 Gitlink 冲突", error))?
+}
+
+#[tauri::command]
+pub async fn load_conflict_file(
+    repository_path: String,
+    file_path: String,
+) -> Result<crate::models::ConflictFileContent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::load_conflict_file(&repository_path, &file_path)
+    })
+    .await
+    .map_err(|error| task_error("读取冲突文件", error))?
+}
+
+#[tauri::command]
+pub async fn resolve_conflict_file(
+    repository_path: String,
+    file_path: String,
+    strategy: String,
+    content: Option<String>,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::resolve_conflict_file(&repository_path, &file_path, &strategy, content.as_deref())?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("保存冲突解决结果", error))?
+}
+
+#[tauri::command]
+pub async fn resolve_conflict_block(
+    repository_path: String,
+    file_path: String,
+    block_index: usize,
+    strategy: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::resolve_conflict_block(&repository_path, &file_path, block_index, &strategy)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("解决冲突块", error))?
+}
+
+#[tauri::command]
+pub async fn launch_conflict_mergetool(
+    repository_path: String,
+    file_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::launch_conflict_mergetool(&repository_path, &file_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("打开外部合并工具", error))?
 }
 
 #[tauri::command]
@@ -242,11 +328,14 @@ pub async fn merge_repository_reference(
     reference: String,
 ) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::merge_repository_reference(&repository_path, &reference)?;
-        git::read_repository(&repository_path)
+        operation_snapshot(
+            &repository_path,
+            git::merge_repository_reference(&repository_path, &reference),
+            "合并",
+        )
     })
     .await
-    .map_err(|error| task_error("合并", error))?
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -255,11 +344,14 @@ pub async fn cherry_pick_repository_commit(
     commit: String,
 ) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::cherry_pick_repository_commit(&repository_path, &commit)?;
-        git::read_repository(&repository_path)
+        operation_snapshot(
+            &repository_path,
+            git::cherry_pick_repository_commit(&repository_path, &commit),
+            "Cherry-pick",
+        )
     })
     .await
-    .map_err(|error| task_error("Cherry-pick", error))?
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -304,11 +396,71 @@ pub async fn rebase_repository_onto(
     commit: String,
 ) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::rebase_repository_onto(&repository_path, &commit)?;
-        git::read_repository(&repository_path)
+        operation_snapshot(
+            &repository_path,
+            git::rebase_repository_onto(&repository_path, &commit),
+            "变基",
+        )
     })
     .await
-    .map_err(|error| task_error("变基", error))?
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn preview_repository_rebase(
+    repository_path: String,
+    onto: String,
+) -> Result<crate::models::RebasePreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::preview_repository_rebase(&repository_path, &onto)
+    })
+    .await
+    .map_err(|error| task_error("预览变基", error))?
+}
+
+#[tauri::command]
+pub async fn continue_repository_operation(
+    repository_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        operation_snapshot(
+            &repository_path,
+            git::continue_repository_operation(&repository_path),
+            "继续 Git 操作",
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn skip_repository_operation(
+    repository_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        operation_snapshot(
+            &repository_path,
+            git::skip_repository_operation(&repository_path),
+            "跳过当前提交",
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn abort_repository_operation(
+    repository_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        operation_snapshot(
+            &repository_path,
+            git::abort_repository_operation(&repository_path),
+            "中止 Git 操作",
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -1,7 +1,9 @@
 use crate::models::{
-    BlameLine, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate, MergeQueueSnapshot,
-    RepositoryCommit, RepositoryCommitStats, RepositoryCommitTemplate, RepositoryComparison,
-    RepositoryFile, RepositorySnapshot, RepositoryStash, RepositorySubmodule, RepositoryWorktree,
+    BlameLine, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate,
+    MergeQueueSnapshot, RebasePreview, RepositoryCommit, RepositoryCommitStats,
+    RepositoryCommitTemplate, RepositoryComparison, RepositoryFile, RepositoryOperationState,
+    RepositoryOperationStep, RepositorySnapshot, RepositoryStash, RepositorySubmodule,
+    RepositoryWorktree,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -38,6 +40,29 @@ where
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn command_output_bytes<I, S>(path: &Path, args: I) -> Result<Vec<u8>, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new("git");
+    command.arg("-C").arg(path).args(args);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let output = command
+        .output()
+        .map_err(|error| format!("无法启动 Git：{error}"))?;
+    if !output.status.success() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if message.is_empty() {
+            "Git 命令执行失败".into()
+        } else {
+            message
+        });
+    }
+    Ok(output.stdout)
 }
 
 pub fn git_output(path: &Path, args: &[&str]) -> Result<String, String> {
@@ -878,6 +903,206 @@ pub fn repository_root(selected_path: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root_output.trim()))
 }
 
+fn git_internal_path(root: &Path, name: &str) -> PathBuf {
+    let value = optional_git_output(root, &["rev-parse", "--git-path", name])
+        .trim()
+        .to_string();
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
+fn read_trimmed(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn operation_steps(root: &Path, range: &str, current_step: usize) -> Vec<RepositoryOperationStep> {
+    let output = optional_git_output(
+        root,
+        &[
+            "log",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--format=%H%x1f%h%x1f%s%x1f%an%x1e",
+            range,
+        ],
+    );
+    output
+        .split('\x1e')
+        .enumerate()
+        .filter_map(|(index, record)| {
+            let fields: Vec<&str> = record.trim().split('\x1f').collect();
+            if fields.len() < 4 || fields[0].is_empty() {
+                return None;
+            }
+            Some(RepositoryOperationStep {
+                hash: fields[0].into(),
+                short_hash: fields[1].into(),
+                title: fields[2].into(),
+                author: fields[3].into(),
+                status: if index + 1 < current_step {
+                    "applied".into()
+                } else if index + 1 == current_step {
+                    "current".into()
+                } else {
+                    "pending".into()
+                },
+            })
+        })
+        .collect()
+}
+
+fn unresolved_paths(root: &Path) -> Vec<String> {
+    optional_git_output(
+        root,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+        ],
+    )
+    .lines()
+    .map(str::trim)
+    .filter(|path| !path.is_empty())
+    .map(ToString::to_string)
+    .collect()
+}
+
+fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
+    let conflicts = unresolved_paths(root);
+    let merge_head = git_internal_path(root, "MERGE_HEAD");
+    let cherry_pick_head = git_internal_path(root, "CHERRY_PICK_HEAD");
+    let rebase_merge = git_internal_path(root, "rebase-merge");
+    let rebase_apply = git_internal_path(root, "rebase-apply");
+    let (kind, current_step, total_steps, original_branch, onto, current_commit, message, steps) =
+        if rebase_merge.is_dir() || rebase_apply.is_dir() {
+            let directory = if rebase_merge.is_dir() {
+                rebase_merge
+            } else {
+                rebase_apply
+            };
+            let current_step = read_trimmed(&directory.join("msgnum"))
+                .or_else(|| read_trimmed(&directory.join("next")))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1);
+            let total_steps = read_trimmed(&directory.join("end"))
+                .or_else(|| read_trimmed(&directory.join("last")))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(current_step);
+            let onto = read_trimmed(&directory.join("onto"));
+            let original_head = read_trimmed(&directory.join("orig-head"))
+                .or_else(|| read_trimmed(&git_internal_path(root, "ORIG_HEAD")));
+            let original_branch = read_trimmed(&directory.join("head-name"))
+                .map(|value| value.trim_start_matches("refs/heads/").to_string());
+            let range = match (&onto, &original_head) {
+                (Some(onto), Some(head)) => format!("{onto}..{head}"),
+                _ => "HEAD".into(),
+            };
+            let current_commit = read_trimmed(&git_internal_path(root, "REBASE_HEAD"));
+            let message = current_commit.as_ref().and_then(|hash| {
+                git_output_owned(
+                    root,
+                    &[
+                        "show".into(),
+                        "-s".into(),
+                        "--format=%s".into(),
+                        hash.clone(),
+                    ],
+                )
+                .ok()
+                .map(|value| value.trim().to_string())
+            });
+            (
+                "rebase",
+                current_step,
+                total_steps,
+                original_branch,
+                onto,
+                current_commit,
+                message,
+                operation_steps(root, &range, current_step),
+            )
+        } else if merge_head.is_file() {
+            let current_commit = read_trimmed(&merge_head);
+            let message = read_trimmed(&git_internal_path(root, "MERGE_MSG"));
+            (
+                "merge",
+                1,
+                1,
+                None,
+                None,
+                current_commit,
+                message,
+                Vec::new(),
+            )
+        } else if cherry_pick_head.is_file() {
+            let current_commit = read_trimmed(&cherry_pick_head);
+            let message = current_commit.as_ref().and_then(|hash| {
+                git_output_owned(
+                    root,
+                    &[
+                        "show".into(),
+                        "-s".into(),
+                        "--format=%s".into(),
+                        hash.clone(),
+                    ],
+                )
+                .ok()
+                .map(|value| value.trim().to_string())
+            });
+            (
+                "cherry-pick",
+                1,
+                1,
+                None,
+                None,
+                current_commit,
+                message,
+                Vec::new(),
+            )
+        } else if !conflicts.is_empty() {
+            (
+                "conflict",
+                0,
+                0,
+                None,
+                None,
+                None,
+                Some("工作区存在未解决冲突".into()),
+                Vec::new(),
+            )
+        } else {
+            return None;
+        };
+    Some(RepositoryOperationState {
+        kind: kind.into(),
+        label: match kind {
+            "rebase" => "变基进行中",
+            "merge" => "合并进行中",
+            "cherry-pick" => "Cherry-pick 进行中",
+            _ => "冲突待处理",
+        }
+        .into(),
+        original_branch,
+        onto,
+        current_step,
+        total_steps,
+        current_commit,
+        message,
+        conflicts,
+        steps,
+    })
+}
+
 pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String> {
     let root = repository_root(selected_path)?;
     let root_path = root.as_path();
@@ -981,6 +1206,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
         tags,
         stashes,
         commit_template,
+        operation: repository_operation(root_path),
     })
 }
 
@@ -1770,10 +1996,24 @@ fn validated_file_path(file_path: &str) -> Result<String, String> {
 pub fn stage_files(
     repository_path: &str,
     file_paths: &[String],
+    force: bool,
 ) -> Result<Vec<RepositoryFile>, String> {
     let root = repository_root(repository_path)?;
+    let file_paths = validated_file_args(file_paths)?;
+    for file_path in &file_paths {
+        if !unresolved_paths(&root).iter().any(|path| path == file_path) {
+            continue;
+        }
+        let target = repository_file_target(&root, file_path)?;
+        if !force && std::fs::read_to_string(&target)
+            .ok()
+            .is_some_and(|content| has_conflict_markers(&content))
+        {
+            return Err(format!("请先处理文件中的全部冲突块：{file_path}"));
+        }
+    }
     let mut args = vec!["add".to_string(), "--".to_string()];
-    args.extend(validated_file_args(file_paths)?);
+    args.extend(file_paths);
     git_output_owned(&root, &args)?;
     Ok(parse_changed_files(&root))
 }
@@ -1795,6 +2035,52 @@ pub fn unstage_files(
     let mut fallback = vec!["reset".to_string(), "HEAD".to_string(), "--".to_string()];
     fallback.extend(file_paths.iter().cloned());
     git_output_owned(&root, &fallback)?;
+    Ok(parse_changed_files(&root))
+}
+
+pub fn discard_worktree_files(
+    repository_path: &str,
+    file_paths: &[String],
+) -> Result<Vec<RepositoryFile>, String> {
+    let root = repository_root(repository_path)?;
+    let file_paths = validated_file_args(file_paths)?;
+    let mut tracked_args = vec![
+        "-c".to_string(),
+        "core.quotepath=false".to_string(),
+        "ls-files".to_string(),
+        "-z".to_string(),
+        "--".to_string(),
+    ];
+    tracked_args.extend(file_paths.iter().cloned());
+    let tracked: HashSet<String> = git_output_owned(&root, &tracked_args)?
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    let (tracked_paths, untracked_paths): (Vec<_>, Vec<_>) = file_paths
+        .into_iter()
+        .partition(|path| tracked.contains(path));
+
+    if !tracked_paths.is_empty() {
+        let mut restore_args = vec![
+            "restore".to_string(),
+            "--worktree".to_string(),
+            "--".to_string(),
+        ];
+        restore_args.extend(tracked_paths);
+        git_output_owned(&root, &restore_args)?;
+    }
+    if !untracked_paths.is_empty() {
+        let mut clean_args = vec![
+            "clean".to_string(),
+            "-f".to_string(),
+            "-d".to_string(),
+            "--".to_string(),
+        ];
+        clean_args.extend(untracked_paths);
+        git_output_owned(&root, &clean_args)?;
+    }
+
     Ok(parse_changed_files(&root))
 }
 
@@ -1995,6 +2281,363 @@ pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, S
         git_output_owned(&root, &["add".into(), "--".into(), path.clone()])?;
     }
     Ok(paths.len())
+}
+
+fn repository_file_target(root: &Path, file_path: &str) -> Result<PathBuf, String> {
+    let file_path = validated_file_path(file_path)?;
+    let target = root.join(&file_path);
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(|error| format!("无法定位仓库：{error}"))?;
+    let mut parent = target.clone();
+    while !parent.exists() {
+        if !parent.pop() {
+            return Err(format!("文件路径超出仓库范围：{file_path}"));
+        }
+    }
+    let canonical_parent =
+        std::fs::canonicalize(&parent).map_err(|error| format!("无法定位文件路径：{error}"))?;
+    if !canonical_parent.starts_with(&canonical_root) {
+        return Err(format!("文件路径超出仓库范围：{file_path}"));
+    }
+    Ok(target)
+}
+
+fn conflict_stage_text(root: &Path, stage: usize, file_path: &str) -> (Option<String>, bool) {
+    let reference = format!(":{stage}:{file_path}");
+    match command_output_bytes(root, ["show", reference.as_str()]) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(value) if !value.contains('\0') => (Some(value), false),
+            Ok(_) => (None, true),
+            Err(_) => (None, true),
+        },
+        Err(_) => (None, false),
+    }
+}
+
+fn has_conflict_markers(content: &str) -> bool {
+    content.lines().any(|line| {
+        line.starts_with("<<<<<<<") || line.starts_with("=======") || line.starts_with(">>>>>>>")
+    })
+}
+
+fn write_conflict_result(root: &Path, file_path: &str, content: &str) -> Result<(), String> {
+    let target = repository_file_target(root, file_path)?;
+    std::fs::write(&target, content.as_bytes())
+        .map_err(|error| format!("写入合并结果失败：{error}"))
+}
+
+pub fn resolve_conflict_block(
+    repository_path: &str,
+    file_path: &str,
+    block_index: usize,
+    strategy: &str,
+) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    if !unresolved_paths(&root)
+        .iter()
+        .any(|path| path == &file_path)
+    {
+        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+    }
+    if !matches!(strategy, "current" | "incoming" | "both") {
+        return Err("未知的冲突块解决方式".into());
+    }
+    let target = repository_file_target(&root, &file_path)?;
+    let content =
+        std::fs::read_to_string(&target).map_err(|error| format!("无法读取冲突文件：{error}"))?;
+    let lines: Vec<&str> = content.lines().collect();
+    let mut blocks = Vec::new();
+    let mut cursor = 0;
+    while cursor < lines.len() {
+        if !lines[cursor].starts_with("<<<<<<<") {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        if cursor + 1 >= lines.len() {
+            return Err("冲突标记不完整，无法解析冲突块".into());
+        }
+        let Some(separator_offset) = lines[cursor + 1..]
+            .iter()
+            .position(|line| line.starts_with("======="))
+        else {
+            return Err("冲突标记不完整，无法解析冲突块".into());
+        };
+        let separator = cursor + 1 + separator_offset;
+        if separator + 1 >= lines.len() {
+            return Err("冲突标记不完整，无法解析冲突块".into());
+        }
+        let Some(end_offset) = lines[separator + 1..]
+            .iter()
+            .position(|line| line.starts_with(">>>>>>>"))
+        else {
+            return Err("冲突标记不完整，无法解析冲突块".into());
+        };
+        let end = separator + 1 + end_offset;
+        blocks.push((start, separator, end));
+        cursor = end + 1;
+    }
+    let Some(&(start, separator, end)) = blocks.get(block_index) else {
+        return Err(format!("未找到第 {} 个冲突块", block_index + 1));
+    };
+    let current = lines[start + 1..separator].join("\n");
+    let incoming = lines[separator + 1..end].join("\n");
+    let replacement = match strategy {
+        "current" => current,
+        "incoming" => incoming,
+        _ if current.is_empty() => incoming,
+        _ if incoming.is_empty() => current,
+        _ => format!("{current}\n{incoming}"),
+    };
+    let mut next = Vec::with_capacity(lines.len());
+    next.extend_from_slice(&lines[..start]);
+    if !replacement.is_empty() {
+        next.extend(replacement.split('\n'));
+    }
+    next.extend_from_slice(&lines[end + 1..]);
+    let mut output = next.join("\n");
+    if content.ends_with('\n') {
+        output.push('\n');
+    }
+    write_conflict_result(&root, &file_path, &output)
+}
+
+pub fn load_conflict_file(
+    repository_path: &str,
+    file_path: &str,
+) -> Result<ConflictFileContent, String> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    if !unresolved_paths(&root)
+        .iter()
+        .any(|path| path == &file_path)
+    {
+        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+    }
+    let (base, base_binary) = conflict_stage_text(&root, 1, &file_path);
+    let (current, current_binary) = conflict_stage_text(&root, 2, &file_path);
+    let (incoming, incoming_binary) = conflict_stage_text(&root, 3, &file_path);
+    let target = repository_file_target(&root, &file_path)?;
+    let (result, result_binary) = match std::fs::read(&target) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(value) if !value.contains('\0') => (value, false),
+            Ok(_) => (String::new(), true),
+            Err(_) => (String::new(), true),
+        },
+        Err(_) => (String::new(), false),
+    };
+    let operation = repository_operation(&root);
+    let rebase = operation.as_ref().is_some_and(|item| item.kind == "rebase");
+    let gitlink = git_output_owned(
+        &root,
+        &[
+            "ls-files".into(),
+            "-u".into(),
+            "--".into(),
+            file_path.clone(),
+        ],
+    )
+    .unwrap_or_default()
+    .lines()
+    .any(|line| line.starts_with("160000 "));
+    Ok(ConflictFileContent {
+        path: file_path,
+        base,
+        current,
+        incoming,
+        result,
+        current_label: if rebase {
+            "变基目标（当前）".into()
+        } else {
+            "当前分支".into()
+        },
+        incoming_label: if rebase {
+            "正在应用的提交".into()
+        } else {
+            "对方分支".into()
+        },
+        binary: gitlink || base_binary || current_binary || incoming_binary || result_binary,
+        gitlink,
+    })
+}
+
+pub fn resolve_conflict_file(
+    repository_path: &str,
+    file_path: &str,
+    strategy: &str,
+    content: Option<&str>,
+) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    if !unresolved_paths(&root)
+        .iter()
+        .any(|path| path == &file_path)
+    {
+        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+    }
+    let target = repository_file_target(&root, &file_path)?;
+    match strategy {
+        "current" | "incoming" => {
+            let side = if strategy == "current" {
+                "ours"
+            } else {
+                "theirs"
+            };
+            git_output_owned(
+                &root,
+                &[
+                    "checkout".into(),
+                    format!("--{side}"),
+                    "--".into(),
+                    file_path.clone(),
+                ],
+            )?;
+        }
+        "both" => {
+            let (current, _) = conflict_stage_text(&root, 2, &file_path);
+            let (incoming, _) = conflict_stage_text(&root, 3, &file_path);
+            let mut combined = current.unwrap_or_default();
+            if let Some(incoming) = incoming.filter(|value| !value.is_empty()) {
+                if !combined.is_empty() && !combined.ends_with('\n') {
+                    combined.push('\n');
+                }
+                combined.push_str(&incoming);
+            }
+            std::fs::write(&target, combined.as_bytes())
+                .map_err(|error| format!("写入合并结果失败：{error}"))?;
+        }
+        "result" => {
+            let content = content.ok_or_else(|| "缺少待保存的合并结果".to_string())?;
+            write_conflict_result(&root, &file_path, content)?;
+        }
+        "delete" => {
+            git_output_owned(&root, &["rm".into(), "-f".into(), "--".into(), file_path])?;
+        }
+        _ => return Err("未知的冲突解决方式".into()),
+    }
+    Ok(())
+}
+
+pub fn launch_conflict_mergetool(repository_path: &str, file_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    if !unresolved_paths(&root)
+        .iter()
+        .any(|path| path == &file_path)
+    {
+        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+    }
+    if optional_git_output(&root, &["config", "--get", "merge.tool"])
+        .trim()
+        .is_empty()
+    {
+        return Err("尚未配置 merge.tool，请先在 Git 配置中选择外部合并工具".into());
+    }
+    git_output_owned(
+        &root,
+        &[
+            "-c".into(),
+            "mergetool.prompt=false".into(),
+            "mergetool.trustExitCode=true".into(),
+            "mergetool".into(),
+            "--no-prompt".into(),
+            "--".into(),
+            file_path,
+        ],
+    )
+    .map(|_| ())
+}
+
+pub fn preview_repository_rebase(
+    repository_path: &str,
+    onto: &str,
+) -> Result<RebasePreview, String> {
+    let root = repository_root(repository_path)?;
+    let onto_hash = resolve_commit(&root, onto.trim())?;
+    let branch = git_output(&root, &["branch", "--show-current"])?
+        .trim()
+        .to_string();
+    if branch.is_empty() {
+        return Err("Detached HEAD 状态下无法开始变基".into());
+    }
+    let head = resolve_commit(&root, "HEAD")?;
+    let merge_base = git_output_owned(&root, &["merge-base".into(), head, onto_hash.clone()])?
+        .trim()
+        .to_string();
+    let steps = operation_steps(&root, &format!("{onto_hash}..HEAD"), 0)
+        .into_iter()
+        .map(|mut step| {
+            step.status = "pending".into();
+            step
+        })
+        .collect();
+    Ok(RebasePreview {
+        branch,
+        onto: onto_hash.clone(),
+        onto_short_hash: onto_hash.chars().take(8).collect(),
+        merge_base,
+        steps,
+    })
+}
+
+pub fn continue_repository_operation(repository_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let operation =
+        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+    if !operation.conflicts.is_empty() {
+        return Err(format!(
+            "仍有 {} 个文件未解决冲突",
+            operation.conflicts.len()
+        ));
+    }
+    let args = match operation.kind.as_str() {
+        "merge" => vec![
+            "-c".into(),
+            "core.editor=true".into(),
+            "merge".into(),
+            "--continue".into(),
+        ],
+        "rebase" => vec![
+            "-c".into(),
+            "core.editor=true".into(),
+            "rebase".into(),
+            "--continue".into(),
+        ],
+        "cherry-pick" => vec![
+            "-c".into(),
+            "core.editor=true".into(),
+            "cherry-pick".into(),
+            "--continue".into(),
+        ],
+        _ => return Err("当前操作不支持继续".into()),
+    };
+    git_output_owned(&root, &args).map(|_| ())
+}
+
+pub fn skip_repository_operation(repository_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let operation =
+        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+    let command = match operation.kind.as_str() {
+        "rebase" => "rebase",
+        "cherry-pick" => "cherry-pick",
+        _ => return Err("合并操作不能跳过提交".into()),
+    };
+    git_output_owned(&root, &[command.into(), "--skip".into()]).map(|_| ())
+}
+
+pub fn abort_repository_operation(repository_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let operation =
+        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+    let command = match operation.kind.as_str() {
+        "merge" => "merge",
+        "rebase" => "rebase",
+        "cherry-pick" => "cherry-pick",
+        _ => return Err("当前冲突不是由可中止的 Git 操作产生".into()),
+    };
+    git_output_owned(&root, &[command.into(), "--abort".into()]).map(|_| ())
 }
 
 fn parse_file_history_entries(output: &str) -> Vec<FileHistoryEntry> {
@@ -2304,10 +2947,28 @@ mod tests {
         );
         assert!(template.content.contains("feat: 默认标题"));
 
-        let staged_files = stage_files(&path, &["README.md".into()]).expect("stage file");
+        let staged_files = stage_files(&path, &["README.md".into()], false).expect("stage file");
         assert!(staged_files[0].staged);
         let snapshot = read_repository(&path).expect("read staged repository");
         assert!(snapshot.files[0].staged);
+
+        fs::write(repository.0.join("README.md"), "first\nsecond\nthird\n")
+            .expect("add unstaged update after staging");
+        let discarded_files = discard_worktree_files(&path, &["README.md".into()])
+            .expect("discard unstaged tracked update");
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md"))
+                .expect("read restored file")
+                .replace("\r\n", "\n"),
+            "first\nsecond\n"
+        );
+        assert!(discarded_files[0].staged);
+        assert!(!discarded_files[0].unstaged);
+
+        fs::write(repository.0.join("untracked.txt"), "temporary\n").expect("write untracked file");
+        discard_worktree_files(&path, &["untracked.txt".into()]).expect("discard untracked file");
+        assert!(!repository.0.join("untracked.txt").exists());
+        assert!(discard_worktree_files(&path, &["../outside.txt".into()]).is_err());
 
         let unstaged_files = unstage_files(&path, &["README.md".into()]).expect("unstage file");
         assert!(unstaged_files[0].unstaged);
@@ -2798,5 +3459,101 @@ mod tests {
             .expect("feature commit");
         assert!(feature.branches.iter().any(|branch| branch == "feat/graph"));
         assert_ne!(feature.lane, merge.lane);
+    }
+
+    #[test]
+    fn supports_conflict_resolution_and_stepwise_rebase() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", "-c", "feat/conflict"])
+            .expect("create conflict branch");
+        fs::write(repository.0.join("README.md"), "feature version\n")
+            .expect("write feature version");
+        git_output(&repository.0, &["add", "README.md"]).expect("add feature version");
+        git_output(&repository.0, &["commit", "-m", "功能冲突提交"])
+            .expect("commit feature version");
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+        fs::write(repository.0.join("README.md"), "main version\n").expect("write main version");
+        git_output(&repository.0, &["add", "README.md"]).expect("add main version");
+        git_output(&repository.0, &["commit", "-m", "主线冲突提交"]).expect("commit main version");
+
+        merge_repository_reference(&path, "feat/conflict").expect_err("merge should conflict");
+        let snapshot = read_repository(&path).expect("read merge conflict state");
+        let operation = snapshot.operation.expect("merge operation");
+        assert_eq!(operation.kind, "merge");
+        assert_eq!(operation.conflicts, vec!["README.md"]);
+        let conflict = load_conflict_file(&path, "README.md").expect("load conflict content");
+        assert!(conflict
+            .base
+            .as_deref()
+            .is_some_and(|value| value.contains("first")));
+        assert!(conflict
+            .current
+            .as_deref()
+            .is_some_and(|value| value.contains("main version")));
+        assert!(conflict
+            .incoming
+            .as_deref()
+            .is_some_and(|value| value.contains("feature version")));
+        resolve_conflict_block(&path, "README.md", 0, "current")
+            .expect("choose current merge conflict block");
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md"))
+                .expect("read resolved merge file")
+                .replace("\r\n", "\n"),
+            "main version\n"
+        );
+        assert!(read_repository(&path)
+            .expect("read unresolved but edited merge file")
+            .operation
+            .is_some());
+        stage_files(&path, &["README.md".into()], false).expect("stage resolved merge file");
+        continue_repository_operation(&path).expect("continue merge");
+        assert!(read_repository(&path)
+            .expect("read completed merge")
+            .operation
+            .is_none());
+
+        git_output(&repository.0, &["switch", "-c", "feat/rebase"]).expect("create rebase branch");
+        fs::write(repository.0.join("route.txt"), "topic\n").expect("write topic route");
+        git_output(&repository.0, &["add", "route.txt"]).expect("add topic route");
+        git_output(&repository.0, &["commit", "-m", "待变基提交"]).expect("commit topic route");
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base for rebase");
+        fs::write(repository.0.join("route.txt"), "base\n").expect("write base route");
+        git_output(&repository.0, &["add", "route.txt"]).expect("add base route");
+        git_output(&repository.0, &["commit", "-m", "变基目标提交"]).expect("commit base route");
+        git_output(&repository.0, &["switch", "feat/rebase"]).expect("switch rebase branch");
+
+        let preview = preview_repository_rebase(&path, &base_branch).expect("preview rebase");
+        assert_eq!(preview.branch, "feat/rebase");
+        assert_eq!(preview.steps.len(), 1);
+        assert_eq!(preview.steps[0].title, "待变基提交");
+        rebase_repository_onto(&path, &base_branch).expect_err("rebase should conflict");
+        let snapshot = read_repository(&path).expect("read rebase conflict state");
+        let operation = snapshot.operation.expect("rebase operation");
+        assert_eq!(operation.kind, "rebase");
+        assert_eq!(operation.current_step, 1);
+        assert_eq!(operation.total_steps, 1);
+        assert_eq!(operation.steps.len(), 1);
+        assert_eq!(operation.steps[0].status, "current");
+        let conflict = load_conflict_file(&path, "route.txt").expect("load rebase conflict");
+        assert_eq!(conflict.current_label, "变基目标（当前）");
+        assert!(conflict
+            .incoming
+            .as_deref()
+            .is_some_and(|value| value.contains("topic")));
+        resolve_conflict_file(&path, "route.txt", "incoming", None)
+            .expect("choose replayed commit");
+        stage_files(&path, &["route.txt".into()], false).expect("stage resolved rebase file");
+        continue_repository_operation(&path).expect("continue rebase");
+        assert!(read_repository(&path)
+            .expect("read completed rebase")
+            .operation
+            .is_none());
     }
 }

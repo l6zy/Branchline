@@ -47,6 +47,47 @@ export type RepositoryFile = {
   incoming?: boolean
 }
 
+export type RepositoryOperationStep = {
+  hash: string
+  shortHash: string
+  title: string
+  author: string
+  status: 'applied' | 'current' | 'pending'
+}
+
+export type RepositoryOperationState = {
+  kind: 'merge' | 'rebase' | 'cherry-pick' | 'conflict'
+  label: string
+  originalBranch?: string
+  onto?: string
+  currentStep: number
+  totalSteps: number
+  currentCommit?: string
+  message?: string
+  conflicts: string[]
+  steps: RepositoryOperationStep[]
+}
+
+export type ConflictFileContent = {
+  path: string
+  base: string | null
+  current: string | null
+  incoming: string | null
+  result: string
+  currentLabel: string
+  incomingLabel: string
+  binary: boolean
+  gitlink: boolean
+}
+
+export type RebasePreview = {
+  branch: string
+  onto: string
+  ontoShortHash: string
+  mergeBase: string
+  steps: RepositoryOperationStep[]
+}
+
 export type RepositoryDiffLine = {
   old: number | null
   next: number | null
@@ -113,6 +154,7 @@ export type RepositorySnapshot = {
   tags: string[]
   stashes: RepositoryStash[]
   commitTemplate?: RepositoryCommitTemplate
+  operation?: RepositoryOperationState
 }
 
 export type RepositoryCommitTemplate = {

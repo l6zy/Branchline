@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { useRepositoryWorkspace, type RecentRepository, type RepositoryParent } from './features/repository/useRepositoryWorkspace'
@@ -12,9 +12,11 @@ import { GitConfigDialog } from './features/settings/GitConfigDialog'
 import { MergeQueuePanel } from './features/merge/MergeQueuePanel'
 import { RepositoryStructurePanel, type StructureView } from './features/repository/RepositoryStructurePanel'
 import { StashPage } from './features/stash/StashPage'
+import { RebaseDialog } from './features/operation/RebaseDialog'
 import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './features/graph/commitGraphLayout'
 import {
   Archive,
+  AlertTriangle,
   ArrowLeft,
   Bell,
   Box,
@@ -85,10 +87,12 @@ type Commit = {
   deletions: number
 }
 
-type WorkspaceView = 'history' | 'changes' | 'stash' | 'compare' | 'merge' | StructureView
+type WorkspaceView = 'history' | 'changes' | 'stash' | 'compare' | 'merge' | 'operation' | StructureView
 type TimeFilter = 'all' | 'day' | 'week' | 'month'
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
 type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit'; label: string; detail: string }
+
+const OperationPanel = lazy(async () => ({ default: (await import('./features/operation/OperationPanel')).OperationPanel }))
 
 function AppMark({ className }: { className?: string }) {
   return <img className={className} src="/app-icon.svg" alt="" aria-hidden="true"/>
@@ -563,6 +567,7 @@ export default function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('history')
   const [compareBase, setCompareBase] = useState<string | null>(null)
   const [branchDialog, setBranchDialog] = useState<{ prefix?: string } | null>(null)
+  const [rebaseDialog, setRebaseDialog] = useState<{ commit: string; label: string } | null>(null)
   const [gitConfigOpen, setGitConfigOpen] = useState(false)
   const [wideDiff, setWideDiff] = useState(false)
   const [diffFile, setDiffFile] = useState<number | null>(null)
@@ -571,6 +576,7 @@ export default function App() {
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null)
   const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null)
+  const [operationPath, setOperationPath] = useState<string | null>(null)
   const [commitStats, setCommitStats] = useState<Record<string, RepositoryCommitStats>>({})
   const [commitFiles, setCommitFiles] = useState<Record<string, RepositoryFile[]>>({})
   const searchRef = useRef<HTMLInputElement>(null)
@@ -634,7 +640,7 @@ export default function App() {
     setQuery('')
     setBranchFilter('all')
     setTimeFilter('all')
-    setWorkspaceView('history')
+    setWorkspaceView(snapshot.operation ? 'changes' : 'history')
   }
   const handleOpenRepository = async () => handleOpenSnapshot(await openRepository())
   const handleOpenRepositoryPath = async (path: string, preserveTrail = false) => handleOpenSnapshot(await openRepositoryPath(path, preserveTrail))
@@ -644,6 +650,7 @@ export default function App() {
     applySnapshot(snapshot)
     setSelected(snapshot.commits[0]?.id ?? '')
     setDiffFile(null)
+    if (!snapshot.operation && workspaceView === 'operation') setWorkspaceView('history')
   }
   const handleDeleteBranchPrefix = async (prefix: string) => {
     if (!repository) return setRepositoryNotice('请先打开本地仓库')
@@ -701,8 +708,7 @@ export default function App() {
     try {
       const snapshot = await action(repository.path)
       handleSnapshot(snapshot)
-      setWorkspaceView('history')
-      setRepositoryNotice(success)
+      setRepositoryNotice(snapshot.operation ? `${snapshot.operation.label}：请在操作中心处理冲突` : success)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       try {
@@ -718,11 +724,13 @@ export default function App() {
   }
   const handleMergeReference = async (reference: string, label = reference) => {
     if (!repository) return setRepositoryNotice('合并操作需要先打开本地仓库')
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
     if (!window.confirm(`将 ${label} 合并到 ${repository.branch}？\n\n工作区必须保持干净；如产生冲突，将保留 Git 的冲突状态供后续处理。`)) return
     await executeRepositoryAction((path) => mergeRepositoryReference(path, reference), `已将 ${label} 合并到 ${repository.branch}`)
   }
   const handleCherryPickCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('Cherry-pick 需要先打开本地仓库')
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
     if (!window.confirm(`将提交 ${commit.id} Cherry-pick 到 ${repository.branch}？\n\n${commit.title}`)) return
     await executeRepositoryAction((path) => cherryPickRepositoryCommit(path, commit.fullHash ?? commit.id), `已 Cherry-pick 提交 ${commit.id}`)
   }
@@ -733,8 +741,13 @@ export default function App() {
   }
   const handleRebaseCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('变基操作需要先打开本地仓库')
-    if (!window.confirm(`将当前分支 ${repository.branch} 变基到提交 ${commit.id}？\n\n工作区必须保持干净；如产生冲突，将保留 Git 的变基状态。`)) return
-    await executeRepositoryAction((path) => rebaseRepositoryOnto(path, commit.fullHash ?? commit.id), `已将 ${repository.branch} 变基到提交 ${commit.id}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    setRebaseDialog({ commit: commit.fullHash ?? commit.id, label: commit.id })
+  }
+  const startRebase = async (onto: string) => {
+    if (!repository) return
+    await executeRepositoryAction((path) => rebaseRepositoryOnto(path, onto), `已将 ${repository.branch} 变基到 ${onto.slice(0, 8)}`)
+    setRebaseDialog(null)
   }
   const handleTagCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('创建标签需要先打开本地仓库')
@@ -861,8 +874,8 @@ export default function App() {
         <div className="top-actions">
           <button className="icon-button" onClick={() => setShortcutOpen(true)} title="查看快捷键"><Command size={17}/></button>
           <button className="fetch-button sync-action" onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} title="获取远程更新"><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? '获取中…' : '获取'}</span></button>
-          <button className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation)} title="拉取当前分支">{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span></button>
-          <button className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation)} title="推送当前分支">{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span></button>
+          <button className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span></button>
+          <button className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span></button>
           <button className="icon-button" onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>
           <button className={`icon-button notification ${notificationOpen ? 'active' : ''}`} onClick={() => setNotificationOpen((value) => !value)} title="查看通知"><Bell size={17}/><span/></button>
           {notificationOpen && <div className="notification-popover">
@@ -873,7 +886,7 @@ export default function App() {
           </div>}
         </div>
       </header>
-      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="提交历史和提交图谱"><GitCommitHorizontal size={14}/><span className="tab-label">提交历史</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="查看和暂存工作区变更"><FileDiff size={14}/><span className="tab-label">工作区变更</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="浏览和管理 Stash"><Archive size={14}/><span className="tab-label">Stash</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button><div className="tab-spacer"/>{workspaceView === 'history' && <><button className={`filter-button ${branchFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></button><button className={`filter-button ${timeFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></button></>}</div>
+      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="提交历史和提交图谱"><GitCommitHorizontal size={14}/><span className="tab-label">提交历史</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="查看和暂存工作区变更"><FileDiff size={14}/><span className="tab-label">工作区变更</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="浏览和管理 Stash"><Archive size={14}/><span className="tab-label">Stash</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前冲突或变基"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : '冲突处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><button className={`filter-button ${branchFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></button><button className={`filter-button ${timeFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选提交</span></div><div className="context-menu-options"><button className={branchFilter === 'all' ? 'selected-option' : ''} onClick={() => { setBranchFilter('all'); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <button className={branchFilter === branch ? 'selected-option' : ''} key={branch} onClick={() => { setBranchFilter(branch); setFilterMenu(null) }}><GitBranch size={14}/><span>{branch}</span></button>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
@@ -884,7 +897,18 @@ export default function App() {
         </section>}
         {workspaceView === 'compare' && <ComparePanel repository={repository} initialBase={compareBase ?? undefined} initialTarget={compareBase ? repository?.branch : undefined} onNotice={setRepositoryNotice}/>} 
         {workspaceView === 'merge' && <MergeQueuePanel repository={repository} onNotice={setRepositoryNotice} onSwitchBranch={handleSwitchBranch}/>} 
-        {workspaceView === 'changes' && <StagingPage repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} onOperationChange={(label) => setActiveOperation(label ? { key: 'commit', label, detail: '正在写入提交并刷新仓库状态' } : null)} onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })} onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: 'HEAD' })}/>} 
+        {workspaceView === 'operation' && <Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong><span>编辑器组件仅在处理合并、变基或 Cherry-pick 时按需加载。</span></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={operationPath} onReturnToChanges={() => setWorkspaceView('changes')}/></Suspense>}
+        {workspaceView === 'changes' && (
+          <StagingPage
+            repository={repository}
+            onSnapshot={handleSnapshot}
+            onNotice={setRepositoryNotice}
+            onOperationChange={(label) => setActiveOperation(label ? { key: 'commit', label, detail: '正在写入提交并刷新仓库状态' } : null)}
+            onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}
+            onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: 'HEAD' })}
+            onOpenConflict={(path) => { setOperationPath(path); setWorkspaceView('operation') }}
+          />
+        )}
         {workspaceView === 'stash' && <StashPage repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice}/>} 
         {(workspaceView === 'worktrees' || workspaceView === 'submodules' || workspaceView === 'tags') && <RepositoryStructurePanel repository={repository} view={workspaceView} onOpenPath={(path, kind) => void (kind === 'submodule' ? handleOpenSubmodulePath(path) : handleOpenRepositoryPath(path, true))}/>} 
         <span className={`panel-resizer inspector-resizer ${inspectorVisible ? '' : 'hidden'}`} role="separator" aria-label="拖动调整右侧面板宽度" onPointerDown={(event) => beginPanelResize('inspector', event)}/>
@@ -895,7 +919,7 @@ export default function App() {
         </section>}
       </div>
       <footer className="statusbar">
-        <div><span className="status-ok"><Check size={11}/></span><span>仓库状态正常</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
+        <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{repository.operation?.label ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
         <div><TimerReset size={12}/><span>自动 Fetch：每 5 分钟</span><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span></div>
       </footer></> : <RepositoryWelcome recentRepositories={recentRepositories} openingRepository={openingRepository} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={(path) => void handleOpenRepositoryPath(path)}/>} 
     </div>
@@ -903,6 +927,7 @@ export default function App() {
     {activeOperation && <div className="operation-indicator" role="status" aria-live="polite"><RefreshCw className="spin" size={17}/><div><strong>{activeOperation.label}</strong><span>{activeOperation.detail}</span></div></div>}
     <HistoryDrawer repositoryPath={repository?.path} filePath={historyTarget?.path ?? null} initialTab={historyTarget?.tab ?? 'history'} lineNumber={historyTarget?.line} revision={historyTarget?.revision} onClose={() => setHistoryTarget(null)}/>
     <CreateBranchDialog open={Boolean(branchDialog)} prefix={branchDialog?.prefix} currentBranch={repository?.branch ?? ''} onClose={() => setBranchDialog(null)} onCreate={handleCreateBranch}/>
+    <RebaseDialog open={Boolean(rebaseDialog)} repository={repository} onto={rebaseDialog?.commit ?? null} targetLabel={rebaseDialog?.label ?? ''} onClose={() => setRebaseDialog(null)} onStart={startRebase}/>
     <GitConfigDialog open={gitConfigOpen} onClose={() => setGitConfigOpen(false)} onNotice={setRepositoryNotice}/>
     <ShortcutOverlay open={shortcutOpen} onClose={() => setShortcutOpen(false)}/>
     {repositoryNotice && <button className="app-notice" onMouseEnter={pauseRepositoryNotice} onMouseLeave={resumeRepositoryNotice} onFocus={pauseRepositoryNotice} onBlur={resumeRepositoryNotice} onClick={() => setRepositoryNotice(null)} title="悬停可暂停关闭倒计时">{repositoryNotice}<X size={14}/></button>}

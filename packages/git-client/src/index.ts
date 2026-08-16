@@ -1,7 +1,8 @@
-import type { BlameLine, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
+import type { BlameLine, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
 
 export type {
   BlameLine,
+  ConflictFileContent,
   FileHistoryEntry,
   GitUserConfig,
   MergeCandidate,
@@ -13,9 +14,12 @@ export type {
   RepositoryFile,
   RepositoryComparison,
   RepositorySnapshot,
+  RepositoryOperationState,
+  RepositoryOperationStep,
   RepositoryStash,
   RepositorySubmodule,
   RepositoryWorktree,
+  RebasePreview,
 } from '@branchline/git-models'
 
 export async function loadGitUserConfig() {
@@ -60,12 +64,16 @@ export async function fetchRepository(repositoryPath: string) {
   return invoke<RepositorySnapshot>('fetch_repository', { repositoryPath })
 }
 
-export async function stageRepositoryFiles(repositoryPath: string, filePaths: string[]) {
-  return invoke<RepositoryFile[]>('stage_files', { repositoryPath, filePaths })
+export async function stageRepositoryFiles(repositoryPath: string, filePaths: string[], force = false) {
+  return invoke<RepositoryFile[]>('stage_files', { repositoryPath, filePaths, force })
 }
 
 export async function unstageRepositoryFiles(repositoryPath: string, filePaths: string[]) {
   return invoke<RepositoryFile[]>('unstage_files', { repositoryPath, filePaths })
+}
+
+export async function discardRepositoryFiles(repositoryPath: string, filePaths: string[]) {
+  return invoke<RepositoryFile[]>('discard_worktree_files', { repositoryPath, filePaths })
 }
 
 export async function loadRepositoryCommitStats(repositoryPath: string, commit: string) {
@@ -82,6 +90,38 @@ export async function commitRepository(repositoryPath: string, message: string, 
 
 export async function resolveGitlinkConflictsLocal(repositoryPath: string) {
   return invoke<number>('resolve_gitlink_conflicts_local', { repositoryPath })
+}
+
+export async function loadConflictFile(repositoryPath: string, filePath: string) {
+  return invoke<ConflictFileContent>('load_conflict_file', { repositoryPath, filePath })
+}
+
+export async function resolveConflictFile(repositoryPath: string, filePath: string, strategy: 'current' | 'incoming' | 'both' | 'delete' | 'result', content?: string) {
+  return invoke<RepositorySnapshot>('resolve_conflict_file', { repositoryPath, filePath, strategy, content })
+}
+
+export async function resolveConflictBlock(repositoryPath: string, filePath: string, blockIndex: number, strategy: 'current' | 'incoming' | 'both') {
+  return invoke<RepositorySnapshot>('resolve_conflict_block', { repositoryPath, filePath, blockIndex, strategy })
+}
+
+export async function launchConflictMergetool(repositoryPath: string, filePath: string) {
+  return invoke<RepositorySnapshot>('launch_conflict_mergetool', { repositoryPath, filePath })
+}
+
+export async function continueRepositoryOperation(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('continue_repository_operation', { repositoryPath })
+}
+
+export async function skipRepositoryOperation(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('skip_repository_operation', { repositoryPath })
+}
+
+export async function abortRepositoryOperation(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('abort_repository_operation', { repositoryPath })
+}
+
+export async function previewRepositoryRebase(repositoryPath: string, onto: string) {
+  return invoke<RebasePreview>('preview_repository_rebase', { repositoryPath, onto })
 }
 
 export async function loadFileHistory(repositoryPath: string, filePath: string) {

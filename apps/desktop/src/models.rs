@@ -49,6 +49,55 @@ pub struct RepositoryFile {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryOperationStep {
+    pub hash: String,
+    pub short_hash: String,
+    pub title: String,
+    pub author: String,
+    pub status: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryOperationState {
+    pub kind: String,
+    pub label: String,
+    pub original_branch: Option<String>,
+    pub onto: Option<String>,
+    pub current_step: usize,
+    pub total_steps: usize,
+    pub current_commit: Option<String>,
+    pub message: Option<String>,
+    pub conflicts: Vec<String>,
+    pub steps: Vec<RepositoryOperationStep>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictFileContent {
+    pub path: String,
+    pub base: Option<String>,
+    pub current: Option<String>,
+    pub incoming: Option<String>,
+    pub result: String,
+    pub current_label: String,
+    pub incoming_label: String,
+    pub binary: bool,
+    pub gitlink: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebasePreview {
+    pub branch: String,
+    pub onto: String,
+    pub onto_short_hash: String,
+    pub merge_base: String,
+    pub steps: Vec<RepositoryOperationStep>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitUserConfig {
     pub user_name: String,
     pub user_email: String,
@@ -177,4 +226,5 @@ pub struct RepositorySnapshot {
     pub tags: Vec<String>,
     pub stashes: Vec<RepositoryStash>,
     pub commit_template: Option<RepositoryCommitTemplate>,
+    pub operation: Option<RepositoryOperationState>,
 }

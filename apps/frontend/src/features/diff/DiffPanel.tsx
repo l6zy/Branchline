@@ -5,6 +5,7 @@ import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile } 
 import { DiffFileList } from './DiffFileList'
 import { HighlightedCode } from './HighlightedCode'
 import { buildDiffContextEntries, type DiffContextEntry } from './diffContext'
+import { isBooleanRecord, usePersistentState } from '../../persistentState'
 
 type SplitDiffRow = { left?: RepositoryDiffLine; right?: RepositoryDiffLine }
 type SplitDiffEntry = { kind: 'row'; row: SplitDiffRow } | { kind: 'omitted'; count: number }
@@ -17,6 +18,10 @@ const MIN_DIFF_FONT_SIZE = 9
 const MAX_DIFF_FONT_SIZE = 22
 const EMPTY_FALLBACK_ROWS: Record<string, RepositoryDiffLine[]> = {}
 const EMPTY_DIFF_ROWS: RepositoryDiffLine[] = []
+
+const isFileMode = (value: unknown): value is 'list' | 'tree' => value === 'list' || value === 'tree'
+const isDiffView = (value: unknown): value is 'unified' | 'split' => value === 'unified' || value === 'split'
+const isDiffScope = (value: unknown): value is 'file' | 'changes' => value === 'file' || value === 'changes'
 
 function initialDiffFontSize(storageKey: string, defaultSize: number) {
   const stored = Number(window.localStorage.getItem(storageKey))
@@ -98,9 +103,10 @@ type DiffPanelProps = {
 
 export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onClose, hideFileList = false, loadRows, fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
   const [activeFile, setActiveFile] = useState(initialFile)
-  const [view, setView] = useState<'unified' | 'split'>('unified')
-  const [scope, setScope] = useState<'file' | 'changes'>('changes')
-  const [fileMode, setFileMode] = useState<'list' | 'tree'>('list')
+  const [view, setView] = usePersistentState('branchline.diffView.v1', 'unified', isDiffView)
+  const [scope, setScope] = usePersistentState('branchline.diffScope.v1', 'changes', isDiffScope)
+  const [fileMode, setFileMode] = usePersistentState('branchline.diffFileMode.v1', 'list', isFileMode)
+  const [collapsedFolders, setCollapsedFolders] = usePersistentState('branchline.diffCollapsedFolders.v1', {}, isBooleanRecord)
   const [repositoryRows, setRepositoryRows] = useState<RepositoryDiffLine[]>([])
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
@@ -268,7 +274,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {onClose && <button className="icon-button" onClick={onClose} title="关闭 Diff"><X size={15}/></button>}
     </div>
     <div className={`diff-body ${hideFileList ? 'code-only' : ''}`}>
-      {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile}/>} 
+      {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
       <div className={`code-diff ${view}`}>
         <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><ChevronDown size={14}/><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
         {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}

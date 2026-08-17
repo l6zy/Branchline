@@ -158,7 +158,10 @@ button, .commit-row { -webkit-tap-highlight-color: transparent; }
 .search-result-count { flex: 0 0 auto; color: var(--faint); font: 10px var(--font-code); white-space: nowrap; }
 kbd { padding: 2px 5px; border: 1px solid #303b43; border-radius: 4px; color: #687781; background: #171e24; font: 8px "Segoe UI Variable", sans-serif; }
 .top-actions { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
-.top-actions .sync-action { flex: 0 0 auto; }
+.top-actions .sync-action { position: relative; flex: 0 0 auto; }
+.sync-count { position: absolute; top: -7px; right: -7px; z-index: 1; min-width: 17px; height: 17px; padding: 0 4px; display: grid; place-items: center; border: 1px solid var(--panel); border-radius: 9px; color: #ffffff; font-size: 10px; font-weight: 700; line-height: 1; pointer-events: none; }
+.pull-count { background: #d48806; }
+.push-count { background: var(--accent); }
 .fetch-button, .secondary-button, .primary-button, .danger-button, .filter-button { height: 30px; min-height: 30px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 7px; color: #aebbc2; background: var(--panel-2); font-size: 12px; white-space: nowrap; cursor: pointer; transition: color .15s, background .15s, border-color .15s, box-shadow .15s, transform .15s; }
 .fetch-button:hover:not(:disabled), .secondary-button:hover:not(:disabled), .filter-button:hover:not(:disabled) { color: #e6f4ff; border-color: #4a6f91; background: #253848; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.28); }
 .fetch-button:disabled, .secondary-button:disabled, .primary-button:disabled, .danger-button:disabled, .filter-button:disabled { opacity: .6; cursor: not-allowed; }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Box, Check, ChevronDown, ChevronRight, FolderGit2, FolderTree, GitFork, Lock, TriangleAlert } from 'lucide-react'
 import type { RepositorySnapshot } from '../../repository'
 import {
@@ -7,6 +7,7 @@ import {
   type RepositoryStructureSelection,
   type SubmoduleTreeNode,
 } from './repositoryTree'
+import { isBooleanRecord, usePersistentState } from '../../persistentState'
 
 function selectionKey(selection: RepositoryStructureSelection) {
   return `${selection.kind}:${'path' in selection ? selection.path : ''}`
@@ -18,7 +19,7 @@ export function RepositoryStructureTree({ repository, selection, onSelect, onOpe
   onSelect: (selection: RepositoryStructureSelection) => void
   onOpenPath: (path: string, kind: 'worktree' | 'submodule') => void
 }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ worktrees: true, submodules: true })
+  const [open, setOpen] = usePersistentState('branchline.repositoryStructureTreeOpen.v1', { worktrees: true, submodules: true }, isBooleanRecord)
   const submoduleTree = useMemo(() => buildSubmoduleTree(repository.submodules), [repository.submodules])
   const activeKey = selectionKey(selection)
   const toggle = (key: string) => setOpen((value) => ({ ...value, [key]: value[key] === false }))

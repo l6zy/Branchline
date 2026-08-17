@@ -21,6 +21,7 @@ import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type 
 import { visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, visibleHistoryCommits, type HistorySearchMode } from './features/history/historySearch'
 import { formatLocalDateTime } from './dateTime'
+import { isBooleanRecord, usePersistentState } from './persistentState'
 import {
   Archive,
   AlertTriangle,
@@ -102,6 +103,12 @@ type SearchSummary = { current: number; total: number }
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
 type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash'; label: string; detail: string }
 
+const isTheme = (value: unknown): value is 'dark' | 'light' => value === 'dark' || value === 'light'
+const isSidebarWidth = (value: unknown): value is number => typeof value === 'number' && value >= 200 && value <= 360
+const isInspectorWidth = (value: unknown): value is number => typeof value === 'number' && value >= 300 && value <= 520
+const isDetailsHeight = (value: unknown): value is number => typeof value === 'number' && value >= 230 && value <= 560
+const isFileMode = (value: unknown): value is 'list' | 'tree' => value === 'list' || value === 'tree'
+
 const OperationPanel = lazy(async () => ({ default: (await import('./features/operation/OperationPanel')).OperationPanel }))
 
 function AppMark({ className }: { className?: string }) {
@@ -151,7 +158,7 @@ function formatCommitListTime(commit: Commit) {
 }
 
 function BranchTree({ branches, remoteBranches = [], branchTracking = {}, currentBranch, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; currentBranch?: string; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ local: true, feat: true, fix: true, remote: false })
+  const [open, setOpen] = usePersistentState('branchline.branchTreeOpen.v1', { local: true, feat: true, fix: true, remote: false }, isBooleanRecord)
   const [contextBranch, setContextBranch] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [contextPrefix, setContextPrefix] = useState<{ prefix: string; x: number; y: number } | null>(null)
   const toggle = (key: string) => setOpen((value) => ({ ...value, [key]: !value[key] }))
@@ -547,10 +554,10 @@ function CommitDetails({ commit }: { commit: Commit }) {
 }
 
 function ChangedFilesPanel({ files, loading, activeFile, onOpenFile, onOpenHistory }: { files: RepositoryFile[]; loading?: boolean; activeFile: number | null; onOpenFile: (index: number) => void; onOpenHistory: (path: string, tab: HistoryTarget['tab']) => void }) {
-  const [fileMode, setFileMode] = useState<'list' | 'tree'>('list')
+  const [fileMode, setFileMode] = usePersistentState('branchline.changedFilesMode.v1', 'list', isFileMode)
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
   const [contextFile, setContextFile] = useState<{ file: RepositoryFile; x: number; y: number } | null>(null)
-  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({})
+  const [collapsedFolders, setCollapsedFolders] = usePersistentState('branchline.changedFilesCollapsedFolders.v1', {}, isBooleanRecord)
   const fileFolders = useMemo(() => {
     const folders = new Set<string>()
     files.forEach((file) => {
@@ -602,10 +609,10 @@ function RepositoryWelcome({ recentRepositories, openingRepository, onOpenReposi
 
 export default function App() {
   const { repository, parentRepository, recentRepositories, openingRepository, fetching, repositoryNotice, pauseRepositoryNotice, resumeRepositoryNotice, setRepositoryNotice, applySnapshot, openRepository, openRepositoryPath, openSubmodulePath, returnToParentRepository, fetchNow, autoFetchEnabled, fetchIntervalMinutes, setAutoFetchEnabled, setFetchIntervalMinutes, lastFetchAt } = useRepositoryWorkspace()
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
-  const [sidebarWidth, setSidebarWidth] = useState(252)
-  const [inspectorWidth, setInspectorWidth] = useState(360)
-  const [detailsHeight, setDetailsHeight] = useState(330)
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState('branchline.sidebarCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
+  const [sidebarWidth, setSidebarWidth] = usePersistentState('branchline.sidebarWidth.v1', 252, isSidebarWidth)
+  const [inspectorWidth, setInspectorWidth] = usePersistentState('branchline.inspectorWidth.v1', 360, isInspectorWidth)
+  const [detailsHeight, setDetailsHeight] = usePersistentState('branchline.detailsHeight.v1', 330, isDetailsHeight)
   const [panelResizing, setPanelResizing] = useState<'sidebar' | 'inspector' | 'details' | null>(null)
   const [selected, setSelected] = useState('')
   const [query, setQuery] = useState('')
@@ -625,8 +632,8 @@ export default function App() {
   const [gitConfigOpen, setGitConfigOpen] = useState(false)
   const [wideDiff, setWideDiff] = useState(false)
   const [diffFile, setDiffFile] = useState<number | null>(null)
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false)
-  const [theme, setTheme] = useState<'dark' | 'light'>('light')
+  const [inspectorCollapsed, setInspectorCollapsed] = usePersistentState('branchline.inspectorCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
+  const [theme, setTheme] = usePersistentState('branchline.theme.v1', 'light', isTheme)
   const [shortcutOpen, setShortcutOpen] = useState(false)
   const [autoFetchOpen, setAutoFetchOpen] = useState(false)
   const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null)
@@ -679,7 +686,6 @@ export default function App() {
   useEffect(() => {
     const path = repository?.path ?? null
     if (path && expandedRepositoryPath.current !== path) {
-      setSidebarCollapsed(false)
       setSelected(repository?.commits[0]?.id ?? '')
     } else if (path) {
       setSelected((current) => resolveCommitSelection(previousCommits.current, repository?.commits ?? [], current))
@@ -1009,8 +1015,8 @@ export default function App() {
           <div className="top-actions">
             <button className="icon-button" onClick={() => setShortcutOpen(true)} title="查看快捷键"><Command size={17}/></button>
             <button className="fetch-button sync-action" onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} title="获取远程更新"><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? '获取中…' : '获取'}</span></button>
-            <button className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span></button>
-            <button className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span></button>
+            <button className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.behind ? `拉取当前分支（${repository.behind} 个待拉取提交）` : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{repository!.behind}</small>}</button>
+            <button className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.ahead ? `推送当前分支（${repository.ahead} 个待推送提交）` : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span>{Boolean(repository?.ahead) && <small className="sync-count push-count">{repository!.ahead}</small>}</button>
             <button className="icon-button" onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>
             <button className={`icon-button notification ${notificationOpen ? 'active' : ''}`} onClick={() => setNotificationOpen((value) => !value)} title="查看通知"><Bell size={17}/><span/></button>
             {notificationOpen && <div className="notification-popover">

@@ -201,6 +201,38 @@ export async function loadMergeQueue(repositoryPath: string) {
   return invoke<MergeQueueSnapshot>('load_merge_queue', { repositoryPath })
 }
 
+export async function createRepositoryWorktree(repositoryPath: string, worktreePath: string, branch: string, createBranch: boolean) {
+  return invoke<RepositorySnapshot>('create_repository_worktree', { repositoryPath, worktreePath, branch, createBranch })
+}
+
+export async function removeRepositoryWorktree(repositoryPath: string, worktreePath: string) {
+  return invoke<RepositorySnapshot>('remove_repository_worktree', { repositoryPath, worktreePath })
+}
+
+export async function setRepositoryWorktreeLock(repositoryPath: string, worktreePath: string, locked: boolean) {
+  return invoke<RepositorySnapshot>('set_repository_worktree_lock', { repositoryPath, worktreePath, locked })
+}
+
+export async function pruneRepositoryWorktrees(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('prune_repository_worktrees', { repositoryPath })
+}
+
+export async function initializeRepositorySubmodule(repositoryPath: string, submodulePath: string) {
+  return invoke<RepositorySnapshot>('initialize_repository_submodule', { repositoryPath, submodulePath })
+}
+
+export async function updateRepositorySubmodule(repositoryPath: string, submodulePath?: string) {
+  return invoke<RepositorySnapshot>('update_repository_submodule', { repositoryPath, submodulePath })
+}
+
+export async function syncRepositorySubmodules(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('sync_repository_submodules', { repositoryPath })
+}
+
+export async function deinitializeRepositorySubmodule(repositoryPath: string, submodulePath: string) {
+  return invoke<RepositorySnapshot>('deinitialize_repository_submodule', { repositoryPath, submodulePath })
+}
+
 export async function createRepositoryStash(repositoryPath: string, message: string, includeUntracked: boolean) {
   return invoke<RepositorySnapshot>('create_repository_stash', { repositoryPath, message, includeUntracked })
 }

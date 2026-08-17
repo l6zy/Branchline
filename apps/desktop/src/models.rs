@@ -219,6 +219,7 @@ pub struct MergeQueueSnapshot {
 pub struct RepositorySnapshot {
     pub name: String,
     pub path: String,
+    pub superproject_path: Option<String>,
     pub branch: String,
     pub remote: Option<String>,
     pub ahead: usize,

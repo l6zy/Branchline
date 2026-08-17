@@ -187,14 +187,14 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
         if (entry.kind === 'folder') {
           const collapsed = Boolean(collapsedFolders[entry.folder])
           return <div className="virtual-file-entry folder" key={entry.key} style={style}>
-            <button className="file-tree-folder" onClick={() => toggleFolder(entry.folder)} title={collapsed ? `展开 ${entry.folder}` : `收起 ${entry.folder}`}>
+            <button className="file-tree-folder" onClick={() => toggleFolder(entry.folder)} title={entry.folder}>
               {collapsed ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}<FolderOpen size={13}/><span>{entry.name}</span><small>{entry.count}</small>
             </button>
           </div>
         }
         const { file, index, folder, name } = entry.item
         return <div className="virtual-file-entry" key={entry.key} style={style}>
-          <button className={`${activeFile === index ? 'active' : ''} ${entry.nested ? 'nested-file' : ''}`} onClick={() => onSelectFile(index)} onContextMenu={(event) => onFileContextMenu?.(event, file)}>
+          <button className={`${activeFile === index ? 'active' : ''} ${entry.nested ? 'nested-file' : ''}`} onClick={() => onSelectFile(index)} onContextMenu={(event) => onFileContextMenu?.(event, file)} title={entry.item.name}>
             <span className={`file-state ${file.type.toLowerCase()}`}>{file.type}</span><div><strong>{name}</strong><span>{folder ? `${folder}/` : ''}</span></div><span className="stats"><i>+{file.add}</i><b>-{file.del}</b></span>{showOpenIndicator && <ChevronRight size={13}/>}
           </button>
         </div>

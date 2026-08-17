@@ -525,6 +525,107 @@ pub async fn load_merge_queue(repository_path: String) -> Result<MergeQueueSnaps
 }
 
 #[tauri::command]
+pub async fn create_repository_worktree(
+    repository_path: String,
+    worktree_path: String,
+    branch: String,
+    create_branch: bool,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::create_repository_worktree(&repository_path, &worktree_path, &branch, create_branch)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("创建 Worktree", error))?
+}
+
+#[tauri::command]
+pub async fn remove_repository_worktree(
+    repository_path: String,
+    worktree_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::remove_repository_worktree(&repository_path, &worktree_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("移除 Worktree", error))?
+}
+
+#[tauri::command]
+pub async fn set_repository_worktree_lock(
+    repository_path: String,
+    worktree_path: String,
+    locked: bool,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::set_repository_worktree_lock(&repository_path, &worktree_path, locked)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error(if locked { "锁定 Worktree" } else { "解锁 Worktree" }, error))?
+}
+
+#[tauri::command]
+pub async fn prune_repository_worktrees(repository_path: String) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::prune_repository_worktrees(&repository_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("清理 Worktree", error))?
+}
+
+#[tauri::command]
+pub async fn initialize_repository_submodule(
+    repository_path: String,
+    submodule_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::initialize_repository_submodule(&repository_path, &submodule_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("初始化 Submodule", error))?
+}
+
+#[tauri::command]
+pub async fn update_repository_submodule(
+    repository_path: String,
+    submodule_path: Option<String>,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::update_repository_submodule(&repository_path, submodule_path.as_deref())?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("更新 Submodule", error))?
+}
+
+#[tauri::command]
+pub async fn sync_repository_submodules(repository_path: String) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::sync_repository_submodules(&repository_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("同步 Submodule URL", error))?
+}
+
+#[tauri::command]
+pub async fn deinitialize_repository_submodule(
+    repository_path: String,
+    submodule_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::deinitialize_repository_submodule(&repository_path, &submodule_path)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("取消初始化 Submodule", error))?
+}
+
+#[tauri::command]
 pub async fn create_repository_stash(
     repository_path: String,
     message: String,

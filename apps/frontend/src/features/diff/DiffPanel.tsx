@@ -4,8 +4,10 @@ import { ContextMenu } from '../../components/ContextMenu'
 import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile } from '../../repository'
 import { DiffFileList } from './DiffFileList'
 import { HighlightedCode } from './HighlightedCode'
+import { buildDiffContextEntries, type DiffContextEntry } from './diffContext'
 
 type SplitDiffRow = { left?: RepositoryDiffLine; right?: RepositoryDiffLine }
+type SplitDiffEntry = { kind: 'row'; row: SplitDiffRow } | { kind: 'omitted'; count: number }
 export type DiffLineSide = 'old' | 'new'
 type PendingDiffJump = { edge: 'first' | 'last'; direction: -1 | 1; remaining: number }
 
@@ -47,6 +49,37 @@ function buildSplitRows(rows: RepositoryDiffLine[]): SplitDiffRow[] {
   return result
 }
 
+function buildSplitEntries(entries: DiffContextEntry[]): SplitDiffEntry[] {
+  const result: SplitDiffEntry[] = []
+  let buffer: RepositoryDiffLine[] = []
+  const flush = () => {
+    if (!buffer.length) return
+    buildSplitRows(buffer).forEach((row) => result.push({ kind: 'row', row }))
+    buffer = []
+  }
+  entries.forEach((entry) => {
+    if (entry.kind === 'omitted') {
+      flush()
+      result.push(entry)
+    } else {
+      buffer.push(entry.row)
+    }
+  })
+  flush()
+  return result
+}
+
+function unifiedEntryRow(entries: DiffContextEntry[], index: number) {
+  const entry = entries[index]
+  return entry?.kind === 'line' ? entry.row : undefined
+}
+
+function splitEntryRow(entries: SplitDiffEntry[], index: number, side: DiffLineSide) {
+  const entry = entries[index]
+  if (entry?.kind !== 'row') return undefined
+  return side === 'old' ? entry.row.left : entry.row.right
+}
+
 type DiffPanelProps = {
   files: RepositoryFile[]
   repositoryPath?: string
@@ -67,7 +100,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [activeFile, setActiveFile] = useState(initialFile)
   const [view, setView] = useState<'unified' | 'split'>('unified')
   const [scope, setScope] = useState<'file' | 'changes'>('changes')
-  const [fileMode, setFileMode] = useState<'list' | 'tree'>('tree')
+  const [fileMode, setFileMode] = useState<'list' | 'tree'>('list')
   const [repositoryRows, setRepositoryRows] = useState<RepositoryDiffLine[]>([])
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
@@ -140,29 +173,32 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const activeFileInfo = files[activeFile]
   const usesLoader = Boolean(loadRows || repositoryPath)
   const sourceRows = usesLoader ? repositoryRows : (activeFileInfo ? (fallbackRows[activeFileInfo.path] ?? fallbackChangeRows) : EMPTY_DIFF_ROWS)
-  const rowsToRender = useMemo(() => scope === 'file' ? sourceRows : sourceRows.filter((row) => row.kind !== 'same'), [scope, sourceRows])
+  const contextEntries = useMemo(() => buildDiffContextEntries(sourceRows), [sourceRows])
+  const unifiedEntries = useMemo<DiffContextEntry[]>(() => scope === 'file'
+    ? sourceRows.map((row, sourceIndex) => ({ kind: 'line', row, sourceIndex }))
+    : contextEntries, [contextEntries, scope, sourceRows])
   const sourceSplitRows = useMemo(() => buildSplitRows(sourceRows), [sourceRows])
-  const splitRows = useMemo(() => scope === 'file' ? sourceSplitRows : sourceSplitRows.filter((row) => row.left?.kind !== 'same' || row.right?.kind !== 'same'), [scope, sourceSplitRows])
+  const splitEntries = useMemo<SplitDiffEntry[]>(() => scope === 'file'
+    ? sourceSplitRows.map((row) => ({ kind: 'row', row }))
+    : buildSplitEntries(contextEntries), [contextEntries, scope, sourceSplitRows])
   const changeIndices = useMemo(() => {
     const targets: number[] = []
     if (view === 'unified') {
-      let renderedIndex = -1
-      sourceRows.forEach((row, sourceIndex) => {
-        if (scope === 'file' || row.kind !== 'same') renderedIndex += 1
-        if (row.kind !== 'same' && (sourceIndex === 0 || sourceRows[sourceIndex - 1].kind === 'same')) targets.push(renderedIndex)
+      unifiedEntries.forEach((entry, renderedIndex) => {
+        if (entry.kind === 'line' && entry.row.kind !== 'same' && (entry.sourceIndex === 0 || sourceRows[entry.sourceIndex - 1]?.kind === 'same')) targets.push(renderedIndex)
       })
       return targets
     }
-    let renderedIndex = -1
-    sourceSplitRows.forEach((row, sourceIndex) => {
-      const same = row.left?.kind === 'same' && row.right?.kind === 'same'
-      if (scope === 'file' || !same) renderedIndex += 1
-      const previous = sourceSplitRows[sourceIndex - 1]
-      const previousSame = !previous || (previous.left?.kind === 'same' && previous.right?.kind === 'same')
+    splitEntries.forEach((entry, renderedIndex) => {
+      if (entry.kind !== 'row') return
+      const same = entry.row.left?.kind === 'same' && entry.row.right?.kind === 'same'
+      const previous = splitEntries[renderedIndex - 1]
+      const previousSame = !previous || previous.kind === 'omitted' || (previous.row.left?.kind === 'same' && previous.row.right?.kind === 'same')
       if (!same && previousSame) targets.push(renderedIndex)
     })
     return targets
-  }, [scope, sourceRows, sourceSplitRows, view])
+  }, [sourceRows, splitEntries, unifiedEntries, view])
+  const visibleEntryCount = view === 'unified' ? unifiedEntries.length : splitEntries.length
   useEffect(() => {
     setLineMenu(null)
     setActiveChange(null)
@@ -234,20 +270,26 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     <div className={`diff-body ${hideFileList ? 'code-only' : ''}`}>
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile}/>} 
       <div className={`code-diff ${view}`}>
-        <div className="file-header"><div><ChevronDown size={14}/><code>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
+        <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><ChevronDown size={14}/><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
         {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
         {diffLoading && <div className="diff-message">正在读取 Diff…</div>}
         {diffError && <div className="diff-message error">{diffError}</div>}
-        {!diffLoading && !diffError && rowsToRender.length === 0 && <div className="diff-message">该文件没有可展示的文本差异</div>}
-        {!diffLoading && !diffError && view === 'unified' && rowsToRender.map((row, index) => { const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; return <div data-diff-row-index={index} className={`code-row ${row.kind} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row, index, side)} title="右键查看该行历史">
+        {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">该文件没有可展示的文本差异</div>}
+        {!diffLoading && !diffError && view === 'unified' && unifiedEntries.map((entry, index) => entry.kind === 'omitted'
+          ? <div className="hunk diff-omitted" key={`omitted-${index}`}>省略 {entry.count} 行未修改源码</div>
+          : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; return <div data-diff-row-index={index} className={`code-row ${row.kind} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row, index, side)} title="右键查看该行历史">
           <span className="line-no">{row.old ?? row.next ?? ''}</span><span className="change-sign">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</span><HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/>
-        </div> })}
+        </div> })())}
         {!diffLoading && !diffError && view === 'split' && <div className="split-diff-panes">
-          <div className="split-diff-pane split-left" aria-label="旧版本代码"><div className="split-diff-content">{splitRows.map((row, index) => <div data-diff-row-index={index} className={`split-code-side ${row.left?.kind ?? 'empty'} ${lineMenu?.rowIndex === index && lineMenu.side === 'old' ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row.left, index, 'old')} title={row.left ? '右键查看该行历史' : undefined}><span className="line-no">{row.left?.old ?? ''}</span><span className="change-sign">{row.left?.kind === 'del' ? '−' : ''}</span>{row.left ? <HighlightedCode code={row.left.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div>)}</div></div>
-          <div className="split-diff-pane split-right" aria-label="新版本代码"><div className="split-diff-content">{splitRows.map((row, index) => <div data-diff-row-index={index} className={`split-code-side ${row.right?.kind ?? 'empty'} ${lineMenu?.rowIndex === index && lineMenu.side === 'new' ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row.right, index, 'new')} title={row.right ? '右键查看该行历史' : undefined}><span className="line-no">{row.right?.next ?? ''}</span><span className="change-sign">{row.right?.kind === 'add' ? '+' : ''}</span>{row.right ? <HighlightedCode code={row.right.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div>)}</div></div>
+          <div className="split-diff-pane split-left" aria-label="旧版本代码"><div className="split-diff-content">{splitEntries.map((entry, index) => entry.kind === 'omitted'
+            ? <div className="hunk diff-omitted" key={`omitted-left-${index}`}>省略 {entry.count} 行未修改源码</div>
+            : <div data-diff-row-index={index} className={`split-code-side ${entry.row.left?.kind ?? 'empty'} ${lineMenu?.rowIndex === index && lineMenu.side === 'old' ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, entry.row.left, index, 'old')} title={entry.row.left ? '右键查看该行历史' : undefined}><span className="line-no">{entry.row.left?.old ?? ''}</span><span className="change-sign">{entry.row.left?.kind === 'del' ? '−' : ''}</span>{entry.row.left ? <HighlightedCode code={entry.row.left.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div>)}</div></div>
+          <div className="split-diff-pane split-right" aria-label="新版本代码"><div className="split-diff-content">{splitEntries.map((entry, index) => entry.kind === 'omitted'
+            ? <div className="hunk diff-omitted" key={`omitted-right-${index}`}>省略 {entry.count} 行未修改源码</div>
+            : <div data-diff-row-index={index} className={`split-code-side ${entry.row.right?.kind ?? 'empty'} ${lineMenu?.rowIndex === index && lineMenu.side === 'new' ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, entry.row.right, index, 'new')} title={entry.row.right ? '右键查看该行历史' : undefined}><span className="line-no">{entry.row.right?.next ?? ''}</span><span className="change-sign">{entry.row.right?.kind === 'add' ? '+' : ''}</span>{entry.row.right ? <HighlightedCode code={entry.row.right.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div>)}</div></div>
         </div>}
       </div>
     </div>
-    {lineMenu && activeFileInfo && <ContextMenu x={lineMenu.x} y={lineMenu.y} onClose={() => setLineMenu(null)}><div className="context-menu-title"><FileCode2 size={13}/><span>{activeFileInfo.path}:{lineMenu.line} · {lineMenu.side === 'old' ? '旧版本' : '新版本'}</span></div>{onOpenLineHistory && <button onClick={() => { const row = view === 'unified' ? rowsToRender[lineMenu.rowIndex] : lineMenu.side === 'old' ? splitRows[lineMenu.rowIndex]?.left : splitRows[lineMenu.rowIndex]?.right; if (row) onOpenLineHistory(activeFileInfo.path, lineMenu.line, lineMenu.side, row); setLineMenu(null) }}><History size={14}/><span>查看第 {lineMenu.line} 行历史</span></button>}<button onClick={() => { navigator.clipboard?.writeText(lineMenu.code).catch(() => undefined); setLineMenu(null) }}><Copy size={14}/><span>复制本行内容</span></button></ContextMenu>}
+    {lineMenu && activeFileInfo && <ContextMenu x={lineMenu.x} y={lineMenu.y} onClose={() => setLineMenu(null)}><div className="context-menu-title"><FileCode2 size={13}/><span>{activeFileInfo.path}:{lineMenu.line} · {lineMenu.side === 'old' ? '旧版本' : '新版本'}</span></div>{onOpenLineHistory && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onOpenLineHistory(activeFileInfo.path, lineMenu.line, lineMenu.side, row); setLineMenu(null) }}><History size={14}/><span>查看第 {lineMenu.line} 行历史</span></button>}<button onClick={() => { navigator.clipboard?.writeText(lineMenu.code).catch(() => undefined); setLineMenu(null) }}><Copy size={14}/><span>复制本行内容</span></button></ContextMenu>}
   </section>
 }

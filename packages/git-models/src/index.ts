@@ -145,6 +145,7 @@ export type RepositoryBranchTracking = {
 export type RepositorySnapshot = {
   name: string
   path: string
+  superprojectPath?: string
   branch: string
   remote?: string
   ahead: number

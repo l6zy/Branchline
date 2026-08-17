@@ -5,8 +5,11 @@ import {
   pickAndLoadRepository,
   type RepositorySnapshot,
 } from '../../repository'
+import { selectStartupRepository, type RecentRepository } from './repositoryPersistence'
+import { repositoryParentFromSnapshot, type RepositoryParent } from './repositoryParents'
 
 const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
+const STARTUP_REPOSITORY_KEY = 'branchline.startupRepository.v1'
 const AUTO_FETCH_SETTINGS_KEY = 'branchline.autoFetchSettings.v1'
 const NOTICE_DURATION = 5 * 1000
 
@@ -22,18 +25,9 @@ const DEFAULT_AUTO_FETCH_SETTINGS: AutoFetchSettings = {
 
 const AUTO_FETCH_INTERVALS = [1, 5, 10, 15, 30]
 
-export type RecentRepository = {
-  name: string
-  path: string
-  branch: string
-  openedAt: number
-}
+export type { RecentRepository } from './repositoryPersistence'
 
-export type RepositoryParent = {
-  name: string
-  path: string
-  branch: string
-}
+export type { RepositoryParent } from './repositoryParents'
 
 function readRecentRepositories(): RecentRepository[] {
   try {
@@ -41,6 +35,14 @@ function readRecentRepositories(): RecentRepository[] {
     return value ? JSON.parse(value) as RecentRepository[] : []
   } catch {
     return []
+  }
+}
+
+function readStartupRepositoryPath() {
+  try {
+    return window.localStorage.getItem(STARTUP_REPOSITORY_KEY)
+  } catch {
+    return null
   }
 }
 
@@ -121,29 +123,41 @@ export function useRepositoryWorkspace() {
   }, [repositoryNotice, startNoticeTimer])
 
   const rememberRepository = useCallback((snapshot: RepositorySnapshot) => {
+    try {
+      window.localStorage.setItem(STARTUP_REPOSITORY_KEY, snapshot.path)
+    } catch {
+      // The current session still works when browser storage is unavailable.
+    }
     setRecentRepositories((current) => {
       const next = [
         { name: snapshot.name, path: snapshot.path, branch: snapshot.branch, openedAt: Date.now() },
         ...current.filter((item) => item.path.toLowerCase() !== snapshot.path.toLowerCase()),
-      ].slice(0, 12)
-      window.localStorage.setItem(RECENT_REPOSITORIES_KEY, JSON.stringify(next))
+      ].slice(0, 50)
+      try {
+        window.localStorage.setItem(RECENT_REPOSITORIES_KEY, JSON.stringify(next))
+      } catch {
+        // Keep the in-memory list usable when browser storage is unavailable.
+      }
       return next
     })
   }, [])
 
   const applySnapshot = useCallback((snapshot: RepositorySnapshot, notice?: string) => {
     setRepository(snapshot)
-    rememberRepository(snapshot)
     if (notice) setRepositoryNotice(notice)
-  }, [rememberRepository])
+  }, [setRepositoryNotice])
 
   const openRepositoryPath = useCallback(async (path: string, preserveTrail = false) => {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
       const snapshot = await loadRepository(path)
-      if (!preserveTrail) setRepositoryTrail([])
+      if (!preserveTrail) {
+        const parent = repositoryParentFromSnapshot(snapshot)
+        setRepositoryTrail(parent ? [parent] : [])
+      }
       applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
+      rememberRepository(snapshot)
       return snapshot
     } catch (error) {
       setRepositoryNotice(error instanceof Error ? error.message : String(error))
@@ -151,7 +165,7 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot])
+  }, [applySnapshot, rememberRepository])
 
   const openSubmodulePath = useCallback(async (path: string) => {
     setOpeningRepository(true)
@@ -182,7 +196,12 @@ export function useRepositoryWorkspace() {
     setRepositoryNotice(null)
     try {
       const snapshot = await loadRepository(parent.path)
-      setRepositoryTrail((current) => current.slice(0, -1))
+      setRepositoryTrail((current) => {
+        const remaining = current.slice(0, -1)
+        if (remaining.length) return remaining
+        const detectedParent = repositoryParentFromSnapshot(snapshot)
+        return detectedParent ? [detectedParent] : []
+      })
       applySnapshot(snapshot, `已返回父仓库：${snapshot.name}`)
       return snapshot
     } catch (error) {
@@ -199,8 +218,10 @@ export function useRepositoryWorkspace() {
     try {
       const snapshot = await pickAndLoadRepository()
       if (!snapshot) return null
-      setRepositoryTrail([])
+      const parent = repositoryParentFromSnapshot(snapshot)
+      setRepositoryTrail(parent ? [parent] : [])
       applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
+      rememberRepository(snapshot)
       return snapshot
     } catch (error) {
       setRepositoryNotice(error instanceof Error ? error.message : String(error))
@@ -208,12 +229,12 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot])
+  }, [applySnapshot, rememberRepository])
 
   useEffect(() => {
     if (initialRestoreStarted.current) return
     initialRestoreStarted.current = true
-    const previousRepository = recentRepositories[0]
+    const previousRepository = selectStartupRepository(recentRepositories, readStartupRepositoryPath())
     if (!previousRepository) {
       setOpeningRepository(false)
       return
@@ -221,15 +242,17 @@ export function useRepositoryWorkspace() {
     setOpeningRepository(true)
     loadRepository(previousRepository.path)
       .then((snapshot) => {
-        setRepositoryTrail([])
+        const parent = repositoryParentFromSnapshot(snapshot)
+        setRepositoryTrail(parent ? [parent] : [])
         applySnapshot(snapshot)
+        rememberRepository(snapshot)
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error)
         setRepositoryNotice(`无法重新打开上次仓库：${message}`)
       })
       .finally(() => setOpeningRepository(false))
-  }, [applySnapshot, recentRepositories, setRepositoryNotice])
+  }, [applySnapshot, recentRepositories, rememberRepository, setRepositoryNotice])
 
   const fetchNow = useCallback(async (quiet = false) => {
     if (!repository || fetchInProgress.current) return null
@@ -238,7 +261,6 @@ export function useRepositoryWorkspace() {
     try {
       const snapshot = await fetchRepository(repository.path)
       setRepository(snapshot)
-      rememberRepository(snapshot)
       setLastFetchAt(Date.now())
       if (!quiet) setRepositoryNotice('Fetch 完成，远程引用已更新')
       return snapshot
@@ -249,7 +271,7 @@ export function useRepositoryWorkspace() {
       fetchInProgress.current = false
       setFetching(false)
     }
-  }, [rememberRepository, repository])
+  }, [repository])
 
   useEffect(() => {
     if (!repository || !autoFetchSettings.enabled) return

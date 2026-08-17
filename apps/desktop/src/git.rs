@@ -706,20 +706,34 @@ pub fn parse_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String>
 }
 
 fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
-    let value = git_output_owned(
+    let object = git_output_owned(
         path,
         &[
             "rev-parse".into(),
             "--verify".into(),
-            format!("{reference}^{{commit}}"),
+            "--end-of-options".into(),
+            reference.into(),
         ],
     )?
     .trim()
     .to_string();
-    if value.len() != 40 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if object.len() != 40 || !object.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(format!("无效的提交或分支：{reference}"));
     }
-    Ok(value)
+    let commit = git_output_owned(
+        path,
+        &[
+            "rev-parse".into(),
+            "--verify".into(),
+            format!("{object}^{{commit}}"),
+        ],
+    )?
+    .trim()
+    .to_string();
+    if commit.len() != 40 || !commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!("无效的提交或分支：{reference}"));
+    }
+    Ok(commit)
 }
 
 pub fn parse_compare_diff(
@@ -813,6 +827,159 @@ fn parse_submodules(path: &Path) -> Vec<RepositorySubmodule> {
             })
         })
         .collect()
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn worktree_entry<'a>(root: &Path, requested_path: &str, worktrees: &'a [RepositoryWorktree]) -> Result<&'a RepositoryWorktree, String> {
+    let requested = PathBuf::from(requested_path.trim());
+    let requested = if requested.is_absolute() { requested } else { root.join(requested) };
+    let key = normalized_path_key(&requested);
+    worktrees
+        .iter()
+        .find(|worktree| normalized_path_key(Path::new(&worktree.path)) == key)
+        .ok_or_else(|| format!("Worktree 不存在：{}", requested.display()))
+}
+
+fn validated_submodule_path(root: &Path, requested_path: &str) -> Result<String, String> {
+    let requested = requested_path
+        .trim()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string();
+    if requested.is_empty() {
+        return Err("Submodule 路径不能为空".into());
+    }
+    parse_submodules(root)
+        .into_iter()
+        .find(|submodule| submodule.path.replace('\\', "/") == requested)
+        .map(|submodule| submodule.path)
+        .ok_or_else(|| format!("Submodule 不存在：{requested}"))
+}
+
+pub fn create_repository_worktree(
+    repository_path: &str,
+    worktree_path: &str,
+    branch: &str,
+    create_branch: bool,
+) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let requested = worktree_path.trim();
+    if requested.is_empty() {
+        return Err("Worktree 目录不能为空".into());
+    }
+    let destination = PathBuf::from(requested);
+    let destination = if destination.is_absolute() { destination } else { root.join(destination) };
+    if parse_worktrees(&root).iter().any(|worktree| {
+        normalized_path_key(Path::new(&worktree.path)) == normalized_path_key(&destination)
+    }) {
+        return Err(format!("该目录已经是 Worktree：{}", destination.display()));
+    }
+
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("Worktree 分支不能为空".into());
+    }
+    git_output_owned(
+        &root,
+        &["check-ref-format".into(), "--branch".into(), branch.into()],
+    )?;
+    let branch_exists = parse_local_branches(&root).iter().any(|item| item == branch);
+    if create_branch && branch_exists {
+        return Err(format!("分支已存在：{branch}"));
+    }
+    if !create_branch && !branch_exists {
+        return Err(format!("本地分支不存在：{branch}"));
+    }
+
+    let mut args = vec!["worktree".into(), "add".into()];
+    if create_branch {
+        args.extend(["-b".into(), branch.into()]);
+    }
+    args.push(destination.to_string_lossy().to_string());
+    args.push(if create_branch { "HEAD".into() } else { branch.into() });
+    git_output_owned(&root, &args).map(|_| ())
+}
+
+pub fn remove_repository_worktree(repository_path: &str, worktree_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let worktrees = parse_worktrees(&root);
+    let worktree = worktree_entry(&root, worktree_path, &worktrees)?;
+    if normalized_path_key(Path::new(&worktree.path)) == normalized_path_key(&root) {
+        return Err("不能移除当前 Worktree".into());
+    }
+    git_output_owned(
+        &root,
+        &["worktree".into(), "remove".into(), worktree.path.clone()],
+    )
+    .map(|_| ())
+}
+
+pub fn set_repository_worktree_lock(repository_path: &str, worktree_path: &str, locked: bool) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let worktrees = parse_worktrees(&root);
+    let worktree = worktree_entry(&root, worktree_path, &worktrees)?;
+    let args = if locked {
+        vec![
+            "worktree".into(),
+            "lock".into(),
+            "--reason".into(),
+            "Branchline".into(),
+            worktree.path.clone(),
+        ]
+    } else {
+        vec!["worktree".into(), "unlock".into(), worktree.path.clone()]
+    };
+    git_output_owned(&root, &args).map(|_| ())
+}
+
+pub fn prune_repository_worktrees(repository_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    git_output(&root, &["worktree", "prune"]).map(|_| ())
+}
+
+pub fn initialize_repository_submodule(repository_path: &str, submodule_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let submodule = validated_submodule_path(&root, submodule_path)?;
+    git_output_owned(
+        &root,
+        &["submodule".into(), "init".into(), "--".into(), submodule],
+    )
+    .map(|_| ())
+}
+
+pub fn update_repository_submodule(repository_path: &str, submodule_path: Option<&str>) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let mut args = vec![
+        "submodule".into(),
+        "update".into(),
+        "--init".into(),
+        "--recursive".into(),
+    ];
+    if let Some(submodule_path) = submodule_path {
+        args.extend(["--".into(), validated_submodule_path(&root, submodule_path)?]);
+    }
+    git_output_owned(&root, &args).map(|_| ())
+}
+
+pub fn sync_repository_submodules(repository_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    git_output(&root, &["submodule", "sync", "--recursive"]).map(|_| ())
+}
+
+pub fn deinitialize_repository_submodule(repository_path: &str, submodule_path: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let submodule = validated_submodule_path(&root, submodule_path)?;
+    git_output_owned(
+        &root,
+        &["submodule".into(), "deinit".into(), "--".into(), submodule],
+    )
+    .map(|_| ())
 }
 
 fn parse_branches(path: &Path) -> Vec<String> {
@@ -962,6 +1129,17 @@ fn parse_commit_template(path: &Path) -> Option<RepositoryCommitTemplate> {
         path: resolved.to_string_lossy().to_string(),
         content: std::fs::read_to_string(&resolved).unwrap_or_default(),
     })
+}
+
+fn superproject_working_tree(path: &Path) -> Option<String> {
+    let value = optional_git_output(path, &["rev-parse", "--show-superproject-working-tree"])
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        return None;
+    }
+    let resolved = std::fs::canonicalize(&value).unwrap_or_else(|_| PathBuf::from(value));
+    Some(resolved.to_string_lossy().to_string())
 }
 
 pub fn repository_root(selected_path: &str) -> Result<PathBuf, String> {
@@ -1219,7 +1397,8 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
                         )
                     })
                     .unwrap_or((0, 0));
-                (branch, remote, ahead, behind)
+                let superproject_path = superproject_working_tree(root_path);
+                (branch, remote, ahead, behind, superproject_path)
             });
             let commits = scope.spawn(|| parse_commits(root_path));
             let files = scope.spawn(|| {
@@ -1256,13 +1435,14 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
                     .expect("commit template task panicked"),
             )
         });
-    let (branch, remote_text, ahead, behind) = metadata;
+    let (branch, remote_text, ahead, behind, superproject_path) = metadata;
     let (worktrees, submodules) = structure;
     let (branches, remote_branches, branch_tracking, tags) = refs;
 
     Ok(RepositorySnapshot {
         name,
         path: root_text.to_string(),
+        superproject_path,
         branch,
         remote: (!remote_text.is_empty()).then_some(remote_text),
         ahead,
@@ -3113,6 +3293,40 @@ mod tests {
     }
 
     #[test]
+    fn reports_the_immediate_superproject_for_a_submodule() {
+        let repository = test_repository();
+        let submodule_source = test_repository();
+        let source_path = submodule_source.0.to_string_lossy().to_string();
+        git_output(
+            &repository.0,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &source_path,
+                "vendor/module",
+            ],
+        )
+        .expect("add test submodule");
+
+        let submodule_path = repository.0.join("vendor/module");
+        let snapshot = read_repository(&submodule_path.to_string_lossy()).expect("read submodule");
+        let expected_parent = repository
+            .0
+            .canonicalize()
+            .expect("canonical parent")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let actual_parent = snapshot
+            .superproject_path
+            .expect("submodule should expose its superproject")
+            .replace('\\', "/");
+
+        assert_eq!(actual_parent, expected_parent);
+    }
+
+    #[test]
     fn supports_branch_compare_merge_queue_tags_and_stashes() {
         let repository = test_repository();
         let path = repository.0.to_string_lossy().to_string();
@@ -3206,6 +3420,83 @@ mod tests {
             .expect("read dropped stash")
             .stashes
             .is_empty());
+    }
+
+    #[test]
+    fn loads_stash_without_untracked_parent() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+
+        fs::write(repository.0.join("README.md"), "first\ntracked stash\n")
+            .expect("write tracked stash change");
+        create_repository_stash(&path, "仅跟踪文件", false).expect("create tracked-only stash");
+        assert!(git_output(&repository.0, &["rev-parse", "--verify", "stash@{0}^3"]).is_err());
+
+        let files = load_stash_files(&path, "stash@{0}").expect("load tracked-only stash files");
+        assert!(files.iter().any(|file| file.path == "README.md"));
+        assert!(!load_stash_file_diff(&path, "stash@{0}", "README.md")
+            .expect("load tracked-only stash diff")
+            .is_empty());
+    }
+
+    #[test]
+    fn manages_repository_worktree_lifecycle() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let worktree_path = repository.0.with_extension("linked-worktree");
+        let worktree = worktree_path.to_string_lossy().to_string();
+
+        create_repository_worktree(&path, &worktree, "feat/linked", true)
+            .expect("create linked worktree");
+        assert!(parse_worktrees(&repository.0)
+            .iter()
+            .any(|item| normalized_path_key(Path::new(&item.path)) == normalized_path_key(&worktree_path) && item.branch.as_deref() == Some("feat/linked")));
+
+        set_repository_worktree_lock(&path, &worktree, true).expect("lock linked worktree");
+        assert!(parse_worktrees(&repository.0)
+            .iter()
+            .find(|item| normalized_path_key(Path::new(&item.path)) == normalized_path_key(&worktree_path))
+            .and_then(|item| item.locked.as_ref())
+            .is_some());
+        set_repository_worktree_lock(&path, &worktree, false).expect("unlock linked worktree");
+        assert!(remove_repository_worktree(&path, &path).is_err());
+
+        remove_repository_worktree(&path, &worktree).expect("remove linked worktree");
+        prune_repository_worktrees(&path).expect("prune linked worktrees");
+        assert!(!worktree_path.exists());
+    }
+
+    #[test]
+    fn manages_repository_submodule_lifecycle() {
+        let repository = test_repository();
+        let submodule_source = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let source_path = submodule_source.0.to_string_lossy().to_string();
+        git_output(
+            &repository.0,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &source_path,
+                "vendor/module",
+            ],
+        )
+        .expect("add lifecycle submodule");
+        git_output(&repository.0, &["commit", "-am", "添加生命周期 Submodule"])
+            .expect("commit lifecycle submodule");
+        git_output(&repository.0, &["config", "protocol.file.allow", "always"])
+            .expect("allow local submodule update");
+
+        deinitialize_repository_submodule(&path, "vendor/module")
+            .expect("deinitialize submodule");
+        assert_eq!(parse_submodules(&repository.0)[0].status, "uninitialized");
+        initialize_repository_submodule(&path, "vendor/module").expect("initialize submodule");
+        update_repository_submodule(&path, Some("vendor/module")).expect("update submodule");
+        assert_eq!(parse_submodules(&repository.0)[0].status, "ok");
+        sync_repository_submodules(&path).expect("sync submodules");
+        assert!(initialize_repository_submodule(&path, "vendor/missing").is_err());
     }
 
     #[test]

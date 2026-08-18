@@ -21,7 +21,7 @@ import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './fea
 import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, visibleHistoryCommits, type HistorySearchMode } from './features/history/historySearch'
-import { createWorkingTreeCommit, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
+import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
 import { formatLocalDateTime } from './dateTime'
 import { isBooleanRecord, usePersistentState } from './persistentState'
 import {
@@ -660,7 +660,7 @@ export default function App() {
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
   const workingTreeCommit = repository
-    ? createWorkingTreeCommit(repository.files, repository.commits[0]?.fullHash)
+    ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository))
     : null
   const activeCommits: Commit[] = workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]

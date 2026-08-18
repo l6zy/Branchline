@@ -1,4 +1,4 @@
-import type { RepositoryFile } from '../../repository'
+import type { RepositoryFile, RepositorySnapshot } from '../../repository'
 
 export const WORKING_TREE_COMMIT_ID = '__branchline_working_tree__'
 
@@ -16,6 +16,19 @@ export type WorkingTreeCommit = {
   files: number
   additions: number
   deletions: number
+}
+
+type WorkingTreeRepository = Pick<RepositorySnapshot, 'path' | 'branch' | 'commits' | 'worktrees'>
+
+function comparablePath(path: string) {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLocaleLowerCase()
+}
+
+export function resolveWorkingTreeParent(repository: WorkingTreeRepository) {
+  const currentWorktree = repository.worktrees.find((worktree) => worktree.branch === repository.branch)
+    ?? repository.worktrees.find((worktree) => comparablePath(worktree.path) === comparablePath(repository.path))
+  return currentWorktree?.head
+    ?? repository.commits.find((commit) => commit.branches?.includes(repository.branch))?.fullHash
 }
 
 export function createWorkingTreeCommit(files: RepositoryFile[], headHash?: string): WorkingTreeCommit | null {

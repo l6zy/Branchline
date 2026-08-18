@@ -65,6 +65,13 @@ pub async fn load_repository(path: String) -> Result<RepositorySnapshot, String>
 }
 
 #[tauri::command]
+pub async fn load_repository_state_token(repository_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git::repository_state_token(&repository_path))
+        .await
+        .map_err(|error| task_error("检查仓库状态", error))?
+}
+
+#[tauri::command]
 pub async fn load_file_diff(
     repository_path: String,
     file_path: String,

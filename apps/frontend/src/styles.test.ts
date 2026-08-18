@@ -2,23 +2,37 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+const tokens = readFileSync(new URL('./styles/tokens.css', import.meta.url), 'utf8')
+const components = readFileSync(new URL('./styles/components.css', import.meta.url), 'utf8')
+const themeOverrides = readFileSync(new URL('./styles/theme-overrides.css', import.meta.url), 'utf8')
 
-describe('light danger button styles', () => {
-  it('keeps destructive buttons red when they also use the secondary-button class', () => {
-    expect(styles).toContain('.theme-light .danger-button, .theme-light .secondary-button.danger { color: #ffffff; border-color: #ff7875; background: #ff7875;')
-    expect(styles).toContain('.theme-light .danger-button:hover:not(:disabled), .theme-light .secondary-button.danger:hover:not(:disabled) { color: #ffffff; border-color: #ff4d4f; background: #ff4d4f; transform: translateY(-1px);')
+describe('semantic style architecture', () => {
+  it('loads styles through explicit cascade layers', () => {
+    expect(styles).toContain('@layer tokens, base, layout, components, features, theme-overrides;')
+    expect(styles).toContain("@import './styles/tokens.css' layer(tokens);")
+    expect(styles).toContain("@import './styles/theme-overrides.css' layer(theme-overrides);")
   })
 
-  it('gives secondary actions the same visible hover feedback in the dark theme', () => {
-    expect(styles).toContain('.fetch-button:hover:not(:disabled), .secondary-button:hover:not(:disabled), .filter-button:hover:not(:disabled) { color: #e6f4ff; border-color: #4a6f91; background: #253848; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.28); }')
-    expect(styles).toContain('.primary-button:hover:not(:disabled) { border-color: #4096ff; background: #4096ff; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0,0,0,.28); }')
+  it('defines theme-independent semantic tokens for controls and surfaces', () => {
+    expect(tokens).toContain('--surface-control:')
+    expect(tokens).toContain('--surface-hover:')
+    expect(tokens).toContain('--text-on-accent:')
+    expect(tokens).toContain('--danger-solid:')
+    expect(tokens).toContain('--danger-hover:')
   })
 
-  it('uses readable text for secondary actions in the light theme', () => {
-    expect(styles).toContain('.theme-light .secondary-button { color: #1f1f1f; border-color: #d5dce5; background: #ffffff; }')
+  it('keeps shared button behavior in the owning component layer', () => {
+    expect(components).toContain('.button-secondary, .button-primary, .button-danger')
+    expect(components).toContain('.button-icon {')
+    expect(components).toContain('color: var(--text-secondary);')
+    expect(components).toContain('background: var(--surface-control);')
+    expect(components).toContain('background: var(--danger-solid);')
+    expect(components).toContain('background: var(--danger-hover);')
   })
 
-  it('keeps filter controls blue on hover in the light theme', () => {
-    expect(styles).toContain('.theme-light .filter-button:hover:not(:disabled) { color: #0958d9; border-color: #91caff; background: #f4f7fb; }')
+  it('does not duplicate common controls in the light-theme exception layer', () => {
+    expect(themeOverrides).not.toContain('.theme-light .button-secondary')
+    expect(themeOverrides).not.toContain('.theme-light .button-danger')
+    expect(themeOverrides).not.toContain('.theme-light .fetch-button')
   })
 })

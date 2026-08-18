@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch, X } from 'lucide-react'
+import { Button } from '../../components/Button'
 
 type CreateBranchDialogProps = {
   open: boolean
@@ -52,12 +53,12 @@ export function CreateBranchDialog({ open, prefix, currentBranch, onClose, onCre
 
   return <div className="modal-backdrop" onPointerDown={() => { if (!submitting) onClose() }}>
     <section className="branch-dialog" role="dialog" aria-modal="true" aria-labelledby="create-branch-title" onPointerDown={(event) => event.stopPropagation()}>
-      <div className="branch-dialog-heading"><span className="branch-dialog-icon"><GitBranch size={18}/></span><div><h2 id="create-branch-title">创建分支</h2><p>基于当前分支 <strong>{currentBranch}</strong> 创建，完成后仍停留在当前分支。</p></div><button className="icon-button" onClick={onClose} disabled={submitting} title="关闭"><X size={17}/></button></div>
+      <div className="branch-dialog-heading"><span className="branch-dialog-icon"><GitBranch size={18}/></span><div><h2 id="create-branch-title">创建分支</h2><p>基于当前分支 <strong>{currentBranch}</strong> 创建，完成后仍停留在当前分支。</p></div><Button variant="icon" onClick={onClose} disabled={submitting} title="关闭"><X size={17}/></Button></div>
       <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
         <label htmlFor="new-branch-name">分支名称</label>
         <div className={`branch-name-input ${error && branch ? 'invalid' : ''}`}><GitBranch size={15}/><input ref={inputRef} id="new-branch-name" value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="例如 feat/1234" autoComplete="off" spellCheck={false}/></div>
         <div className="branch-dialog-hint">{error && branch ? <span className="error">{error}</span> : <span>支持使用斜杠整理分支，例如 feat/1234。</span>}</div>
-        <div className="branch-dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>取消</button><button type="submit" className="primary-button" disabled={Boolean(error) || submitting}><GitBranch size={14}/>{submitting ? '正在创建…' : '创建分支'}</button></div>
+        <div className="branch-dialog-actions"><Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>取消</Button><Button type="submit" variant="primary" disabled={Boolean(error) || submitting}><GitBranch size={14}/>{submitting ? '正在创建…' : '创建分支'}</Button></div>
       </form>
     </section>
   </div>

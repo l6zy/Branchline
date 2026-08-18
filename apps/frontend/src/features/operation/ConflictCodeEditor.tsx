@@ -11,6 +11,7 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, keymap, lineNumbers, WidgetType, type DecorationSet } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
+import { Button } from '../../components/Button'
 
 export type ConflictBlockRange = {
   index: number
@@ -267,6 +268,6 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
       {blocks.map((block) => <span className={`current${block.index === activeBlock ? ' active' : ''}`} key={`current-${block.index}`} style={overviewStyle(block.offset, block.currentEnd)}/>)}
       {blocks.map((block) => <span className={`incoming${block.index === activeBlock ? ' active' : ''}`} key={`incoming-${block.index}`} style={overviewStyle(block.separatorEnd, block.endOffset)}/>)}
     </div>
-    <button className="primary-button conflict-save-floating" type="button" onClick={onSave} disabled={disabled} title="保存合并结果"><Save size={14}/>{saveLabel}</button>
+    <Button variant="primary" className="conflict-save-floating" type="button" onClick={onSave} disabled={disabled} title="保存合并结果"><Save size={14}/>{saveLabel}</Button>
   </div>
 })

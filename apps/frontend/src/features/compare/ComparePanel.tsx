@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check, ChevronDown, GitBranch, GitCompareArrows, Play, RefreshCw, Search } from 'lucide-react'
 import { compareRepositoryRefs, loadRepositoryCompareFileDiff, type RepositoryComparison, type RepositorySnapshot } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
+import { Button } from '../../components/Button'
 
 type ReferenceSelectProps = {
   label: string
@@ -110,12 +111,12 @@ export function ComparePanel({ repository, initialBase, initialTarget, onNotice 
 
   if (!repository) return <section className="workspace-empty"><GitCompareArrows size={34}/><strong>比较分支或提交</strong><span>打开本地仓库后，可选择两个引用并查看完整 Diff。</span></section>
   return <section className="compare-panel workspace-page">
-    <div className="workspace-page-heading"><div><span className="eyebrow">Diff 比较</span><h2>比较两个分支或提交</h2><p>直接比较两端提交快照，显示目标引用相对基础引用的全部变化。</p></div><button className="secondary-button" onClick={() => void compare()} disabled={loading}><Play size={14}/>{loading ? '正在比较…' : '开始比较'}</button></div>
+    <div className="workspace-page-heading"><div><span className="eyebrow">Diff 比较</span><h2>比较两个分支或提交</h2><p>直接比较两端提交快照，显示目标引用相对基础引用的全部变化。</p></div><Button variant="secondary" onClick={() => void compare()} disabled={loading}><Play size={14}/>{loading ? '正在比较…' : '开始比较'}</Button></div>
     <div className="compare-controls">
       <ReferenceSelect label="基础引用" value={base} references={refs} localBranches={repository.branches} remoteBranches={repository.remoteBranches} onChange={(reference) => { setBase(reference); setComparison(null) }}/>
       <ArrowRight size={18}/>
       <ReferenceSelect label="目标引用" value={target} references={refs} localBranches={repository.branches} remoteBranches={repository.remoteBranches} onChange={(reference) => { setTarget(reference); setComparison(null) }}/>
-      <button className="icon-button compare-swap" title="交换比较方向" onClick={() => { setBase(target); setTarget(base); setComparison(null) }}><RefreshCw size={15}/></button>
+      <Button variant="icon" className="compare-swap" title="交换比较方向" onClick={() => { setBase(target); setTarget(base); setComparison(null) }}><RefreshCw size={15}/></Button>
     </div>
     {!comparison && <div className="workspace-hint"><GitCompareArrows size={28}/><strong>选择引用后开始比较</strong><span>支持本地分支、远程分支以及仓库中的提交引用。</span></div>}
     {comparison && <div className="comparison-result">

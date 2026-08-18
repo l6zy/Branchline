@@ -8,8 +8,11 @@ use crate::models::{
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
+    fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     process::Command,
+    time::UNIX_EPOCH,
 };
 
 #[cfg(target_os = "windows")]
@@ -1350,6 +1353,51 @@ fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
         conflicts,
         steps,
     })
+}
+
+pub fn repository_state_token(selected_path: &str) -> Result<String, String> {
+    let root = repository_root(selected_path)?;
+    let status = command_output_bytes(
+        &root,
+        [
+            "status",
+            "--porcelain=v1",
+            "--branch",
+            "-z",
+            "--untracked-files=all",
+        ],
+    )?;
+    let references = command_output_bytes(
+        &root,
+        [
+            "for-each-ref",
+            "--format=%(refname):%(objectname)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+            "refs/stash",
+        ],
+    )?;
+    let worktrees = command_output_bytes(&root, ["worktree", "list", "--porcelain"])?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    status.hash(&mut hasher);
+    references.hash(&mut hasher);
+    worktrees.hash(&mut hasher);
+
+    for record in status.split(|byte| *byte == 0).filter(|record| record.len() > 3) {
+        let relative_path = String::from_utf8_lossy(&record[3..]);
+        let path = root.join(relative_path.as_ref());
+        path.hash(&mut hasher);
+        if let Ok(metadata) = fs::metadata(path) {
+            metadata.len().hash(&mut hasher);
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(elapsed) = modified.duration_since(UNIX_EPOCH) {
+                    elapsed.as_nanos().hash(&mut hasher);
+                }
+            }
+        }
+    }
+    Ok(format!("{:016x}", hasher.finish()))
 }
 
 pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String> {
@@ -3169,6 +3217,26 @@ mod tests {
         git_output(&path, &["add", "README.md"]).expect("git add");
         git_output(&path, &["commit", "-m", "初始提交"]).expect("git commit");
         TestRepository(path)
+    }
+
+    #[test]
+    fn repository_state_token_changes_with_worktree_and_history() {
+        let repository = test_repository();
+        let clean = repository_state_token(&repository.0.to_string_lossy())
+            .expect("read clean repository token");
+
+        fs::write(repository.0.join("README.md"), "first\nsecond\n")
+            .expect("modify tracked file");
+        let modified = repository_state_token(&repository.0.to_string_lossy())
+            .expect("read modified repository token");
+        assert_ne!(modified, clean);
+
+        git_output(&repository.0, &["add", "README.md"]).expect("stage update");
+        git_output(&repository.0, &["commit", "-m", "second commit"])
+            .expect("commit update");
+        let committed = repository_state_token(&repository.0.to_string_lossy())
+            .expect("read committed repository token");
+        assert_ne!(committed, modified);
     }
 
     #[test]

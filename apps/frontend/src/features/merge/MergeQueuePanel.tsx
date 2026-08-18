@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Check, GitBranch, GitMerge, RefreshCw } from 'lucide-react'
 import { loadMergeQueue, type MergeQueueSnapshot, type RepositorySnapshot } from '../../repository'
+import { Button } from '../../components/Button'
 
 export function MergeQueuePanel({ repository, onNotice, onSwitchBranch }: { repository: RepositorySnapshot | null; onNotice: (message: string) => void; onSwitchBranch: (branch: string) => Promise<void> }) {
   const [queue, setQueue] = useState<MergeQueueSnapshot | null>(null)
@@ -20,7 +21,7 @@ export function MergeQueuePanel({ repository, onNotice, onSwitchBranch }: { repo
 
   if (!repository) return <section className="workspace-empty"><GitMerge size={34}/><strong>合并队列</strong><span>打开本地仓库后，可查看候选分支、领先/落后状态和冲突文件。</span></section>
   return <section className="merge-panel workspace-page">
-    <div className="workspace-page-heading"><div><span className="eyebrow">合并队列</span><h2>合并到 {repository.branch}</h2><p>按候选分支的新增提交数排序，已合并分支会单独标记。</p></div><button className="secondary-button" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''}/>{loading ? '刷新中…' : '刷新队列'}</button></div>
+    <div className="workspace-page-heading"><div><span className="eyebrow">合并队列</span><h2>合并到 {repository.branch}</h2><p>按候选分支的新增提交数排序，已合并分支会单独标记。</p></div><Button variant="secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw size={14} className={loading ? 'spin' : ''}/>{loading ? '刷新中…' : '刷新队列'}</Button></div>
     {queue?.conflicts.length ? <div className="conflict-card"><AlertTriangle size={17}/><div><strong>{queue.conflicts.length} 个未解决冲突</strong>{queue.conflicts.map((path) => <code key={path}>{path}</code>)}</div></div> : <div className="queue-healthy"><Check size={14}/>当前工作区没有未解决冲突</div>}
     <div className="merge-list">
       <div className="merge-list-header"><span>候选分支</span><span>领先</span><span>落后</span><span>状态</span><span/></div>

@@ -1,0 +1,68 @@
+/* Theme exceptions only. Shared surfaces and controls are token-driven. */
+
+/* Operation state keeps a warm warning color in both themes. */
+.content-tabs .operation-tab { color: var(--operation-text); }
+.content-tabs .operation-tab:hover,
+.content-tabs .operation-tab.active { color: var(--operation-hover); }
+.content-tabs .operation-tab:hover svg,
+.content-tabs .operation-tab.active svg { color: currentColor; }
+
+/* Diff and syntax contrast that cannot be expressed by the base surface tokens. */
+.theme-light .code-row.line-context-active,
+.theme-light .split-code-side.line-context-active { box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px rgba(22, 119, 255, .52); }
+.theme-light .code-row.diff-navigation-active,
+.theme-light .split-code-side.diff-navigation-active { box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px rgba(22, 119, 255, .58); }
+.theme-light .split-diff-pane { scrollbar-color: var(--scroll-thumb) var(--code-surface); }
+.theme-light .line-no { color: var(--text-tertiary); border-right-color: var(--border-subtle); }
+
+/* Git state badges use intentionally distinct semantic colors. */
+.theme-light .ref { border-color: #91caff; color: #0958d9; background: #e6f4ff; }
+.theme-light .ref.ref-working { color: #874d00 !important; background: #fff1b8; }
+.theme-light .commit-row.working-tree { background: #fffbe6; }
+.theme-light .commit-row.working-tree:hover { background: #fff1b8; }
+.theme-light .commit-row.working-tree.selected { background: #fff1b8; box-shadow: inset 2px 0 #d48806; }
+.theme-light .working-tree .avatar { color: #ad6800; background: #fff1b8; }
+.theme-light .ref-feature { border-color: #d3adf7; color: #531dab; background: #f9f0ff; }
+.theme-light .ref-fix { border-color: #ffd591; color: #ad4e00; background: #fff7e6; }
+.theme-light .commit-meta .ahead { color: #ad4e00; background: #fff7e6; }
+.theme-light .verified { color: #389e0d !important; background: #f6ffed; }
+.theme-light .healthy-status { border-color: #b7eb8f; color: #237804; background: #d9f7be; }
+.theme-light .queue-healthy { color: #237804; background: #f6ffed; }
+.theme-light .conflict-card,
+.theme-light .structure-list button i.warn { color: #ad6800; background: #fffbe6; }
+.theme-light .merge-row .merged-state { color: #389e0d; }
+.theme-light .file-state { color: #ad4e00; background: #fff7e6; }
+.theme-light .file-state.a { color: #237804; background: #f6ffed; }
+.theme-light .stage-file-status.added { color: #237804; background: #f6ffed; }
+.theme-light .stage-file-status.modified { color: #0958d9; background: #e6f4ff; }
+.theme-light .stage-file-status.deleted { color: #cf1322; background: #fff1f0; }
+.theme-light .stage-file-status.renamed { color: #531dab; background: #f9f0ff; }
+.theme-light .stage-file-status.copied { color: #006d75; background: #e6fffb; }
+.theme-light .stage-file-status.conflicted { color: #ad6800; background: #fffbe6; }
+.theme-light .stage-file-stats .additions { color: #389e0d; }
+.theme-light .stage-file-stats .deletions { color: #cf1322; }
+
+/* Welcome and conflict surfaces have their own visual language. */
+.theme-light .repository-welcome { background: #f2f4f7; }
+.theme-light .welcome-card { border-color: #d8dee7; box-shadow: 0 22px 60px rgba(31, 43, 58, .12); }
+.theme-light .welcome-recents,
+.theme-light .welcome-capabilities > div { background: #f7f8fa; }
+.theme-light .welcome-capabilities > div { border-color: #e0e4ea; }
+.theme-light .welcome-capabilities > div:hover { border-color: #b8c2cf; box-shadow: 0 10px 24px rgba(31, 43, 58, .075); }
+.theme-light .welcome-capabilities > div > svg,
+.theme-light .sidebar-empty-state > svg,
+.theme-light .branch-context > svg,
+.theme-light .structure-icon { color: #667384; }
+.theme-light .structure-icon { background: #eef0f3; }
+
+.theme-light .conflict-code-editor { background: #f6f8fa; }
+.theme-light .conflict-code-editor .cm-scroller { scrollbar-color: var(--scroll-thumb) #f6f8fa; }
+.theme-light .conflict-overview { background: #e8edf2; }
+.theme-light .conflict-overview span.active { box-shadow: 0 0 0 1px #ffffff; }
+.theme-light .cm-conflict-actions button { color: var(--accent-text); background: transparent; }
+.theme-light .cm-conflict-actions button:hover { color: var(--accent); background: transparent; }
+
+/* Scrollbars are a browser-specific exception, so keep their light tuning here. */
+.theme-light * { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
+.theme-light *::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: content-box; }
+.theme-light *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }

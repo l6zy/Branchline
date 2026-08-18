@@ -10,6 +10,7 @@ pub fn run() {
             commands::load_git_user_config,
             commands::update_git_user_config,
             commands::load_repository,
+            commands::load_repository_state_token,
             commands::load_file_diff,
             commands::load_commit_stats,
             commands::load_commit_files,

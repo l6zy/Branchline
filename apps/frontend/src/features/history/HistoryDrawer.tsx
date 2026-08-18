@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { GitCommitHorizontal, History, Rows3, X } from 'lucide-react'
+import { Button } from '../../components/Button'
 import { loadFileBlame, loadFileCommitDiff, loadFileHistory, loadLineHistory, type BlameLine, type FileHistoryEntry } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
@@ -108,7 +109,7 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
   if (!filePath) return null
   const fileName = filePath.split(/[\\/]/).pop() || filePath
   return <div className="drawer-backdrop" onClick={onClose}><aside className="history-drawer" onClick={(event) => event.stopPropagation()}>
-    <div className="drawer-heading"><div className="history-drawer-title"><span className="eyebrow">{tab === 'line' ? `第 ${activeLineNumber} 行历史` : '文件追踪'}</span><h2 title={filePath}>{fileName}</h2><span className="history-file-path" title={filePath}>{filePath}{tab === 'line' && activeLineNumber ? ` · 第 ${activeLineNumber} 行${revision ? ` · ${revision.slice(0, 12)}` : ''}` : ''}</span></div><button className="icon-button" onClick={onClose} title="关闭"><X size={18}/></button></div>
+    <div className="drawer-heading"><div className="history-drawer-title"><span className="eyebrow">{tab === 'line' ? `第 ${activeLineNumber} 行历史` : '文件追踪'}</span><h2 title={filePath}>{fileName}</h2><span className="history-file-path" title={filePath}>{filePath}{tab === 'line' && activeLineNumber ? ` · 第 ${activeLineNumber} 行${revision ? ` · ${revision.slice(0, 12)}` : ''}` : ''}</span></div><Button variant="icon" onClick={onClose} title="关闭"><X size={18}/></Button></div>
     <div className="history-tabs"><button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><History size={14}/>文件历史 <span>{history.length}</span></button><button className={tab === 'blame' ? 'active' : ''} onClick={() => setTab('blame')}><Rows3 size={14}/>逐行归属 <span>{blame.length}</span></button>{activeLineNumber && <button className={tab === 'line' ? 'active' : ''} onClick={() => setTab('line')}><GitCommitHorizontal size={14}/>第 {activeLineNumber} 行历史 <span>{lineHistory.length}</span></button>}</div>
     {loading && <div className="history-empty">正在读取历史…</div>}
     {!loading && (tab === 'history' || tab === 'line') && <div className="file-history-workspace">

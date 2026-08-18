@@ -1,0 +1,33 @@
+/* Foundation: reset, typography, focus behavior, scrollbars, and shared motion. */
+
+* { box-sizing: border-box; }
+
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+
+button, input, textarea { font: inherit; }
+
+code, pre { font-family: var(--font-code); }
+
+button { color: inherit; }
+
+button, .commit-row { -webkit-tap-highlight-color: transparent; }
+
+@keyframes popIn { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes fadeIn { from { opacity: 0; } }
+
+@keyframes popOut { to { opacity: 0; transform: translateY(-3px) scale(.98); } }
+
+@keyframes slideIn { from { transform: translateX(35px); opacity: .7; } }
+
+@keyframes noticeCountdown { to { transform: scaleX(0); } }
+
+@keyframes operationIn { from { opacity: 0; transform: translate(-50%, -7px) scale(.98); } }
+
+@keyframes operationProgress { 0% { transform: translateX(-65%); } 100% { transform: translateX(65%); } }
+
+body, button, input, textarea { font-size: 12px; }
+
+* { scrollbar-width: thin; scrollbar-color: #667788 transparent; }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   fetchRepository,
   loadRepository,
+  loadRepositoryStateToken,
   pickAndLoadRepository,
   type RepositorySnapshot,
 } from '../../repository'
@@ -12,6 +13,7 @@ const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
 const STARTUP_REPOSITORY_KEY = 'branchline.startupRepository.v1'
 const AUTO_FETCH_SETTINGS_KEY = 'branchline.autoFetchSettings.v1'
 const NOTICE_DURATION = 5 * 1000
+const LOCAL_REPOSITORY_POLL_INTERVAL = 1500
 
 export type AutoFetchSettings = {
   enabled: boolean
@@ -72,6 +74,8 @@ export function useRepositoryWorkspace() {
   const [autoFetchSettings, setAutoFetchSettings] = useState<AutoFetchSettings>(readAutoFetchSettings)
   const [repositoryTrail, setRepositoryTrail] = useState<RepositoryParent[]>([])
   const fetchInProgress = useRef(false)
+  const stateRefreshInProgress = useRef(false)
+  const repositoryStateToken = useRef<{ path: string; token: string } | null>(null)
   const initialRestoreStarted = useRef(false)
   const noticeTimer = useRef<number | null>(null)
   const noticeStartedAt = useRef(0)
@@ -278,6 +282,51 @@ export function useRepositoryWorkspace() {
     const timer = window.setInterval(() => void fetchNow(true), autoFetchSettings.intervalMinutes * 60 * 1000)
     return () => window.clearInterval(timer)
   }, [autoFetchSettings.enabled, autoFetchSettings.intervalMinutes, fetchNow, repository?.path])
+
+  useEffect(() => {
+    const repositoryPath = repository?.path
+    if (!repositoryPath) {
+      repositoryStateToken.current = null
+      return
+    }
+    let cancelled = false
+    const synchronizeLocalState = async () => {
+      if (document.hidden || stateRefreshInProgress.current) return
+      stateRefreshInProgress.current = true
+      try {
+        const token = await loadRepositoryStateToken(repositoryPath)
+        if (cancelled) return
+        const previous = repositoryStateToken.current
+        if (!previous || previous.path !== repositoryPath) {
+          repositoryStateToken.current = { path: repositoryPath, token }
+          return
+        }
+        if (previous.token === token) return
+        const snapshot = await loadRepository(repositoryPath)
+        if (!cancelled) {
+          repositoryStateToken.current = { path: repositoryPath, token }
+          setRepository((current) => current?.path === repositoryPath ? snapshot : current)
+        }
+      } catch {
+        // A transient lock or an in-progress external Git operation is retried on the next poll.
+      } finally {
+        stateRefreshInProgress.current = false
+      }
+    }
+    void synchronizeLocalState()
+    const timer = window.setInterval(() => void synchronizeLocalState(), LOCAL_REPOSITORY_POLL_INTERVAL)
+    const synchronizeWhenVisible = () => {
+      if (!document.hidden) void synchronizeLocalState()
+    }
+    window.addEventListener('focus', synchronizeWhenVisible)
+    document.addEventListener('visibilitychange', synchronizeWhenVisible)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', synchronizeWhenVisible)
+      document.removeEventListener('visibilitychange', synchronizeWhenVisible)
+    }
+  }, [repository?.path])
 
   const updateAutoFetchSettings = useCallback((next: Partial<AutoFetchSettings>) => {
     setAutoFetchSettings((current) => {

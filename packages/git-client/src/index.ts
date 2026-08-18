@@ -47,6 +47,10 @@ export async function loadRepository(path: string) {
   return invoke<RepositorySnapshot>('load_repository', { path })
 }
 
+export async function loadRepositoryStateToken(repositoryPath: string) {
+  return invoke<string>('load_repository_state_token', { repositoryPath })
+}
+
 export async function pickAndLoadRepository(): Promise<RepositorySnapshot | null> {
   if (!isTauriRuntime()) {
     throw new Error('打开本地仓库需要桌面版。请运行 pnpm desktop:dev。')

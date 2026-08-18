@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
+import { Button } from './components/Button'
 import { useRepositoryWorkspace, type RecentRepository, type RepositoryParent } from './features/repository/useRepositoryWorkspace'
 import { StagingPage } from './features/staging/StagingPage'
 import { HistoryDrawer } from './features/history/HistoryDrawer'
@@ -20,6 +21,7 @@ import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './fea
 import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, visibleHistoryCommits, type HistorySearchMode } from './features/history/historySearch'
+import { createWorkingTreeCommit, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
 import { formatLocalDateTime } from './dateTime'
 import { isBooleanRecord, usePersistentState } from './persistentState'
 import {
@@ -88,7 +90,7 @@ type Commit = {
   avatar: string
   time: string
   branches?: string[]
-  status?: 'ahead' | 'merge' | 'local' | 'stash'
+  status?: 'ahead' | 'merge' | 'local' | 'stash' | 'working'
   parent?: string
   parents?: string[]
   files: number
@@ -222,7 +224,7 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
       <button onClick={() => { onMergeBranch(contextBranch.branch); setContextBranch(null) }} disabled={contextBranch.branch === currentBranch}><GitMerge size={14}/><span>合并到 {currentBranch ?? '当前分支'}</span></button>
       <div className="context-menu-separator"/>
       <button onClick={() => { onCopyBranch(contextBranch.branch); setContextBranch(null) }}><Copy size={14}/><span>复制分支名</span></button>
-      <button className="danger" onClick={() => { onDeleteBranch(contextBranch.branch); setContextBranch(null) }} disabled={contextBranch.branch === currentBranch}><Trash2 size={14}/><span>删除分支</span></button>
+      <Button variant="danger" onClick={() => { onDeleteBranch(contextBranch.branch); setContextBranch(null) }} disabled={contextBranch.branch === currentBranch}><Trash2 size={14}/><span>删除分支</span></Button>
     </ContextMenu>}
     {contextPrefix && <ContextMenu x={contextPrefix.x} y={contextPrefix.y} onClose={() => setContextPrefix(null)}>
       <div className="context-menu-title"><FolderGit2 size={13}/><span>{contextPrefix.prefix} 分支组</span></div>
@@ -230,7 +232,7 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
       <button onClick={() => { onCreateBranch(contextPrefix.prefix); setContextPrefix(null) }}><Plus size={14}/><span>在该组中创建分支</span></button>
       <button onClick={() => { onCopyBranch(`${contextPrefix.prefix}/`); setContextPrefix(null) }}><Copy size={14}/><span>复制分支前缀</span></button>
       <div className="context-menu-separator"/>
-      <button className="danger" onClick={() => { onDeletePrefix(contextPrefix.prefix); setContextPrefix(null) }}><Trash2 size={14}/><span>删除整个分支组</span></button>
+      <Button variant="danger" onClick={() => { onDeletePrefix(contextPrefix.prefix); setContextPrefix(null) }}><Trash2 size={14}/><span>删除整个分支组</span></Button>
     </ContextMenu>}
   </div>
 }
@@ -265,7 +267,7 @@ function Sidebar({ repository, parentRepository, recentRepositories, openingRepo
   return <aside className="sidebar">
     <div className="sidebar-repository-header">
       <RepositoryQuickSwitcher repository={repository} parentRepository={parentRepository} recentRepositories={recentRepositories} openingRepository={openingRepository} openSignal={repositorySwitcherSignal} onOpenRepository={onOpenRepository} onOpenRepositoryPath={onOpenRepositoryPath} onOpenSubmodulePath={onOpenSubmodulePath} onReturnToParentRepository={onReturnToParentRepository}/>
-      <button className="icon-button sidebar-toggle" onClick={onToggle} title="收起左侧面板"><PanelLeftClose size={16}/></button>
+      <Button variant="icon" className="sidebar-toggle" onClick={onToggle} title="收起左侧面板"><PanelLeftClose size={16}/></Button>
     </div>
     <nav>{repository ? <>
       <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>工作台</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>工作区变更</span><span className="nav-badge">{repository.files.length}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>Stash</span></button></div>
@@ -280,13 +282,14 @@ function Sidebar({ repository, parentRepository, recentRepositories, openingRepo
 function GraphLine({ commit, row, laneCount, graphWidth }: { commit: Commit; row: CommitGraphRow; laneCount: number; graphWidth: number }) {
   const x = lanePosition(row.lane, laneCount, graphWidth)
   const isStash = commit.status === 'stash'
-  const isMerge = !isStash && (row.parentCount > 1 || commit.status === 'merge')
-  const title = isStash ? `Stash ${commit.id}，从基准提交独立保存` : isMerge ? `合并提交 ${commit.id}，连接 ${row.parentCount} 个父提交` : row.parentCount === 0 ? `路径终点 ${commit.id}` : `提交 ${commit.id}，轨道 ${row.lane + 1}`
+  const isWorking = commit.status === 'working'
+  const isMerge = !isStash && !isWorking && (row.parentCount > 1 || commit.status === 'merge')
+  const title = isWorking ? '工作区未提交修改' : isStash ? `Stash ${commit.id}，从基准提交独立保存` : isMerge ? `合并提交 ${commit.id}，连接 ${row.parentCount} 个父提交` : row.parentCount === 0 ? `路径终点 ${commit.id}` : `提交 ${commit.id}，轨道 ${row.lane + 1}`
   return <div className="graph-cell" title={title} data-lane={row.lane} data-parent-count={row.parentCount}>
     <svg className="graph-segments" width={graphWidth} height="32" viewBox={`0 0 ${graphWidth} 32`} aria-hidden="true">
       {row.segments.map((segment) => <path key={segment.id} className={`graph-segment ${segment.kind}`} d={segment.path} stroke={segment.color}/>) }
     </svg>
-    <span className={`commit-dot ${isMerge ? 'merge' : ''} ${isStash ? 'stash' : ''} ${row.parentCount === 0 ? 'terminal' : ''}`} style={{ left: x, borderColor: row.color, color: row.color, background: isMerge || isStash ? 'transparent' : row.color }}/>
+    <span className={`commit-dot ${isMerge ? 'merge' : ''} ${isStash ? 'stash' : ''} ${isWorking ? 'working' : ''} ${row.parentCount === 0 ? 'terminal' : ''}`} style={{ left: x, borderColor: row.color, color: row.color, background: isMerge || isStash || isWorking ? 'transparent' : row.color }}/>
   </div>
 }
 
@@ -353,11 +356,14 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     const threshold = timeWindow ? Date.now() - timeWindow : null
     return commits.filter((commit) => {
       const timestamp = threshold ? commitTimestamp(commit) : null
+      const visibleOnBranch = commit.status === 'working'
+        ? (!branchCommitIds || branchFilter === currentBranch)
+        : (!branchCommitIds || branchCommitIds.has(commit.id))
       return (!authorFilter || commit.author === authorFilter)
-        && (!branchCommitIds || branchCommitIds.has(commit.id))
+        && visibleOnBranch
         && (!threshold || timestamp === null || timestamp >= threshold)
     })
-  }, [authorFilter, branchCommitIds, commits, timeFilter])
+  }, [authorFilter, branchCommitIds, branchFilter, commits, currentBranch, timeFilter])
   const searchMatches = useMemo(() => matchingCommitIds(baseFiltered, deferredQuery), [baseFiltered, deferredQuery])
   const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches])
   const filtered = useMemo(() => visibleHistoryCommits(baseFiltered, deferredQuery, searchMode), [baseFiltered, deferredQuery, searchMode])
@@ -443,7 +449,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
       <div className="column-label">提交信息{resizer('author')}</div>
       {visibleColumns.time && <div className="column-label">时间{resizer('time')}</div>}
       {visibleColumns.hash && <div className="column-label">Hash{resizer('hash')}</div>}
-      <div className="column-label author-label"><span className="column-title">提交人</span><div className="column-actions"><button className={`icon-button ${authorFilter ? 'active' : ''}`} onClick={() => { setAuthorMenuOpen((value) => !value); setColumnMenuOpen(false) }} title="筛选提交人" aria-label="筛选提交人"><ListFilter size={14}/></button><button className="icon-button" onClick={onToggleInspector} title={inspectorCollapsed ? '展开右侧面板' : '收起右侧面板'} aria-label={inspectorCollapsed ? '展开右侧面板' : '收起右侧面板'}>{inspectorCollapsed ? <PanelRightOpen size={15}/> : <PanelRightClose size={15}/>}</button><button className="icon-button" onClick={() => { setColumnMenuOpen((value) => !value); setAuthorMenuOpen(false) }} title="配置列" aria-label="配置列"><Settings2 size={14}/></button></div>{authorMenuOpen && <div className="column-config-menu author-filter-menu"><strong>筛选提交人</strong><button className={!authorFilter ? 'active' : ''} onClick={() => { setAuthorFilter(null); setAuthorMenuOpen(false) }}>全部提交人</button>{authors.map((author) => <button className={authorFilter === author ? 'active' : ''} key={author} onClick={() => { setAuthorFilter(author); setAuthorMenuOpen(false) }}>{author}</button>)}</div>}{columnMenuOpen && <div className="column-config-menu"><strong>显示列</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>时间</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label></div>}</div>
+      <div className="column-label author-label"><span className="column-title">提交人</span><div className="column-actions"><Button variant="icon" active={Boolean(authorFilter)} onClick={() => { setAuthorMenuOpen((value) => !value); setColumnMenuOpen(false) }} title="筛选提交人" aria-label="筛选提交人"><ListFilter size={14}/></Button><Button variant="icon" onClick={onToggleInspector} title={inspectorCollapsed ? '展开右侧面板' : '收起右侧面板'} aria-label={inspectorCollapsed ? '展开右侧面板' : '收起右侧面板'}>{inspectorCollapsed ? <PanelRightOpen size={15}/> : <PanelRightClose size={15}/>}</Button><Button variant="icon" onClick={() => { setColumnMenuOpen((value) => !value); setAuthorMenuOpen(false) }} title="配置列" aria-label="配置列"><Settings2 size={14}/></Button></div>{authorMenuOpen && <div className="column-config-menu author-filter-menu"><strong>筛选提交人</strong><button className={!authorFilter ? 'active' : ''} onClick={() => { setAuthorFilter(null); setAuthorMenuOpen(false) }}>全部提交人</button>{authors.map((author) => <button className={authorFilter === author ? 'active' : ''} key={author} onClick={() => { setAuthorFilter(author); setAuthorMenuOpen(false) }}>{author}</button>)}</div>}{columnMenuOpen && <div className="column-config-menu"><strong>显示列</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>时间</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label></div>}</div>
     </div>
     <div className="commit-list" ref={commitListRef} onScroll={(event) => {
       pendingScrollTop.current = event.currentTarget.scrollTop
@@ -462,9 +468,9 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
       const timeDivider = visibleIndex > 0 && currentDay && currentDay.key !== previousDay?.key ? currentDay.label : null
       const graphRow = graphLayout.rows[visibleIndex]
       const rowStyle = { gridTemplateColumns: template, '--time-divider-left': `${widths.branch + widths.graph + 8}px` } as React.CSSProperties
-      return <button key={commit.id} data-commit-id={commit.id} className={`commit-row ${selected === commit.id ? 'selected' : ''} ${searchMatchSet.has(commit.id) ? 'search-match' : ''} ${selected === commit.id && searchMatchSet.has(commit.id) ? 'search-current' : ''} ${timeDivider ? 'time-break' : ''}`} style={rowStyle} onClick={() => onSelect(commit.id)} onContextMenu={(event) => { event.preventDefault(); onSelect(commit.id); setContextCommit({ commit, x: event.clientX, y: event.clientY }) }}>
+      return <button key={commit.id} data-commit-id={commit.id} className={`commit-row ${commit.status === 'working' ? 'working-tree' : ''} ${selected === commit.id ? 'selected' : ''} ${searchMatchSet.has(commit.id) ? 'search-match' : ''} ${selected === commit.id && searchMatchSet.has(commit.id) ? 'search-current' : ''} ${timeDivider ? 'time-break' : ''}`} style={rowStyle} onClick={() => onSelect(commit.id)} onContextMenu={(event) => { event.preventDefault(); if (commit.status === 'working') return; onSelect(commit.id); setContextCommit({ commit, x: event.clientX, y: event.clientY }) }}>
         {timeDivider && <span className="time-divider-label">{timeDivider}</span>}
-        <div className="branch-cell">{visibleCommitReferences(commit.branches ?? [], remoteBranchSet, branchTracking).map((branch) => refTag(branch, graphRow.color))}</div>
+        <div className="branch-cell">{commit.status === 'working' ? <span className="ref ref-working"><FileDiff size={11}/><span>工作区</span></span> : visibleCommitReferences(commit.branches ?? [], remoteBranchSet, branchTracking).map((branch) => refTag(branch, graphRow.color))}</div>
         <GraphLine commit={commit} row={graphRow} laneCount={graphLayout.laneCount} graphWidth={widths.graph}/>
         <div className="commit-content message-cell">
           <div className="commit-subject"><span>{commit.title}</span></div>
@@ -484,7 +490,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
         <button onClick={() => { onApplyStash(stashReference); setContextCommit(null) }}><Check size={14}/><span>应用并保留</span></button>
         <button onClick={() => { onPopStash(stashReference); setContextCommit(null) }}><CornerDownLeft size={14}/><span>弹出并删除</span></button>
         <div className="context-menu-separator"/>
-        <button className="danger" onClick={() => { onDropStash(stashReference); setContextCommit(null) }}><Trash2 size={14}/><span>删除 Stash</span></button>
+        <Button variant="danger" onClick={() => { onDropStash(stashReference); setContextCommit(null) }}><Trash2 size={14}/><span>删除 Stash</span></Button>
         <div className="context-menu-separator"/>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'hash'); setContextCommit(null) }}><Copy size={14}/><span>复制 Stash Hash</span></button>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'details'); setContextCommit(null) }}><FileText size={14}/><span>复制完整 Stash 信息</span></button>
@@ -496,7 +502,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
         <button onClick={() => { onRebaseCommit(contextCommit.commit); setContextCommit(null) }}><GitFork size={14}/><span>将当前分支变基到此提交</span></button>
         <button onClick={() => { onTagCommit(contextCommit.commit); setContextCommit(null) }}><Tag size={14}/><span>在此提交创建标签</span></button>
         <div className="context-menu-separator"/>
-        <button className="danger" onClick={() => { onResetCommit(contextCommit.commit); setContextCommit(null) }}><RotateCcw size={14}/><span>回退到此提交（保留文件）</span></button>
+        <Button variant="danger" onClick={() => { onResetCommit(contextCommit.commit); setContextCommit(null) }}><RotateCcw size={14}/><span>回退到此提交（保留文件）</span></Button>
         <div className="context-menu-separator"/>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'hash'); setContextCommit(null) }}><Copy size={14}/><span>复制提交 Hash</span></button>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'details'); setContextCommit(null) }}><FileText size={14}/><span>复制完整提交信息</span></button>
@@ -509,15 +515,22 @@ function CommitDetails({ commit }: { commit: Commit }) {
   const [copied, setCopied] = useState(false)
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
   const commitTextRef = useRef<HTMLTextAreaElement>(null)
-  const fullHash = commit.fullHash ?? `${commit.id}4b92d7e08f7e16f85b16d0c`
+  const isWorkingTree = commit.status === 'working'
+  const fullHash = isWorkingTree ? '未提交' : commit.fullHash ?? `${commit.id}4b92d7e08f7e16f85b16d0c`
   const parentHash = commit.parents?.length ? commit.parents.join(', ') : commit.parent ? (commit.parent.length > 7 ? commit.parent : `${commit.parent}019be47a1d40d5406a8f61b0`) : '—'
-  const email = commit.email ?? 'zhou@example.com'
-  const message = commit.message ?? `${commit.title}\n\n将提交图谱切换为可视区域渲染，并复用 lane 缓冲区，降低大型仓库滚动时的布局与绘制开销。\n\n- 仅渲染可见提交行\n- 缓存 lane 绘制数据\n- 保持搜索和跳转定位稳定`
+  const email = isWorkingTree ? '本地工作区' : commit.email ?? 'zhou@example.com'
+  const message = commit.message ?? (isWorkingTree ? '这些修改尚未写入 Git 历史。' : `${commit.title}\n\n将提交图谱切换为可视区域渲染，并复用 lane 缓冲区，降低大型仓库滚动时的布局与绘制开销。\n\n- 仅渲染可见提交行\n- 缓存 lane 绘制数据\n- 保持搜索和跳转定位稳定`)
   const committer = commit.committer ?? commit.author
   const committerEmail = commit.committerEmail ?? email
   const authorTime = commit.authorTime ?? commit.time
   const commitTime = commit.commitTime ?? commit.time
-  const commitText = [
+  const commitText = (isWorkingTree ? [
+    '状态：未提交',
+    `基于：${parentHash}`,
+    `变更：${commit.files} 个文件，新增 ${commit.additions} 行，删除 ${commit.deletions} 行`,
+    '',
+    message,
+  ] : [
     `提交：${fullHash}`,
     `父级：${parentHash}`,
     `作者：${commit.author} <${email}>`,
@@ -528,7 +541,7 @@ function CommitDetails({ commit }: { commit: Commit }) {
     `变更：${commit.files} 个文件，新增 ${commit.additions} 行，删除 ${commit.deletions} 行`,
     '',
     message,
-  ].join('\n')
+  ]).join('\n')
   const copy = () => {
     commitTextRef.current?.focus()
     commitTextRef.current?.select()
@@ -543,13 +556,13 @@ function CommitDetails({ commit }: { commit: Commit }) {
     window.setTimeout(() => setCopied(false), 1500)
   }
   return <section className="commit-details">
-    <div className="detail-heading"><div><span className="eyebrow">提交详情</span><h2>{commit.title}</h2></div><button className="icon-button" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多提交操作"><MoreHorizontal size={17}/></button></div>
-    <div className="identity-row"><div className="avatar large">{commit.avatar}</div><div><strong>{commit.author}</strong><span>{email} · {formatLocalDateTime(commitTime)}</span></div>{!commit.fullHash && <span className="verified"><Check size={11}/> 已验证</span>}</div>
+    <div className="detail-heading"><div><span className="eyebrow">{isWorkingTree ? '工作区详情' : '提交详情'}</span><h2>{commit.title}</h2></div>{!isWorkingTree && <Button variant="icon" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多提交操作"><MoreHorizontal size={17}/></Button>}</div>
+    <div className="identity-row"><div className="avatar large">{commit.avatar}</div><div><strong>{commit.author}</strong><span>{isWorkingTree ? `${email} · 尚未提交` : `${email} · ${formatLocalDateTime(commitTime)}`}</span></div>{!commit.fullHash && !isWorkingTree && <span className="verified"><Check size={11}/> 已验证</span>}</div>
     <div className="commit-text-panel">
-      <div className="commit-text-toolbar"><div><FileText size={14}/><span>完整提交信息</span></div><button className="icon-tool-button" onClick={copy} title={copied ? '已复制' : '复制全部'} aria-label={copied ? '已复制' : '复制全部'}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
+      <div className="commit-text-toolbar"><div><FileText size={14}/><span>{isWorkingTree ? '工作区信息' : '完整提交信息'}</span></div><button className="icon-tool-button" onClick={copy} title={copied ? '已复制' : '复制全部'} aria-label={copied ? '已复制' : '复制全部'}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
       <textarea ref={commitTextRef} aria-label="完整提交信息" readOnly value={commitText} onFocus={(event) => event.currentTarget.select()}/>
     </div>
-    {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><GitCommitHorizontal size={13}/><span>提交详情操作</span></div><button onClick={() => { copyHash(); setMoreMenu(null) }}><Copy size={14}/><span>复制提交 Hash</span></button><button onClick={() => { copy(); setMoreMenu(null) }}><FileText size={14}/><span>复制完整提交信息</span></button></ContextMenu>}
+    {moreMenu && !isWorkingTree && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><GitCommitHorizontal size={13}/><span>提交详情操作</span></div><button onClick={() => { copyHash(); setMoreMenu(null) }}><Copy size={14}/><span>复制提交 Hash</span></button><button onClick={() => { copy(); setMoreMenu(null) }}><FileText size={14}/><span>复制完整提交信息</span></button></ContextMenu>}
   </section>
 }
 
@@ -567,7 +580,7 @@ function ChangedFilesPanel({ files, loading, activeFile, onOpenFile, onOpenHisto
     return Array.from(folders)
   }, [files])
   return <section className="changed-files-panel">
-    <div className="changed-files-heading"><div><FileDiff size={15}/><strong>变更文件</strong><span>{loading ? '…' : files.length}</span></div><div className="changed-files-actions"><div className="segmented compact-segmented icon-segmented"><button className={fileMode === 'tree' ? 'active' : ''} onClick={() => setFileMode('tree')} title="树形视图" aria-label="树形视图"><FolderOpen size={14}/></button><button className={fileMode === 'list' ? 'active' : ''} onClick={() => setFileMode('list')} title="列表视图" aria-label="列表视图"><List size={14}/></button></div><button className="icon-button" disabled={loading || !files.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多文件操作"><MoreHorizontal size={15}/></button></div></div>
+    <div className="changed-files-heading"><div><FileDiff size={15}/><strong>变更文件</strong><span>{loading ? '…' : files.length}</span></div><div className="changed-files-actions"><div className="segmented compact-segmented icon-segmented"><button className={fileMode === 'tree' ? 'active' : ''} onClick={() => setFileMode('tree')} title="树形视图" aria-label="树形视图"><FolderOpen size={14}/></button><button className={fileMode === 'list' ? 'active' : ''} onClick={() => setFileMode('list')} title="列表视图" aria-label="列表视图"><List size={14}/></button></div><Button variant="icon" disabled={loading || !files.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多文件操作"><MoreHorizontal size={15}/></Button></div></div>
     {loading ? <div className="changed-files-list"><div className="changed-files-empty"><RefreshCw className="spin" size={15}/><span>正在读取该提交的变更文件…</span></div></div> : !files.length ? <div className="changed-files-list"><div className="changed-files-empty"><FileDiff size={15}/><span>该提交没有文件变更</span></div></div> : <DiffFileList files={files} activeFile={activeFile ?? -1} mode={fileMode} onSelectFile={onOpenFile} className="changed-files-list" fileRowHeight={42} folderRowHeight={28} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders} showOpenIndicator onFileContextMenu={(event, file) => { event.preventDefault(); setContextFile({ file, x: event.clientX, y: event.clientY }) }}/>} 
     {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><FileDiff size={13}/><span>变更文件操作</span></div>{fileMode === 'tree' && <><button onClick={() => { setCollapsedFolders({}); setMoreMenu(null) }}><ChevronDown size={14}/><span>展开全部文件夹</span></button><button onClick={() => { setCollapsedFolders(Object.fromEntries(fileFolders.map((folder) => [folder, true]))); setMoreMenu(null) }}><ChevronRight size={14}/><span>收起全部文件夹</span></button><div className="context-menu-separator"/></>}<button onClick={() => { navigator.clipboard?.writeText(files.map((file) => file.path).join('\n')).catch(() => undefined); setMoreMenu(null) }}><Copy size={14}/><span>复制文件路径列表</span></button><button onClick={() => { navigator.clipboard?.writeText(files.map((file) => `${file.type} ${file.path} (+${file.add} -${file.del})`).join('\n')).catch(() => undefined); setMoreMenu(null) }}><FileText size={14}/><span>复制变更摘要</span></button></ContextMenu>}
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>查看文件历史</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>查看逐行归属（Blame）</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>复制文件路径</span></button></ContextMenu>}
@@ -588,7 +601,7 @@ function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () => void
     ['?', '显示快捷键'],
   ]
   return <div className="shortcut-backdrop" onClick={onClose}><section className="shortcut-dialog" onClick={(event) => event.stopPropagation()}>
-    <div className="drawer-heading"><div><span className="eyebrow">导航</span><h2>快捷键</h2></div><button className="icon-button" onClick={onClose}><X size={18}/></button></div>
+    <div className="drawer-heading"><div><span className="eyebrow">导航</span><h2>快捷键</h2></div><Button variant="icon" onClick={onClose}><X size={18}/></Button></div>
     <div className="shortcut-list">{shortcuts.map(([key, label]) => <div className="shortcut-row" key={key}><span>{label}</span><kbd>{key}</kbd></div>)}</div>
   </section></div>
 }
@@ -600,7 +613,7 @@ function RepositoryWelcome({ recentRepositories, openingRepository, onOpenReposi
       <span className="eyebrow">开始使用 Branchline</span>
       <h1>打开一个 Git 仓库</h1>
       <p>选择已有仓库或 Worktree，即可查看提交图谱、工作区变更、Stash、Submodule 与完整 Diff。</p>
-      <button className="primary-button welcome-open-button" onClick={onOpenRepository} disabled={openingRepository}><FolderOpen size={16}/>{openingRepository ? '正在读取仓库…' : '选择本地仓库'}</button>
+      <Button variant="primary" className="welcome-open-button" onClick={onOpenRepository} disabled={openingRepository}><FolderOpen size={16}/>{openingRepository ? '正在读取仓库…' : '选择本地仓库'}</Button>
       {recentRepositories.length > 0 && <div className="welcome-recents"><div className="welcome-section-title"><span>最近打开</span><small>{recentRepositories.length}</small></div>{recentRepositories.slice(0, 5).map((item) => <button key={item.path} onClick={() => onOpenRepositoryPath(item.path)} disabled={openingRepository}><span className="switcher-icon"><FolderGit2 size={14}/></span><span><strong>{item.name}</strong><small>{item.path}</small></span><ChevronRight size={14}/></button>)}</div>}
       <div className="welcome-capabilities"><div><GitBranch size={16}/><span><strong>提交与分支</strong><small>提交图谱、搜索和分支管理</small></span></div><div><GitFork size={16}/><span><strong>Worktree</strong><small>在同一仓库内快速切换</small></span></div><div><Box size={16}/><span><strong>Submodule</strong><small>进入子模块并返回父仓库</small></span></div></div>
     </div>
@@ -646,9 +659,15 @@ export default function App() {
   const expandedRepositoryPath = useRef<string | null>(null)
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
-  const activeCommits: Commit[] = repository?.commits ?? []
+  const workingTreeCommit = repository
+    ? createWorkingTreeCommit(repository.files, repository.commits[0]?.fullHash)
+    : null
+  const activeCommits: Commit[] = workingTreeCommit
+    ? [workingTreeCommit, ...(repository?.commits ?? [])]
+    : repository?.commits ?? []
   const availableBranches = repository?.branches ?? []
   const selectedCommitBase = activeCommits.find((commit) => commit.id === selected) ?? activeCommits[0] ?? emptyCommit
+  const selectedWorkingTree = selectedCommitBase.status === 'working'
   const selectedStatsKey = selectedCommitBase.fullHash ?? selectedCommitBase.id
   useEffect(() => {
     if (!repository) {
@@ -663,11 +682,11 @@ export default function App() {
     }
     setStructureSelection((current) => resolveRepositoryStructureSelection(repository, current))
   }, [repository])
-  const selectedCommit = commitStats[selectedStatsKey]
+  const selectedCommit = !selectedWorkingTree && commitStats[selectedStatsKey]
     ? { ...selectedCommitBase, ...commitStats[selectedStatsKey] }
     : selectedCommitBase
-  const selectedCommitFiles = repository ? (commitFiles[selectedStatsKey] ?? []) : []
-  const selectedCommitFilesLoading = Boolean(repository) && selectedCommitBase.id !== '—' && !Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)
+  const selectedCommitFiles = selectedWorkingTree ? repository?.files ?? [] : repository ? (commitFiles[selectedStatsKey] ?? []) : []
+  const selectedCommitFilesLoading = !selectedWorkingTree && Boolean(repository) && selectedCommitBase.id !== '—' && !Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)
   useEffect(() => {
     if (!autoFetchOpen) return
     const closeWhenOutside = (event: PointerEvent) => {
@@ -688,13 +707,15 @@ export default function App() {
     if (path && expandedRepositoryPath.current !== path) {
       setSelected(repository?.commits[0]?.id ?? '')
     } else if (path) {
-      setSelected((current) => resolveCommitSelection(previousCommits.current, repository?.commits ?? [], current))
+      setSelected((current) => current === WORKING_TREE_COMMIT_ID && Boolean(repository?.files.length)
+        ? current
+        : resolveCommitSelection(previousCommits.current, repository?.commits ?? [], current))
     }
     expandedRepositoryPath.current = path
     previousCommits.current = repository?.commits ?? []
-  }, [repository?.commits, repository?.path])
+  }, [repository?.commits, repository?.files.length, repository?.path])
   useEffect(() => {
-    if (!repository || selectedCommitBase.id === '—' || commitStats[selectedStatsKey]) return
+    if (!repository || selectedWorkingTree || selectedCommitBase.id === '—' || commitStats[selectedStatsKey]) return
     let cancelled = false
     loadRepositoryCommitStats(repository.path, selectedStatsKey)
       .then((stats) => {
@@ -702,9 +723,9 @@ export default function App() {
       })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [commitStats, repository?.path, selectedStatsKey])
+  }, [commitStats, repository?.path, selectedStatsKey, selectedWorkingTree])
   useEffect(() => {
-    if (!repository || selectedCommitBase.id === '—' || Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)) return
+    if (!repository || selectedWorkingTree || selectedCommitBase.id === '—' || Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)) return
     let cancelled = false
     loadRepositoryCommitFiles(repository.path, selectedStatsKey)
       .then((files) => {
@@ -716,15 +737,16 @@ export default function App() {
         setRepositoryNotice(error instanceof Error ? error.message : String(error))
       })
     return () => { cancelled = true }
-  }, [commitFiles, repository?.path, selectedStatsKey])
+  }, [commitFiles, repository?.path, selectedStatsKey, selectedWorkingTree])
   useEffect(() => {
     setDiffFile(null)
     setWideDiff(false)
   }, [selectedStatsKey])
   const loadSelectedCommitDiff = useCallback((filePath: string) => {
     if (!repository) return Promise.resolve([])
+    if (selectedWorkingTree) return loadRepositoryFileDiff(repository.path, filePath)
     return loadFileCommitDiff(repository.path, selectedStatsKey, filePath)
-  }, [repository?.path, selectedStatsKey])
+  }, [repository?.path, selectedStatsKey, selectedWorkingTree])
   const handleOpenSnapshot = (snapshot: RepositorySnapshot | null) => {
     if (!snapshot) return
     setCommitStats({})
@@ -743,7 +765,9 @@ export default function App() {
   const handleReturnToParentRepository = async () => handleOpenSnapshot(await returnToParentRepository())
   const handleSnapshot = (snapshot: RepositorySnapshot) => {
     applySnapshot(snapshot)
-    setSelected((current) => resolveCommitSelection(activeCommits, snapshot.commits, current))
+    setSelected((current) => current === WORKING_TREE_COMMIT_ID && snapshot.files.length
+      ? current
+      : resolveCommitSelection(activeCommits, snapshot.commits, current))
     if (!snapshot.operation && workspaceView === 'operation') setWorkspaceView('history')
   }
   const handleDeleteBranchPrefix = async (prefix: string) => {
@@ -1010,15 +1034,15 @@ export default function App() {
     <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" aria-label="拖动调整左侧面板宽度" onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
     <div className={`workspace ${repository ? '' : 'empty-repository'}`}>
       {repository && <header className="topbar">
-        <div className="branch-context">{sidebarCollapsed && <button className="icon-button panel-toggle" onClick={() => setSidebarCollapsed(false)} title="展开左侧面板"><PanelLeftOpen size={17}/></button>}{parentRepository && <button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} title={`返回父仓库：${parentRepository.path}`}><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button>}{repository ? <GitBranch size={16}/> : <FolderOpen size={16}/>}<strong>{repository?.branch ?? '未打开仓库'}</strong><span className="sync-state"><span/>{repository ? `领先 ${repository.ahead} · 落后 ${repository.behind}` : '请选择本地 Git 仓库'}</span></div>
+        <div className="branch-context">{sidebarCollapsed && <Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed(false)} title="展开左侧面板"><PanelLeftOpen size={17}/></Button>}{parentRepository && <button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} title={`返回父仓库：${parentRepository.path}`}><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button>}{repository ? <GitBranch size={16}/> : <FolderOpen size={16}/>}<strong>{repository?.branch ?? '未打开仓库'}</strong></div>
           <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={repository ? '搜索提交信息、Hash 或提交人…' : '打开仓库后可搜索提交'} disabled={!repository}/>{query ? <><span className="search-result-count">{searchSummary.total ? `${searchSummary.current || 1}/${searchSummary.total}` : '0/0'}</span><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 }))} disabled={!searchSummary.total} title="上一个匹配"><ChevronUp size={13}/></button><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 }))} disabled={!searchSummary.total} title="下一个匹配"><ChevronDown size={13}/></button><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} title={searchMode === 'locate' ? '切换为仅显示匹配提交' : '保留完整图谱并定位匹配提交'}><ListFilter size={13}/></button><button type="button" onClick={() => setQuery('')} title="清除搜索"><X size={13}/></button></> : <kbd>⌘ F</kbd>}</div>
           <div className="top-actions">
-            <button className="icon-button" onClick={() => setShortcutOpen(true)} title="查看快捷键"><Command size={17}/></button>
-            <button className="fetch-button sync-action" onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} title="获取远程更新"><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? '获取中…' : '获取'}</span></button>
-            <button className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.behind ? `拉取当前分支（${repository.behind} 个待拉取提交）` : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{repository!.behind}</small>}</button>
-            <button className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.ahead ? `推送当前分支（${repository.ahead} 个待推送提交）` : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span>{Boolean(repository?.ahead) && <small className="sync-count push-count">{repository!.ahead}</small>}</button>
-            <button className="icon-button" onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</button>
-            <button className={`icon-button notification ${notificationOpen ? 'active' : ''}`} onClick={() => setNotificationOpen((value) => !value)} title="查看通知"><Bell size={17}/><span/></button>
+            <Button variant="icon" onClick={() => setShortcutOpen(true)} title="查看快捷键"><Command size={17}/></Button>
+            <Button variant="secondary" className="fetch-button sync-action" onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} title="获取远程更新"><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? '获取中…' : '获取'}</span></Button>
+            <Button variant="secondary" className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.behind ? `拉取当前分支（${repository.behind} 个待拉取提交）` : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{repository!.behind}</small>}</Button>
+            <Button variant="secondary" className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.ahead ? `推送当前分支（${repository.ahead} 个待推送提交）` : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span>{Boolean(repository?.ahead) && <small className="sync-count push-count">{repository!.ahead}</small>}</Button>
+            <Button variant="icon" onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</Button>
+            <Button variant="icon" className="notification" active={notificationOpen} onClick={() => setNotificationOpen((value) => !value)} title="查看通知"><Bell size={17}/><span/></Button>
             {notificationOpen && <div className="notification-popover">
               <div className="popover-heading"><strong>通知</strong><button onClick={() => setNotificationOpen(false)} title="关闭通知"><X size={13}/></button></div>
               <div className="notification-item unread"><span/><div><strong>{repository ? '仓库状态正常' : '尚未打开仓库'}</strong><small>{repository ? `${repository.branch}：领先 ${repository.ahead}，落后 ${repository.behind}` : '选择本地 Git 仓库后开始使用'}</small></div></div>
@@ -1028,14 +1052,14 @@ export default function App() {
           </div>
         </header>
       }
-      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="提交历史和提交图谱"><GitCommitHorizontal size={14}/><span className="tab-label">提交历史</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="查看和暂存工作区变更"><FileDiff size={14}/><span className="tab-label">工作区变更</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="浏览和管理 Stash"><Archive size={14}/><span className="tab-label">Stash</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><button className={`filter-button ${branchFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></button><button className={`filter-button ${timeFilter !== 'all' ? 'active' : ''}`} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></button></>}</div>
+      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="提交历史和提交图谱"><GitCommitHorizontal size={14}/><span className="tab-label">提交历史</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="查看和暂存工作区变更"><FileDiff size={14}/><span className="tab-label">工作区变更</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="浏览和管理 Stash"><Archive size={14}/><span className="tab-label">Stash</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选提交</span></div><div className="context-menu-options"><button className={branchFilter === 'all' ? 'selected-option' : ''} onClick={() => { setBranchFilter('all'); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <button className={branchFilter === branch ? 'selected-option' : ''} key={branch} onClick={() => { setBranchFilter(branch); setFilterMenu(null) }}><GitBranch size={14}/><span>{branch}</span></button>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
       <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
           <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={setSearchSummary} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReference={repository.stashes[0]?.reference ?? 'stash@{0}'} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onOpenStash={() => setWorkspaceView('stash')} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
-          {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
+          {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
         </section>}
         {workspaceView === 'compare' && <ComparePanel repository={repository} initialBase={compareBase ?? undefined} initialTarget={compareBase ? repository?.branch : undefined} onNotice={setRepositoryNotice}/>} 
         {workspaceView === 'merge' && <MergeQueuePanel repository={repository} onNotice={setRepositoryNotice} onSwitchBranch={handleSwitchBranch}/>} 
@@ -1078,7 +1102,7 @@ export default function App() {
       </div>
       <footer className="statusbar">
         <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{repository.operation?.label ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
-        <div ref={autoFetchRef} className="statusbar-secondary"><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置自动 Fetch"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="自动 Fetch 配置"><div className="auto-fetch-heading"><div><strong>自动 Fetch</strong><small>在后台定期更新远程引用</small></div><button className="icon-button" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><label className="auto-fetch-field"><span>获取间隔</span><select value={fetchIntervalMinutes} onChange={(event) => setFetchIntervalMinutes(Number(event.target.value))} disabled={!autoFetchEnabled}>{[1, 5, 10, 15, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select></label><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><button className="secondary-button auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</button></div>}</div>
+        <div ref={autoFetchRef} className="statusbar-secondary"><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置自动 Fetch"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="自动 Fetch 配置"><div className="auto-fetch-heading"><div><strong>自动 Fetch</strong><small>在后台定期更新远程引用</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><label className="auto-fetch-field"><span>获取间隔</span><select value={fetchIntervalMinutes} onChange={(event) => setFetchIntervalMinutes(Number(event.target.value))} disabled={!autoFetchEnabled}>{[1, 5, 10, 15, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select></label><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</Button></div>}</div>
       </footer></> : <RepositoryWelcome recentRepositories={recentRepositories} openingRepository={openingRepository} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={(path) => void handleOpenRepositoryPath(path)}/>} 
     </div>
     {openingRepository && <div className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>正在加载仓库</strong><span>正在读取分支、提交图谱、Worktree 与 Submodule…</span></div></div>}

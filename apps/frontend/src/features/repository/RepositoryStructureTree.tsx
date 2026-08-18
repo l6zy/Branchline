@@ -19,7 +19,7 @@ export function RepositoryStructureTree({ repository, selection, onSelect, onOpe
   onSelect: (selection: RepositoryStructureSelection) => void
   onOpenPath: (path: string, kind: 'worktree' | 'submodule') => void
 }) {
-  const [open, setOpen] = usePersistentState('branchline.repositoryStructureTreeOpen.v1', { worktrees: true, submodules: true }, isBooleanRecord)
+  const [open, setOpen] = usePersistentState('branchline.repositoryStructureTreeOpen.v2', { worktrees: false, submodules: false }, isBooleanRecord)
   const submoduleTree = useMemo(() => buildSubmoduleTree(repository.submodules), [repository.submodules])
   const activeKey = selectionKey(selection)
   const toggle = (key: string) => setOpen((value) => ({ ...value, [key]: value[key] === false }))

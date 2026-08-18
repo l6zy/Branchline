@@ -52,21 +52,21 @@
 
 .history-diff-overlay .diff-panel { height: 100%; }
 
-.graph-segment.stash { stroke-dasharray: 4 3; opacity: .76; }
+.graph-segment.stash, .graph-segment.working { stroke-dasharray: 4 4; opacity: .76; }
 
-.commit-dot { position: absolute; top: 50%; width: 12px; height: 12px; border: 0; border-radius: 50%; box-shadow: none; transform: translate(-50%, -50%); z-index: 2; }
+.commit-dot { position: absolute; top: 50%; width: 16px; height: 16px; border: 0; border-radius: 50%; box-shadow: none; transform: translate(-50%, -50%); z-index: 2; }
 
 .commit-dot.terminal { box-shadow: 0 0 0 1.5px currentColor; }
 
-.commit-dot.merge { width: 16px; height: 16px; border: 0; background: var(--panel)!important; box-shadow: inset 0 0 0 1.5px currentColor; }
+.commit-dot.merge { width: 16px; height: 16px; border: 0; box-shadow: inset 0 0 0 1.5px currentColor; }
 
 .commit-dot.merge::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: currentColor; }
 
-.commit-dot.stash { width: 14px; height: 14px; border-radius: 3px; background: var(--panel)!important; box-shadow: inset 0 0 0 1.5px currentColor; transform: translate(-50%, -50%) rotate(45deg); }
+.commit-dot.stash { width: 16px; height: 16px; border-radius: 3px; box-shadow: inset 0 0 0 1.5px currentColor; transform: translate(-50%, -50%) rotate(45deg); }
 
 .commit-dot.stash::after { content: ''; position: absolute; inset: 3px; border-radius: 1px; background: currentColor; }
 
-.commit-dot.working { width: 14px; height: 14px; border: 1.5px dashed currentColor; border-radius: 4px; background: var(--bg)!important; }
+.commit-dot.working { width: 18px; height: 18px; border: 1.5px dashed currentColor; border-radius: 4px; }
 
 .commit-dot.working::after { content: ''; position: absolute; inset: 3px; border-radius: 1px; background: currentColor; }
 

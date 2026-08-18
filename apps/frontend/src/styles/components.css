@@ -252,7 +252,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .list-heading > div:last-child { display: flex; }
 
-.time-divider-label { position: absolute; top: 0; left: calc(var(--time-divider-left) + 10px); padding: 0 5px; color: color-mix(in srgb, var(--accent) 82%, var(--text)); background: var(--bg); font-size: 10px; font-weight: 700; line-height: 13px; white-space: nowrap; transform: translateY(-50%); z-index: 4; pointer-events: none; }
+.time-divider-label { position: absolute; top: 0; left: calc(var(--time-divider-left) + 10px); padding: 0 5px; color: color-mix(in srgb, var(--accent) 82%, var(--text)); background: var(--panel); font-size: 10px; font-weight: 700; line-height: 13px; white-space: nowrap; transform: translateY(-50%); z-index: 4; pointer-events: none; }
 
 .branch-cell { min-width: 0; padding: 0 10px; display: flex; align-items: center; gap: 4px; overflow: hidden; }
 
@@ -274,7 +274,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .graph-segments { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 
-.graph-segment { fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: .8; vector-effect: non-scaling-stroke; }
+.graph-segment { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .8; vector-effect: non-scaling-stroke; }
 
 .graph-segment.branch { opacity: .9; }
 

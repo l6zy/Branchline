@@ -199,7 +199,7 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
     <div className="section-title"><span>分支</span><button className="section-add" onClick={() => onCreateBranch()} title="创建分支"><Plus size={14}/></button></div>
     <button className="tree-row group" onClick={() => toggle('local')}>{open.local ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<GitBranch size={14}/><span>本地</span><span className="count">{branchNames.length}</span></button>
     {open.local && <div className="tree-children">
-      {(grouped[''] ?? []).map((branch) => <button className={`tree-row ${branch === currentBranch ? 'active' : ''}`} key={branch} onClick={() => onJumpBranch(branch)} onDoubleClick={() => onSwitchBranch(branch)} onContextMenu={(event) => openContextMenu(event, branch)} title="单击定位提交，双击切换分支，右键查看更多操作"><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{incomingBadge(branch)}</button>)}
+      {(grouped[''] ?? []).map((branch) => <button className={`tree-row ${branch === currentBranch ? 'active' : ''}`} key={branch} onClick={() => onJumpBranch(branch)} onDoubleClick={() => onSwitchBranch(branch)} onContextMenu={(event) => openContextMenu(event, branch)} title={branch}><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{incomingBadge(branch)}</button>)}
       {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} title="单击展开或收起，右键管理分支组">{open[prefix] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{children.length}</span></button>{open[prefix] && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
     </div>}
     <button className="tree-row group" onClick={() => toggle('remote')}>{open.remote ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<CloudDownload size={14}/><span>远程</span><span className="count">{remoteBranches.length}</span></button>
@@ -212,7 +212,7 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
         return groups
       }, {})
       return <div key={remote}><button className="tree-row group nested remote-root" onClick={() => toggle(remoteKey)}>{open[remoteKey] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<CloudDownload size={13}/><span>{remote}</span><span className="count">{remoteBranchNames.length}</span></button>{open[remoteKey] && <div className="tree-children compact remote-children">
-        {(groupedRemoteBranches[''] ?? []).map((branch) => { const fullBranch = `${remote}/${branch}`; return <button className="tree-row" key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)} title="单击定位提交，双击切换分支，右键查看更多操作"><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span></button> })}
+        {(groupedRemoteBranches[''] ?? []).map((branch) => { const fullBranch = `${remote}/${branch}`; return <button className="tree-row" key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)} title={fullBranch}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span></button> })}
         {Object.entries(groupedRemoteBranches).filter(([prefix]) => prefix).map(([prefix, children]) => { const prefixKey = `${remoteKey}:${prefix}`; return <div key={prefix}><button className="tree-row group remote-prefix" onClick={() => toggle(prefixKey)}>{open[prefixKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<FolderGit2 size={12}/><span>{prefix}</span><span className="count">{children.length}</span></button>{open[prefixKey] && <div className="tree-children compact remote-prefix-children">{children.map((branch) => { const fullBranch = `${remote}/${prefix}/${branch}`; return <button className="tree-row" key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span></button> })}</div>}</div> })}
       </div>}</div>
     })}</div>}
@@ -307,7 +307,7 @@ function commitDay(commit: Commit) {
 }
 
 function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReference, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onOpenStash, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReference: string; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onOpenStash: () => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
-  const [widths, setWidths] = useState({ branch: 112, graph: 160, time: 104, hash: 82, author: 138 })
+  const [widths, setWidths] = useState({ branch: 180, graph: 250, time: 104, hash: 82, author: 138 })
   const [visibleColumns, setVisibleColumns] = useState({ time: false, hash: false })
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
   const [authorFilter, setAuthorFilter] = useState<string | null>(null)
@@ -523,12 +523,10 @@ function CommitDetails({ commit }: { commit: Commit }) {
   const message = commit.message ?? (isWorkingTree ? '这些修改尚未写入 Git 历史。' : `${commit.title}\n\n将提交图谱切换为可视区域渲染，并复用 lane 缓冲区，降低大型仓库滚动时的布局与绘制开销。\n\n- 仅渲染可见提交行\n- 缓存 lane 绘制数据\n- 保持搜索和跳转定位稳定`)
   const committer = commit.committer ?? commit.author
   const committerEmail = commit.committerEmail ?? email
-  const authorTime = commit.authorTime ?? commit.time
   const commitTime = commit.commitTime ?? commit.time
   const commitText = (isWorkingTree ? [
     '状态：未提交',
     `基于：${parentHash}`,
-    `变更：${commit.files} 个文件，新增 ${commit.additions} 行，删除 ${commit.deletions} 行`,
     '',
     message,
   ] : [
@@ -536,10 +534,7 @@ function CommitDetails({ commit }: { commit: Commit }) {
     `父级：${parentHash}`,
     `作者：${commit.author} <${email}>`,
     `提交人：${committer} <${committerEmail}>`,
-    `作者日期：${formatLocalDateTime(authorTime)}`,
     `提交日期：${formatLocalDateTime(commitTime)}`,
-    `引用：${commit.branches?.join(', ') || '—'}`,
-    `变更：${commit.files} 个文件，新增 ${commit.additions} 行，删除 ${commit.deletions} 行`,
     '',
     message,
   ]).join('\n')

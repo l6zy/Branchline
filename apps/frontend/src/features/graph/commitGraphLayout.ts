@@ -201,7 +201,7 @@ function chooseDetachedNodeSlot(active: ActivePath[], minSlot: number, maxSlot: 
 }
 
 function cornerRadius(horizontalDistance: number, verticalDistance: number) {
-  return Math.min(6, Math.abs(horizontalDistance) / 2, Math.abs(verticalDistance))
+  return Math.min(10, Math.abs(horizontalDistance) / 2, Math.abs(verticalDistance))
 }
 
 function fullPath(fromX: number, toX: number, rowHeight: number) {

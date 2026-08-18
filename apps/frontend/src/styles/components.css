@@ -74,7 +74,7 @@
 
 .nav-row:hover, .tree-row:hover { color: var(--text); background: var(--panel-3); }
 
-.nav-row.active, .tree-row.active { color: #69b1ff; background: var(--accent-dim); }
+.nav-row.active, .tree-row.active { color: var(--accent); background: var(--accent-dim); }
 
 .nav-row.active svg, .tree-row.active svg { color: var(--accent); }
 
@@ -552,13 +552,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .auto-fetch-toggle input:focus-visible + .toggle-track { outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
 
-.auto-fetch-field { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.auto-fetch-field { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 14px; }
 
-.auto-fetch-field select { min-width: 104px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; outline: 0; color: var(--text); background: var(--panel-2); font-size: 11px; cursor: pointer; }
+.auto-fetch-field select { min-width: 104px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; outline: 0; color: var(--text); background: var(--panel-2); font-size: 12px; cursor: pointer; }
 
 .auto-fetch-field select:focus { border-color: var(--accent); }
 
 .auto-fetch-field select:disabled { opacity: .5; cursor: not-allowed; }
+
+.local-polling-settings { padding-top: 9px; display: grid; gap: 4px; border-top: 1px solid var(--line-soft); }
 
 .auto-fetch-meta { min-height: 29px; padding-top: 9px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
 
@@ -670,13 +672,13 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .shortcut-row kbd { min-width: 54px; text-align: center; }
 
-.app-notice { position: fixed; right: 18px; bottom: 39px; max-width: min(440px, calc(100vw - 36px)); min-height: 38px; padding: 8px 10px 8px 12px; display: flex; align-items: center; gap: 10px; overflow: hidden; border: 1px solid #15395b; border-radius: 8px; color: #bae0ff; background: #111a2c; box-shadow: 0 12px 35px rgba(0,0,0,.35); font-size: 14px; text-align: left; cursor: pointer; z-index: 30; animation: popIn .18s ease-out; }
+.app-notice { position: fixed; right: 18px; bottom: 39px; max-width: min(440px, calc(100vw - 36px)); min-height: 38px; padding: 8px 10px 8px 12px; display: flex; align-items: center; gap: 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 8px; color: var(--accent-text); background: var(--accent-dim); box-shadow: var(--shadow-panel); font-size: 14px; text-align: left; cursor: pointer; z-index: 30; animation: popIn .18s ease-out; }
 
-.app-notice::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: #69b1ff; transform-origin: left; animation: noticeCountdown 5s linear forwards; }
+.app-notice::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--accent-text); transform-origin: left; animation: noticeCountdown 5s linear forwards; }
 
 .app-notice:hover::after, .app-notice:focus-visible::after { animation-play-state: paused; }
 
-.app-notice svg { flex: 0 0 auto; margin-left: auto; color: #69b1ff; }
+.app-notice svg { flex: 0 0 auto; margin-left: auto; color: var(--accent-text); }
 
 /* Tree depth is applied to the virtual rows so nested directories remain aligned. */
 

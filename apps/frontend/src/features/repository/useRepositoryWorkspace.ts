@@ -8,24 +8,20 @@ import {
 } from '../../repository'
 import { selectStartupRepository, type RecentRepository } from './repositoryPersistence'
 import { repositoryParentFromSnapshot, type RepositoryParent } from './repositoryParents'
+import {
+  AUTO_FETCH_INTERVALS,
+  DEFAULT_REPOSITORY_REFRESH_SETTINGS,
+  LOCAL_POLLING_INTERVALS,
+  normalizeRepositoryRefreshSettings,
+  type RepositoryRefreshSettings,
+} from './repositoryRefreshSettings'
 
 const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
 const STARTUP_REPOSITORY_KEY = 'branchline.startupRepository.v1'
 const AUTO_FETCH_SETTINGS_KEY = 'branchline.autoFetchSettings.v1'
 const NOTICE_DURATION = 5 * 1000
-const LOCAL_REPOSITORY_POLL_INTERVAL = 1500
 
-export type AutoFetchSettings = {
-  enabled: boolean
-  intervalMinutes: number
-}
-
-const DEFAULT_AUTO_FETCH_SETTINGS: AutoFetchSettings = {
-  enabled: true,
-  intervalMinutes: 5,
-}
-
-const AUTO_FETCH_INTERVALS = [1, 5, 10, 15, 30]
+export type AutoFetchSettings = RepositoryRefreshSettings
 
 export type { RecentRepository } from './repositoryPersistence'
 
@@ -51,15 +47,9 @@ function readStartupRepositoryPath() {
 function readAutoFetchSettings(): AutoFetchSettings {
   try {
     const value = window.localStorage.getItem(AUTO_FETCH_SETTINGS_KEY)
-    if (!value) return DEFAULT_AUTO_FETCH_SETTINGS
-    const parsed = JSON.parse(value) as Partial<AutoFetchSettings>
-    const intervalMinutes = Number(parsed.intervalMinutes)
-    return {
-      enabled: parsed.enabled !== false,
-      intervalMinutes: AUTO_FETCH_INTERVALS.includes(intervalMinutes) ? intervalMinutes : DEFAULT_AUTO_FETCH_SETTINGS.intervalMinutes,
-    }
+    return normalizeRepositoryRefreshSettings(value ? JSON.parse(value) as Partial<AutoFetchSettings> : null)
   } catch {
-    return DEFAULT_AUTO_FETCH_SETTINGS
+    return DEFAULT_REPOSITORY_REFRESH_SETTINGS
   }
 }
 
@@ -314,7 +304,9 @@ export function useRepositoryWorkspace() {
       }
     }
     void synchronizeLocalState()
-    const timer = window.setInterval(() => void synchronizeLocalState(), LOCAL_REPOSITORY_POLL_INTERVAL)
+    const timer = autoFetchSettings.localPollingEnabled
+      ? window.setInterval(() => void synchronizeLocalState(), autoFetchSettings.localPollingIntervalSeconds * 1000)
+      : null
     const synchronizeWhenVisible = () => {
       if (!document.hidden) void synchronizeLocalState()
     }
@@ -322,11 +314,11 @@ export function useRepositoryWorkspace() {
     document.addEventListener('visibilitychange', synchronizeWhenVisible)
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      if (timer !== null) window.clearInterval(timer)
       window.removeEventListener('focus', synchronizeWhenVisible)
       document.removeEventListener('visibilitychange', synchronizeWhenVisible)
     }
-  }, [repository?.path])
+  }, [autoFetchSettings.localPollingEnabled, autoFetchSettings.localPollingIntervalSeconds, repository?.path])
 
   const updateAutoFetchSettings = useCallback((next: Partial<AutoFetchSettings>) => {
     setAutoFetchSettings((current) => {
@@ -335,6 +327,10 @@ export function useRepositoryWorkspace() {
         intervalMinutes: next.intervalMinutes !== undefined && AUTO_FETCH_INTERVALS.includes(next.intervalMinutes)
           ? next.intervalMinutes
           : current.intervalMinutes,
+        localPollingEnabled: next.localPollingEnabled ?? current.localPollingEnabled,
+        localPollingIntervalSeconds: next.localPollingIntervalSeconds !== undefined && LOCAL_POLLING_INTERVALS.includes(next.localPollingIntervalSeconds)
+          ? next.localPollingIntervalSeconds
+          : current.localPollingIntervalSeconds,
       }
       try {
         window.localStorage.setItem(AUTO_FETCH_SETTINGS_KEY, JSON.stringify(updated))
@@ -364,7 +360,11 @@ export function useRepositoryWorkspace() {
     fetchNow,
     autoFetchEnabled: autoFetchSettings.enabled,
     fetchIntervalMinutes: autoFetchSettings.intervalMinutes,
+    localPollingEnabled: autoFetchSettings.localPollingEnabled,
+    localPollingIntervalSeconds: autoFetchSettings.localPollingIntervalSeconds,
     setAutoFetchEnabled: (enabled: boolean) => updateAutoFetchSettings({ enabled }),
     setFetchIntervalMinutes: (intervalMinutes: number) => updateAutoFetchSettings({ intervalMinutes }),
+    setLocalPollingEnabled: (enabled: boolean) => updateAutoFetchSettings({ localPollingEnabled: enabled }),
+    setLocalPollingIntervalSeconds: (seconds: number) => updateAutoFetchSettings({ localPollingIntervalSeconds: seconds }),
   }
 }

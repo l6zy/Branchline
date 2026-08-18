@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { commitMatchesQuery, matchingCommitIds, nextSearchMatch, visibleHistoryCommits } from './historySearch'
+import { commitMatchesQuery, matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits } from './historySearch'
 
 const commits = [
   { id: 'a1', fullHash: 'aaaa1111', title: 'Prepare release', author: 'Alice' },
@@ -26,5 +26,11 @@ describe('history search', () => {
     expect(nextSearchMatch(['a1', 'b2'], 'a1', -1)).toBe('b2')
     expect(nextSearchMatch(['a1', 'b2'], 'missing', 1)).toBe('a1')
     expect(nextSearchMatch([], 'a1', 1)).toBeNull()
+  })
+
+  it('reuses an unchanged search summary to avoid another parent render', () => {
+    const current = { current: 0, total: 0 }
+    expect(retainUnchangedSearchSummary(current, { current: 0, total: 0 })).toBe(current)
+    expect(retainUnchangedSearchSummary(current, { current: 1, total: 2 })).toEqual({ current: 1, total: 2 })
   })
 })

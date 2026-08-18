@@ -35,4 +35,10 @@ describe('semantic style architecture', () => {
     expect(themeOverrides).not.toContain('.theme-light .button-danger')
     expect(themeOverrides).not.toContain('.theme-light .fetch-button')
   })
+
+  it('uses theme tokens for app notices', () => {
+    const noticeRule = components.match(/\.app-notice \{[^}]+\}/)?.[0] ?? ''
+    expect(noticeRule).toContain('color: var(--accent-text);')
+    expect(noticeRule).toContain('background: var(--accent-dim);')
+  })
 })

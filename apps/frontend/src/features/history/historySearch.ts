@@ -1,5 +1,10 @@
 export type HistorySearchMode = 'locate' | 'filter'
 
+export type HistorySearchSummary = {
+  current: number
+  total: number
+}
+
 export type HistorySearchCommit = {
   id: string
   fullHash?: string
@@ -38,4 +43,8 @@ export function nextSearchMatch(matches: string[], selected: string, direction: 
   const currentIndex = matches.indexOf(selected)
   if (currentIndex < 0) return direction === 1 ? matches[0] : matches[matches.length - 1]
   return matches[(currentIndex + direction + matches.length) % matches.length]
+}
+
+export function retainUnchangedSearchSummary(current: HistorySearchSummary, next: HistorySearchSummary) {
+  return current.current === next.current && current.total === next.total ? current : next
 }

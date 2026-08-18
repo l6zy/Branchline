@@ -20,7 +20,7 @@ import { RebaseDialog } from './features/operation/RebaseDialog'
 import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './features/graph/commitGraphLayout'
 import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
-import { matchingCommitIds, nextSearchMatch, visibleHistoryCommits, type HistorySearchMode } from './features/history/historySearch'
+import { matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits, type HistorySearchMode, type HistorySearchSummary } from './features/history/historySearch'
 import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
 import { formatLocalDateTime } from './dateTime'
 import { isBooleanRecord, usePersistentState } from './persistentState'
@@ -101,7 +101,7 @@ type Commit = {
 type WorkspaceView = 'history' | 'changes' | 'stash' | 'compare' | 'merge' | 'operation' | StructureView
 type TimeFilter = 'all' | 'day' | 'week' | 'month'
 type SearchNavigationAction = { sequence: number; direction: 1 | -1 }
-type SearchSummary = { current: number; total: number }
+type SearchSummary = HistorySearchSummary
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
 type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash'; label: string; detail: string }
 
@@ -375,6 +375,8 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     return { start, end }
   }, [filtered.length, listHeight, scrollTop])
   const visibleCommits = filtered.slice(virtualRange.start, virtualRange.end)
+  const searchMatchIndex = searchMatches.indexOf(selected)
+  const searchMatchCount = searchMatches.length
   useEffect(() => {
     const element = commitListRef.current
     if (!element) return
@@ -386,9 +388,8 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   }, [])
   useEffect(() => () => { if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current) }, [])
   useEffect(() => {
-    const index = searchMatches.indexOf(selected)
-    onSearchSummaryChange({ current: index >= 0 ? index + 1 : 0, total: searchMatches.length })
-  }, [onSearchSummaryChange, searchMatches, selected])
+    onSearchSummaryChange({ current: searchMatchIndex >= 0 ? searchMatchIndex + 1 : 0, total: searchMatchCount })
+  }, [onSearchSummaryChange, searchMatchCount, searchMatchIndex])
   useEffect(() => {
     if (!deferredQuery.trim() || !searchMatches.length || searchMatchSet.has(selected)) return
     onSelect(searchMatches[0])
@@ -621,7 +622,7 @@ function RepositoryWelcome({ recentRepositories, openingRepository, onOpenReposi
 }
 
 export default function App() {
-  const { repository, parentRepository, recentRepositories, openingRepository, fetching, repositoryNotice, pauseRepositoryNotice, resumeRepositoryNotice, setRepositoryNotice, applySnapshot, openRepository, openRepositoryPath, openSubmodulePath, returnToParentRepository, fetchNow, autoFetchEnabled, fetchIntervalMinutes, setAutoFetchEnabled, setFetchIntervalMinutes, lastFetchAt } = useRepositoryWorkspace()
+  const { repository, parentRepository, recentRepositories, openingRepository, fetching, repositoryNotice, pauseRepositoryNotice, resumeRepositoryNotice, setRepositoryNotice, applySnapshot, openRepository, openRepositoryPath, openSubmodulePath, returnToParentRepository, fetchNow, autoFetchEnabled, fetchIntervalMinutes, localPollingEnabled, localPollingIntervalSeconds, setAutoFetchEnabled, setFetchIntervalMinutes, setLocalPollingEnabled, setLocalPollingIntervalSeconds, lastFetchAt } = useRepositoryWorkspace()
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState('branchline.sidebarCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
   const [sidebarWidth, setSidebarWidth] = usePersistentState('branchline.sidebarWidth.v1', 252, isSidebarWidth)
   const [inspectorWidth, setInspectorWidth] = usePersistentState('branchline.inspectorWidth.v1', 360, isInspectorWidth)
@@ -632,6 +633,9 @@ export default function App() {
   const [searchMode, setSearchMode] = useState<HistorySearchMode>('locate')
   const [searchAction, setSearchAction] = useState<SearchNavigationAction>({ sequence: 0, direction: 1 })
   const [searchSummary, setSearchSummary] = useState<SearchSummary>({ current: 0, total: 0 })
+  const handleSearchSummaryChange = useCallback((next: SearchSummary) => {
+    setSearchSummary((current) => retainUnchangedSearchSummary(current, next))
+  }, [])
   const [repositorySwitcherSignal, setRepositorySwitcherSignal] = useState(0)
   const [branchFilter, setBranchFilter] = useState('all')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
@@ -659,12 +663,12 @@ export default function App() {
   const expandedRepositoryPath = useRef<string | null>(null)
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
-  const workingTreeCommit = repository
+  const workingTreeCommit = useMemo(() => repository
     ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository))
-    : null
-  const activeCommits: Commit[] = workingTreeCommit
+    : null, [repository])
+  const activeCommits = useMemo<Commit[]>(() => workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
-    : repository?.commits ?? []
+    : repository?.commits ?? [], [repository?.commits, workingTreeCommit])
   const availableBranches = repository?.branches ?? []
   const selectedCommitBase = activeCommits.find((commit) => commit.id === selected) ?? activeCommits[0] ?? emptyCommit
   const selectedWorkingTree = selectedCommitBase.status === 'working'
@@ -1058,7 +1062,7 @@ export default function App() {
       </ContextMenu>}
       <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
-          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={setSearchSummary} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReference={repository.stashes[0]?.reference ?? 'stash@{0}'} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onOpenStash={() => setWorkspaceView('stash')} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
+          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReference={repository.stashes[0]?.reference ?? 'stash@{0}'} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onOpenStash={() => setWorkspaceView('stash')} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
           {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
         </section>}
         {workspaceView === 'compare' && <ComparePanel repository={repository} initialBase={compareBase ?? undefined} initialTarget={compareBase ? repository?.branch : undefined} onNotice={setRepositoryNotice}/>} 
@@ -1102,7 +1106,7 @@ export default function App() {
       </div>
       <footer className="statusbar">
         <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{repository.operation?.label ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
-        <div ref={autoFetchRef} className="statusbar-secondary"><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置自动 Fetch"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="自动 Fetch 配置"><div className="auto-fetch-heading"><div><strong>自动 Fetch</strong><small>在后台定期更新远程引用</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><label className="auto-fetch-field"><span>获取间隔</span><select value={fetchIntervalMinutes} onChange={(event) => setFetchIntervalMinutes(Number(event.target.value))} disabled={!autoFetchEnabled}>{[1, 5, 10, 15, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select></label><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</Button></div>}</div>
+        <div ref={autoFetchRef} className="statusbar-secondary"><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置后台同步"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="后台同步配置"><div className="auto-fetch-heading"><div><strong>后台同步</strong><small>控制远程引用更新与本地状态采样</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><label className="auto-fetch-field"><span>获取间隔</span><select value={fetchIntervalMinutes} onChange={(event) => setFetchIntervalMinutes(Number(event.target.value))} disabled={!autoFetchEnabled}>{[1, 5, 10, 15, 30].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select></label><div className="local-polling-settings"><label className="auto-fetch-toggle"><span><strong>本地状态采样</strong><small>定期检测其他工具产生的仓库变更</small></span><input type="checkbox" checked={localPollingEnabled} onChange={(event) => setLocalPollingEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><label className="auto-fetch-field"><span>采样间隔</span><select value={localPollingIntervalSeconds} onChange={(event) => setLocalPollingIntervalSeconds(Number(event.target.value))} disabled={!localPollingEnabled}>{[2, 5, 10, 30].map((seconds) => <option key={seconds} value={seconds}>{seconds} 秒</option>)}</select></label></div><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</Button></div>}</div>
       </footer></> : <RepositoryWelcome recentRepositories={recentRepositories} openingRepository={openingRepository} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={(path) => void handleOpenRepositoryPath(path)}/>} 
     </div>
     {openingRepository && <div className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>正在加载仓库</strong><span>正在读取分支、提交图谱、Worktree 与 Submodule…</span></div></div>}

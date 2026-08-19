@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Archive, ArrowDown, Check, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Plus, Rows3, Trash2 } from 'lucide-react'
+import { Archive, ArrowDown, Check, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import {
@@ -10,8 +10,10 @@ import {
   loadRepositoryFileDiff,
   loadRepositoryUnstagedFileDiff,
   restoreRepositoryPatch,
+  clearRepositoryCommitTemplate,
   stageRepositoryFiles,
   stageRepositoryPatch,
+  updateRepositoryCommitTemplate,
   unstageRepositoryFiles,
   type RepositoryFile,
   type RepositorySnapshot,
@@ -29,14 +31,12 @@ type StagingPageProps = {
   onOpenConflict?: (path: string) => void
 }
 
-function parseCommitTemplate(content: string) {
-  const lines = content.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('#'))
-  const titleIndex = lines.findIndex((line) => line.trim())
-  if (titleIndex < 0) return { title: '', body: '' }
-  return {
-    title: lines[titleIndex].trimEnd(),
-    body: lines.slice(titleIndex + 1).join('\n').trim(),
-  }
+function templateMessageLines(content: string) {
+  return content.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('#'))
+}
+
+function templateMessage(content: string) {
+  return templateMessageLines(content).join('\n')
 }
 
 function fileName(path: string) {
@@ -59,8 +59,9 @@ function getFileStatus(type: string) {
 }
 
 export function StagingPage({ repository, onSnapshot, onNotice, onOperationChange, onOpenHistory, onOpenLineHistory, onOpenConflict }: StagingPageProps) {
-  const [title, setTitle] = useState('')
-  const [body, setBody] = useState('')
+  const [fullMessage, setFullMessage] = useState('')
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
+  const [templateDraft, setTemplateDraft] = useState('')
   const [amend, setAmend] = useState(false)
   const [sign, setSign] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -95,9 +96,8 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
   }, [files, selectedPath])
 
   const applyConfiguredTemplate = () => {
-    const parsed = parseCommitTemplate(repository?.commitTemplate?.content ?? '')
-    setTitle(parsed.title)
-    setBody(parsed.body)
+    const content = repository?.commitTemplate?.content ?? ''
+    setFullMessage(templateMessage(content))
   }
 
   useEffect(() => {
@@ -105,9 +105,8 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
     const key = `${repository?.path ?? 'empty'}\u0000${template?.path ?? ''}\u0000${template?.content ?? ''}`
     if (appliedTemplateKey.current === key) return
     appliedTemplateKey.current = key
-    const parsed = parseCommitTemplate(template?.content ?? '')
-    setTitle(parsed.title)
-    setBody(parsed.body)
+    setFullMessage(templateMessage(template?.content ?? ''))
+    setTemplateDraft(template?.content ?? '')
   }, [repository?.commitTemplate?.content, repository?.commitTemplate?.path, repository?.path])
 
   const run = async (action: () => Promise<RepositorySnapshot>, success: string, operationLabel?: string) => {
@@ -212,9 +211,37 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
     : onNotice('快速 Stash 需要先打开本地仓库')
   const commit = () => {
     if (!repository) return onNotice('请先打开本地仓库')
-    const message = [title.trim(), body.trim()].filter(Boolean).join('\n\n')
-    if (!message) return onNotice('提交信息不能为空')
+    const message = fullMessage
+    if (!message.trim()) return onNotice('提交信息不能为空')
     return run(() => commitRepository(repository.path, message, amend, sign), '提交完成，工作区已刷新', '正在创建提交…')
+  }
+  const saveRepositoryTemplate = async () => {
+    if (!repository) return
+    setBusy(true)
+    try {
+      const snapshot = await updateRepositoryCommitTemplate(repository.path, templateDraft)
+      onSnapshot(snapshot)
+      setTemplateEditorOpen(false)
+      onNotice('当前仓库提交模板已保存')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const restoreGlobalTemplate = async () => {
+    if (!repository) return
+    setBusy(true)
+    try {
+      const snapshot = await clearRepositoryCommitTemplate(repository.path)
+      onSnapshot(snapshot)
+      setTemplateEditorOpen(false)
+      onNotice('当前仓库已恢复使用全局提交模板')
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
   }
   const fileRow = (file: RepositoryFile, action: () => void, icon: 'add' | 'remove', scope: 'staged' | 'unstaged') => {
     const Icon = icon === 'add' ? Plus : Minus
@@ -259,11 +286,12 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
           </div>
         </div>
         <span className={`workspace-resizer workspace-resizer-row ${filesHeight.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件列表和提交面板高度" onPointerDown={filesHeight.beginResize}/>
-        <div className="commit-compose"><div className="template-row"><span title={repository?.commitTemplate?.path}><FileText size={14}/> {repository?.commitTemplate ? `模板：${fileName(repository.commitTemplate.path)}` : '未配置 commit.template'}</span><button type="button" onClick={applyConfiguredTemplate} disabled={!repository?.commitTemplate}>重新应用模板</button></div><input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="提交标题" placeholder="提交标题"/><textarea value={body} onChange={(event) => setBody(event.target.value)} aria-label="提交正文" placeholder="补充提交说明（可选）"/><div className="commit-options"><label><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)}/> Amend</label><label><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)}/> 签名</label></div><Button variant="primary" onClick={commit} disabled={!stagedFiles.length || busy}><GitCommitHorizontal size={16}/> {busy ? '处理中…' : `提交 ${stagedFiles.length} 个文件`} <span>⌘↵</span></Button></div>
+        <div className="commit-compose"><div className="template-row"><span title={repository?.commitTemplate?.path}><FileText size={14}/> {repository?.commitTemplate ? `模板：${fileName(repository.commitTemplate.path)}` : '未配置 commit.template'}</span><div className="template-row-actions"><button type="button" className="template-icon-button" onClick={applyConfiguredTemplate} disabled={!repository?.commitTemplate} title="重新应用模板" aria-label="重新应用模板"><RefreshCw size={14}/></button><button type="button" className="template-icon-button" onClick={() => { setTemplateDraft(repository?.commitTemplate?.content ?? ''); setTemplateEditorOpen(true) }} title="编辑模板" aria-label="编辑模板"><Pencil size={14}/></button></div></div><textarea className="commit-full-message" value={fullMessage} onChange={(event) => setFullMessage(event.target.value)} aria-label="完整提交信息" placeholder="输入完整提交信息" spellCheck={false}/><div className="commit-options"><label><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)}/> Amend</label><label><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)}/> 签名</label></div><Button variant="primary" onClick={commit} disabled={!stagedFiles.length || busy}><GitCommitHorizontal size={16}/> {busy ? '处理中…' : `提交 ${stagedFiles.length} 个文件`} <span>⌘↵</span></Button></div>
       </div>
       <span className={`workspace-resizer workspace-resizer-column ${stagingWidth.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件面板和 Diff 宽度" onPointerDown={stagingWidth.beginResize}/>
       <div className="staging-preview-pane">{selectedPath && files.length ? <DiffPanel files={files} repositoryPath={repository?.path} loadRows={loadStagingRows} wide={widePreview} onWideChange={setWidePreview} initialFile={selectedIndex} hideFileList allowStage={Boolean(files[selectedIndex]?.unstaged)} onStagePatch={(path, patch, description) => void stagePatch(path, patch, description)} onRestorePatch={(path, patch, description) => void restorePatch(path, patch, description)} onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice('未提交的新增或修改行尚无提交历史，请查询对应旧版本行或提交后再查看'); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>选择文件查看变更</strong><span>点击左侧文件即可查看完整内容、统一 Diff 或并排 Diff。</span></div>}</div>
     </div>
+    {templateEditorOpen && <div className="template-editor-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) setTemplateEditorOpen(false) }}><section className="template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="template-editor-title"><header className="template-editor-heading"><div><h2 id="template-editor-title">编辑提交模板</h2><span title={repository?.commitTemplate?.path}>{repository?.commitTemplate?.path ?? '当前仓库 commit.template'}</span></div><button type="button" className="template-editor-close" onClick={() => setTemplateEditorOpen(false)} disabled={busy} aria-label="关闭模板编辑器">×</button></header><div className="template-editor-body"><textarea value={templateDraft} onChange={(event) => setTemplateDraft(event.target.value)} aria-label="当前仓库完整提交模板" placeholder="输入当前仓库的完整提交模板" spellCheck={false} autoFocus /></div><footer className="template-editor-actions"><Button variant="secondary" onClick={() => setTemplateEditorOpen(false)} disabled={busy}>取消</Button><Button variant="secondary" onClick={() => void restoreGlobalTemplate()} disabled={busy}>恢复全局模板</Button><Button variant="primary" onClick={() => void saveRepositoryTemplate()} disabled={busy}>保存当前仓库模板</Button></footer></section></div>}
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>查看文件历史</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>查看逐行归属（Blame）</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>复制文件路径</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>丢弃未暂存改动…</span></Button></>}</ContextMenu>}
   </section>
 }

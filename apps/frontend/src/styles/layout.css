@@ -156,6 +156,10 @@
 
 .statusbar-secondary { position: relative; min-width: 0; }
 
+.status-command-log { min-height: 22px; padding: 0 5px; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 4px; color: var(--text-secondary); background: transparent; font: inherit; cursor: pointer; }
+
+.status-command-log:hover { color: var(--accent); background: var(--accent-dim); }
+
 .global-search input, .content-tabs > button, .fetch-button, .button-primary, .filter-button { font-size: 12px; }
 
 .workspace-page-heading p, .workspace-empty span, .workspace-hint span { font-size: 12px; }

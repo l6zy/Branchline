@@ -954,6 +954,53 @@
 
 .stage-section { margin-top: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 
+.commit-full-message, .commit-template-editor textarea, .git-config-template-field textarea { width: 100%; min-height: 108px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); font: 11px/1.55 var(--font-code); }
+
+.commit-full-message { min-height: 126px; padding: 8px; }
+
+.commit-template-editor { min-width: 0; flex: 0 0 auto; display: grid; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+
+.commit-template-editor textarea { display: block; width: 100%; min-height: 120px; max-height: 260px; margin: 0; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); font: 11px/1.55 var(--font-code); }
+
+.commit-template-editor > div { min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+.commit-template-editor > div .button { flex: 0 0 auto; white-space: nowrap; }
+
+.template-editor-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: clamp(16px, 4vw, 48px); background: rgba(0, 0, 0, .58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
+
+.template-editor-dialog { width: min(920px, calc(100vw - 32px)); height: min(760px, calc(100vh - 32px)); max-height: calc(100vh - 32px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); box-shadow: 0 24px 72px rgba(0, 0, 0, .46); animation: popIn .18s ease-out; }
+
+.template-editor-heading { min-width: 0; padding: 18px 20px 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+
+.template-editor-heading h2 { margin: 0 0 5px; color: var(--text); font-size: 16px; line-height: 1.25; }
+
+.template-editor-heading span { display: block; min-width: 0; overflow: hidden; color: var(--muted); font: 11px/1.4 var(--font-code); text-overflow: ellipsis; white-space: nowrap; }
+
+.template-editor-close { flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: transparent; font-size: 22px; line-height: 1; cursor: pointer; }
+
+.template-editor-close:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
+
+.template-editor-close:disabled { opacity: .45; cursor: not-allowed; }
+
+.template-editor-body { min-height: 0; padding: 18px 20px; display: flex; background: var(--panel); }
+
+.template-editor-body textarea { width: 100%; min-height: 0; padding: 14px; resize: none; border: 1px solid var(--line); border-radius: 7px; outline: 0; color: var(--text); background: var(--bg); font: 13px/1.65 var(--font-code); tab-size: 2; }
+
+.template-editor-body textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+
+.template-editor-actions { min-width: 0; padding: 14px 20px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); background: var(--panel-2); }
+
+@media (max-width: 640px) {
+  .template-editor-backdrop { padding: 10px; }
+  .template-editor-dialog { width: 100%; height: calc(100vh - 20px); max-height: calc(100vh - 20px); }
+  .template-editor-heading, .template-editor-body, .template-editor-actions { padding-left: 14px; padding-right: 14px; }
+  .template-editor-actions .button { flex: 1 1 auto; }
+}
+
+.git-config-template-field { display: block; }
+
+.git-config-template-field textarea { min-height: 148px; margin-top: 10px; padding: 9px; }
+
 .stage-section-header { min-height: 43px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line-soft); background: var(--panel-2); }
 
 .stage-section-name { min-width: 0; display: flex; align-items: center; gap: 8px; }
@@ -1040,7 +1087,7 @@
 
 .stage-empty { min-height: 38px; padding: 0 7px; display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 10px; }
 
-.commit-compose { min-height: 0; margin-top: 8px; padding-top: 10px; display: grid; grid-template-rows: auto 38px minmax(130px, 1fr) 35px 36px; }
+.commit-compose { min-height: 0; margin-top: 8px; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
 
 .commit-compose input, .commit-compose textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); outline: 0; color: var(--text); background: var(--panel-2); font-size: 10px; }
 
@@ -1059,6 +1106,10 @@
 .commit-compose .button-primary { width: 100%; height: 36px; }
 
 .commit-compose .button-primary span { margin-left: auto; color: #326249; font-size: 10px; }
+
+.commit-compose .commit-full-message, .commit-compose .commit-template-editor textarea { min-height: 120px; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); font: 11px/1.55 var(--font-code); }
+
+.commit-compose .commit-full-message { min-height: 150px; }
 
 .commit-columns-header { font-size: 12px; }
 

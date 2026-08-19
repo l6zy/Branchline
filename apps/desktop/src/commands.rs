@@ -43,6 +43,7 @@ pub async fn update_git_user_config(
     default_branch: String,
     autocrlf: String,
     pull_strategy: String,
+    commit_template_content: String,
 ) -> Result<GitUserConfig, String> {
     tauri::async_runtime::spawn_blocking(move || {
         git::update_git_user_config(
@@ -51,10 +52,43 @@ pub async fn update_git_user_config(
             &default_branch,
             &autocrlf,
             &pull_strategy,
+            &commit_template_content,
         )
     })
     .await
     .map_err(|error| task_error("保存 Git 配置", error))?
+}
+
+#[tauri::command]
+pub async fn update_repository_commit_template(
+    repository_path: String,
+    content: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::update_repository_commit_template(&repository_path, &content)
+    })
+    .await
+    .map_err(|error| task_error("保存仓库提交模板", error))?
+}
+
+#[tauri::command]
+pub async fn clear_repository_commit_template(
+    repository_path: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || git::clear_repository_commit_template(&repository_path))
+        .await
+        .map_err(|error| task_error("移除仓库提交模板", error))?
+}
+
+#[tauri::command]
+pub async fn load_command_logs() -> Result<Vec<crate::models::CommandLogEntry>, String> {
+    Ok(git::load_command_logs())
+}
+
+#[tauri::command]
+pub async fn clear_command_logs() -> Result<(), String> {
+    git::clear_command_logs();
+    Ok(())
 }
 
 #[tauri::command]

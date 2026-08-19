@@ -1,5 +1,5 @@
 use crate::models::{
-    BlameLine, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate,
+    BlameLine, CommandLogEntry, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate,
     MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommit,
     RepositoryCommitStats, RepositoryCommitTemplate, RepositoryComparison, RepositoryFile,
     RepositoryOperationState, RepositoryOperationStep, RepositorySnapshot, RepositoryStash,
@@ -13,8 +13,9 @@ use std::{
     path::{Path, PathBuf},
     io::Write,
     process::{Command, Stdio},
-    time::UNIX_EPOCH,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -23,18 +24,79 @@ const LANE_COLORS: [&str; 6] = [
     "#36cfc9", "#9254de", "#fa8c16", "#52c41a", "#f759ab", "#597ef7",
 ];
 
+static COMMAND_LOGS: OnceLock<Mutex<Vec<CommandLogEntry>>> = OnceLock::new();
+static COMMAND_LOG_ID: OnceLock<Mutex<u64>> = OnceLock::new();
+
+fn command_logs() -> &'static Mutex<Vec<CommandLogEntry>> {
+    COMMAND_LOGS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn next_command_log_id() -> u64 {
+    let mut id = COMMAND_LOG_ID.get_or_init(|| Mutex::new(0)).lock().expect("command log id lock");
+    *id += 1;
+    *id
+}
+
+fn sanitize_command(args: &[String]) -> String {
+    let mut redact_next = false;
+    args.iter().map(|part| {
+        let value = if redact_next { "[redacted]".to_string() } else {
+            let shortened: String = part.chars().take(180).collect();
+            if shortened.chars().count() < part.chars().count() { format!("{shortened}…") } else { shortened }
+        };
+        redact_next = matches!(part.as_str(), "-m" | "--message" | "user.email" | "user.name");
+        value
+    }).collect::<Vec<_>>().join(" ")
+}
+
+fn limit_log_output(value: String) -> String {
+    let shortened: String = value.chars().take(20_000).collect();
+    if shortened.chars().count() < value.chars().count() { format!("{shortened}\n… 输出已截断") } else { shortened }
+}
+
+fn record_command(path: &Path, args: &[String], output: &std::process::Output, started: SystemTime) {
+    let stdout = limit_log_output(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    let stderr = limit_log_output(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    let entry = CommandLogEntry {
+        id: next_command_log_id(),
+        started_at: started.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),
+        duration_ms: started.elapsed().unwrap_or(Duration::ZERO).as_millis(),
+        command: if path.as_os_str().is_empty() { format!("git {}", sanitize_command(args)) } else { format!("git -C {} {}", path.display(), sanitize_command(args)) },
+        working_directory: path.to_string_lossy().to_string(),
+        success: output.status.success(),
+        exit_code: output.status.code(),
+        stdout,
+        stderr,
+    };
+    if let Ok(mut logs) = command_logs().lock() {
+        logs.push(entry);
+        if logs.len() > 500 { let excess = logs.len() - 500; logs.drain(0..excess); }
+    }
+}
+
+pub fn load_command_logs() -> Vec<CommandLogEntry> {
+    command_logs().lock().map(|logs| logs.clone()).unwrap_or_default()
+}
+
+pub fn clear_command_logs() {
+    if let Ok(mut logs) = command_logs().lock() { logs.clear(); }
+}
+
 fn command_output<I, S>(path: &Path, args: I) -> Result<String, String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let args: Vec<String> = args.into_iter().map(|value| value.as_ref().to_string_lossy().to_string()).collect();
+    let started = SystemTime::now();
     let mut command = Command::new("git");
-    command.arg("-C").arg(path).args(args);
+    command.arg("-C").arg(path).args(&args);
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let output = command
         .output()
         .map_err(|error| format!("无法启动 Git：{error}"))?;
+    record_command(path, &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
@@ -51,13 +113,16 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let args: Vec<String> = args.into_iter().map(|value| value.as_ref().to_string_lossy().to_string()).collect();
+    let started = SystemTime::now();
     let mut command = Command::new("git");
-    command.arg("-C").arg(path).args(args);
+    command.arg("-C").arg(path).args(&args);
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let output = command
         .output()
         .map_err(|error| format!("无法启动 Git：{error}"))?;
+    record_command(path, &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
@@ -78,13 +143,16 @@ fn optional_git_output(path: &Path, args: &[&str]) -> String {
 }
 
 fn global_git_output(args: &[&str]) -> Result<String, String> {
+    let args: Vec<String> = args.iter().map(|value| (*value).to_string()).collect();
+    let started = SystemTime::now();
     let mut command = Command::new("git");
-    command.args(args);
+    command.args(&args);
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let output = command
         .output()
         .map_err(|error| format!("无法启动 Git：{error}"))?;
+    record_command(Path::new(""), &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
@@ -102,6 +170,33 @@ fn global_git_config_value(key: &str) -> String {
 
 fn unset_global_git_config(key: &str) {
     let _ = global_git_output(&["config", "--global", "--unset-all", key]);
+}
+
+fn configured_global_commit_template_path() -> Option<PathBuf> {
+    let value = global_git_output(&["config", "--global", "--path", "--get", "commit.template"])
+        .ok()?
+        .trim()
+        .to_string();
+    (!value.is_empty()).then(|| PathBuf::from(value))
+}
+
+fn default_global_commit_template_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    let base = std::env::var_os("APPDATA")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    #[cfg(not(target_os = "windows"))]
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|value| PathBuf::from(value).join(".config")));
+    base.map(|path| path.join("Branchline").join("commit-template.txt"))
+        .ok_or_else(|| "无法确定用户配置目录".into())
+}
+
+fn resolved_git_path(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let value = git_output(root, &["rev-parse", "--git-path", name])?;
+    let path = PathBuf::from(value.trim());
+    Ok(if path.is_absolute() { path } else { root.join(path) })
 }
 
 pub fn load_git_user_config() -> GitUserConfig {
@@ -133,6 +228,11 @@ pub fn load_git_user_config() -> GitUserConfig {
         },
         autocrlf: autocrlf.into(),
         pull_strategy: pull_strategy.into(),
+        commit_template_path: configured_global_commit_template_path()
+            .map(|path| path.to_string_lossy().to_string()),
+        commit_template_content: configured_global_commit_template_path()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -142,6 +242,7 @@ pub fn update_git_user_config(
     default_branch: &str,
     autocrlf: &str,
     pull_strategy: &str,
+    commit_template_content: &str,
 ) -> Result<GitUserConfig, String> {
     let user_name = user_name.trim();
     let user_email = user_email.trim();
@@ -177,7 +278,47 @@ pub fn update_git_user_config(
             unset_global_git_config("pull.ff");
         }
     }
+    let template_content = commit_template_content.replace("\r\n", "\n");
+    if template_content.trim().is_empty() {
+        unset_global_git_config("commit.template");
+    } else {
+        let template_path = configured_global_commit_template_path()
+            .unwrap_or(default_global_commit_template_path()?);
+        if let Some(parent) = template_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| format!("创建全局模板目录失败：{error}"))?;
+        }
+        fs::write(&template_path, template_content.as_bytes())
+            .map_err(|error| format!("写入全局提交模板失败：{error}"))?;
+        let template_path = template_path.to_string_lossy().to_string();
+        global_git_output(&["config", "--global", "commit.template", &template_path])?;
+    }
     Ok(load_git_user_config())
+}
+
+pub fn update_repository_commit_template(
+    repository_path: &str,
+    content: &str,
+) -> Result<RepositorySnapshot, String> {
+    let root = repository_root(repository_path)?;
+    let template_path = resolved_git_path(&root, "branchline-commit-template.txt")?;
+    let template_content = content.replace("\r\n", "\n");
+    if template_content.trim().is_empty() {
+        let _ = git_output(&root, &["config", "--local", "--unset-all", "commit.template"]);
+        let _ = fs::remove_file(&template_path);
+    } else {
+        if let Some(parent) = template_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| format!("创建仓库模板目录失败：{error}"))?;
+        }
+        fs::write(&template_path, template_content.as_bytes())
+            .map_err(|error| format!("写入仓库提交模板失败：{error}"))?;
+        let template_path = template_path.to_string_lossy().to_string();
+        git_output(&root, &["config", "--local", "commit.template", &template_path])?;
+    }
+    read_repository(repository_path)
+}
+
+pub fn clear_repository_commit_template(repository_path: &str) -> Result<RepositorySnapshot, String> {
+    update_repository_commit_template(repository_path, "")
 }
 
 pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, String> {
@@ -2739,7 +2880,7 @@ pub fn commit_repository(
         args.push("-S".into());
     }
     args.push("-m".into());
-    args.push(message.trim().to_string());
+    args.push(message.to_string());
     git_output_owned(&root, &args).map(|_| ())
 }
 
@@ -3425,6 +3566,37 @@ mod tests {
         let committed = repository_state_token(&repository.0.to_string_lossy())
             .expect("read committed repository token");
         assert_ne!(committed, modified);
+    }
+
+    #[test]
+    fn saves_and_clears_a_repository_commit_template() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+
+        let snapshot = update_repository_commit_template(
+            &path,
+            "feat: complete message\n\nIssue: BL-42\n# editor hint\n",
+        )
+        .expect("save repository template");
+        let template = snapshot.commit_template.expect("read saved template");
+        assert_eq!(
+            template.content,
+            "feat: complete message\n\nIssue: BL-42\n# editor hint\n"
+        );
+        assert_eq!(
+            git_output(&repository.0, &["config", "--local", "--get", "commit.template"])
+                .expect("read local template setting")
+                .trim(),
+            template.path
+        );
+
+        let snapshot = clear_repository_commit_template(&path).expect("clear repository template");
+        assert!(
+            git_output(&repository.0, &["config", "--local", "--get", "commit.template"])
+                .is_err()
+        );
+        assert!(snapshot.commit_template.is_none() || snapshot.commit_template.unwrap().path != template.path);
+        assert!(!Path::new(&template.path).exists());
     }
 
     #[test]

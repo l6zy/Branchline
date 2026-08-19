@@ -9,6 +9,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::load_git_user_config,
             commands::update_git_user_config,
+            commands::update_repository_commit_template,
+            commands::clear_repository_commit_template,
+            commands::load_command_logs,
+            commands::clear_command_logs,
             commands::load_repository,
             commands::load_repository_state_token,
             commands::load_file_diff,

@@ -104,6 +104,22 @@ pub struct GitUserConfig {
     pub default_branch: String,
     pub autocrlf: String,
     pub pull_strategy: String,
+    pub commit_template_path: Option<String>,
+    pub commit_template_content: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandLogEntry {
+    pub id: u64,
+    pub started_at: u128,
+    pub duration_ms: u128,
+    pub command: String,
+    pub working_directory: String,
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Serialize)]

@@ -35,6 +35,20 @@ export type GitUserConfig = {
   defaultBranch: string
   autocrlf: 'true' | 'input' | 'false'
   pullStrategy: 'merge' | 'rebase' | 'ff-only'
+  commitTemplatePath?: string
+  commitTemplateContent?: string
+}
+
+export type CommandLogEntry = {
+  id: number
+  startedAt: number
+  durationMs: number
+  command: string
+  workingDirectory: string
+  success: boolean
+  exitCode?: number
+  stdout: string
+  stderr: string
 }
 
 export type RepositoryFile = {

@@ -1,7 +1,8 @@
-import type { BlameLine, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
+import type { BlameLine, CommandLogEntry, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
 
 export type {
   BlameLine,
+  CommandLogEntry,
   ConflictFileContent,
   FileHistoryEntry,
   GitUserConfig,
@@ -29,6 +30,22 @@ export async function loadGitUserConfig() {
 
 export async function updateGitUserConfig(config: GitUserConfig) {
   return invoke<GitUserConfig>('update_git_user_config', config)
+}
+
+export async function updateRepositoryCommitTemplate(repositoryPath: string, content: string) {
+  return invoke<RepositorySnapshot>('update_repository_commit_template', { repositoryPath, content })
+}
+
+export async function clearRepositoryCommitTemplate(repositoryPath: string) {
+  return invoke<RepositorySnapshot>('clear_repository_commit_template', { repositoryPath })
+}
+
+export async function loadCommandLogs() {
+  return invoke<CommandLogEntry[]>('load_command_logs', {})
+}
+
+export async function clearCommandLogs() {
+  return invoke('clear_command_logs', {})
 }
 
 export function isTauriRuntime() {

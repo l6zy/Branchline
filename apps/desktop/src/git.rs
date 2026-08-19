@@ -11,7 +11,8 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    process::Command,
+    io::Write,
+    process::{Command, Stdio},
     time::UNIX_EPOCH,
 };
 
@@ -181,6 +182,82 @@ pub fn update_git_user_config(
 
 pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, String> {
     command_output(path, args)
+}
+
+fn git_apply_cached(path: &Path, patch: &str) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(path).args([
+        "apply",
+        "--cached",
+        "--recount",
+        "--whitespace=nowarn",
+        "-",
+    ]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 Git：{error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "无法写入 Git patch".to_string())?
+        .write_all(patch.as_bytes())
+        .map_err(|error| format!("无法写入 Git patch：{error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("等待 Git 完成失败：{error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if message.is_empty() {
+            "Git 无法应用所选修改块".into()
+        } else {
+            message
+        })
+    }
+}
+
+fn git_apply_reverse(path: &Path, patch: &str) -> Result<(), String> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(path).args([
+        "apply",
+        "--reverse",
+        "--recount",
+        "--whitespace=nowarn",
+        "-",
+    ]);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法启动 Git：{error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "无法写入 Git patch".to_string())?
+        .write_all(patch.as_bytes())
+        .map_err(|error| format!("无法写入 Git patch：{error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("等待 Git 完成失败：{error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if message.is_empty() {
+            "Git 无法还原所选修改块".into()
+        } else {
+            message
+        })
+    }
 }
 
 fn git_success(path: &Path, args: &[&str]) -> bool {
@@ -684,6 +761,50 @@ pub fn parse_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String>
             .canonicalize()
             .map_err(|error| format!("无法访问仓库：{error}"))?;
         let candidate = path.join(file_path);
+        if candidate.exists() {
+            let resolved = candidate
+                .canonicalize()
+                .map_err(|error| format!("无法访问文件：{error}"))?;
+            if !resolved.starts_with(&root) {
+                return Err("文件路径超出仓库范围".into());
+            }
+            let content = std::fs::read_to_string(&resolved)
+                .map_err(|_| "暂不支持预览二进制文件".to_string())?;
+            rows = content
+                .lines()
+                .enumerate()
+                .map(|(index, code)| DiffLine {
+                    old: None,
+                    next: Some(index + 1),
+                    kind: "add".into(),
+                    code: code.to_string(),
+                })
+                .collect();
+        }
+    }
+    Ok(rows)
+}
+
+pub fn parse_unstaged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String> {
+    let file_path = validated_file_path(file_path)?;
+    let diff = optional_git_output(
+        path,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--no-color",
+            "--unified=100000",
+            "--",
+            &file_path,
+        ],
+    );
+    let mut rows = parse_diff_text(&diff);
+    if rows.is_empty() {
+        let root = path
+            .canonicalize()
+            .map_err(|error| format!("无法访问仓库：{error}"))?;
+        let candidate = root.join(&file_path);
         if candidate.exists() {
             let resolved = candidate
                 .canonicalize()
@@ -2317,6 +2438,73 @@ pub fn stage_files(
     let mut args = vec!["add".to_string(), "--".to_string()];
     args.extend(file_paths);
     git_output_owned(&root, &args)?;
+    Ok(parse_changed_files(&root))
+}
+
+pub fn stage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+    let root = repository_root(repository_path)?;
+    let mut patch = patch.trim_start_matches('\u{feff}').to_string();
+    if patch.trim().is_empty() {
+        return Err("没有选择要暂存的修改".into());
+    }
+    if patch.contains("new file mode 100644") {
+        if let Some(path) = patch
+            .lines()
+            .find_map(|line| line.strip_prefix("+++ b/"))
+        {
+            if git_success(&root, &["ls-files", "--error-unmatch", "--", path]) {
+                patch = patch
+                    .replace("new file mode 100644\n", "")
+                    .replace("--- /dev/null\n", &format!("--- a/{path}\n"));
+            }
+        }
+    }
+    let mut file_count = 0;
+    for line in patch.lines() {
+        let path = line
+            .strip_prefix("+++ b/")
+            .or_else(|| line.strip_prefix("--- a/"));
+        if let Some(path) = path {
+            validated_file_path(path)?;
+            file_count += 1;
+        }
+    }
+    if file_count == 0 {
+        return Err("暂存 patch 缺少有效文件路径".into());
+    }
+    git_apply_cached(&root, &patch)?;
+    Ok(parse_changed_files(&root))
+}
+
+pub fn restore_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+    let root = repository_root(repository_path)?;
+    let patch = patch.trim_start_matches('\u{feff}');
+    if patch.trim().is_empty() {
+        return Err("没有选择要还原的修改".into());
+    }
+    let mut file_path = None;
+    for line in patch.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            validated_file_path(path)?;
+            file_path = Some(path.to_string());
+        } else if let Some(path) = line.strip_prefix("--- a/") {
+            validated_file_path(path)?;
+            file_path = Some(path.to_string());
+        }
+    }
+    let file_path = file_path.ok_or_else(|| "还原 patch 缺少有效文件路径".to_string())?;
+    git_apply_reverse(&root, patch)?;
+    let tracked = git_success(&root, &["ls-files", "--error-unmatch", "--", &file_path]);
+    if !tracked {
+        let target = root.join(&file_path);
+        if target.is_file()
+            && std::fs::read_to_string(&target)
+                .map(|content| content.is_empty())
+                .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(target);
+        }
+    }
     Ok(parse_changed_files(&root))
 }
 

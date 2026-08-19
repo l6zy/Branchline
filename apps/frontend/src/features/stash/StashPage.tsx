@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Archive, Check, CornerDownLeft, FileCode2, Plus, Trash2 } from 'lucide-react'
 import {
   applyRepositoryStash,
@@ -12,6 +12,7 @@ import {
 import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
 import { Button } from '../../components/Button'
+import { useResizablePane } from '../../components/useResizablePane'
 
 export function StashPage({ repository, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
   const [message, setMessage] = useState('')
@@ -22,6 +23,7 @@ export function StashPage({ repository, onSnapshot, onNotice }: { repository: Re
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [widePreview, setWidePreview] = useState(false)
+  const stashWidth = useResizablePane('branchline.stashWidth.v1', 330, 260, 620, 'horizontal')
 
   useEffect(() => {
     const stashes = repository?.stashes ?? []
@@ -59,8 +61,9 @@ export function StashPage({ repository, onSnapshot, onNotice }: { repository: Re
     }
   }
 
-  return <section className="workspace-page stash-page">
-    <div className={`stash-workspace ${widePreview ? 'preview-wide' : ''}`}>
+  const workspaceStyle = { '--stash-control-width': `${stashWidth.value}px` } as CSSProperties
+  return <section className={`workspace-page stash-page ${stashWidth.resizing ? 'pane-resizing' : ''}`}>
+    <div className={`stash-workspace ${widePreview ? 'preview-wide' : ''}`} style={workspaceStyle}>
       <div className="stash-control-pane">
         <div className="stash-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="可选：输入 Stash 说明"/><label><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)}/>包含未跟踪文件</label><Button variant="primary" disabled={!repository || busy !== null} onClick={() => void run('create', () => createRepositoryStash(repository!.path, message, includeUntracked), '已保存工作区到 Stash')}><Plus size={14}/>{busy === 'create' ? '正在保存…' : '创建 Stash'}</Button></div>
         <div className="stash-list-heading"><strong>已保存的工作区</strong><span>{repository?.stashes.length ?? 0}</span></div>
@@ -72,6 +75,7 @@ export function StashPage({ repository, onSnapshot, onNotice }: { repository: Re
           {!repository && <div className="workspace-hint"><Archive size={26}/><strong>请先打开本地仓库</strong></div>}
         </div>
       </div>
+      <span className={`workspace-resizer workspace-resizer-column ${stashWidth.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整 Stash 列表和 Diff 宽度" onPointerDown={stashWidth.beginResize}/>
       <div className="stash-preview-pane">
         {filesLoading && <div className="drawer-preview-empty"><Archive size={28}/><strong>正在读取 Stash…</strong></div>}
         {filesError && <div className="drawer-preview-empty error"><Archive size={28}/><strong>无法读取 Stash</strong><span>{filesError}</span></div>}

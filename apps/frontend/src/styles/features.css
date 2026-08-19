@@ -104,7 +104,7 @@
 
 .commit-text-toolbar button:hover { color: var(--accent-text); border-color: var(--accent); }
 
-.commit-text-panel textarea { width: 100%; height: 126px; padding: 9px 10px; display: block; resize: vertical; border: 0; outline: 0; color: var(--text); background: var(--surface-base); font: 8.5px/1.6 var(--font-code); white-space: pre; height: 0; flex: 1; }
+.commit-text-panel textarea { width: 100%; height: 126px; padding: 9px 10px; display: block; resize: vertical; border: 0; outline: 0; color: var(--text); background: var(--panel); font: 8.5px/1.6 var(--font-code); white-space: pre; height: 0; flex: 1; }
 
 .commit-text-panel textarea { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 
@@ -182,7 +182,7 @@
 
 .diff-body { min-height: 0; display: grid; grid-template-columns: 205px 1fr; }
 
-.file-list { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--surface-base); }
+.file-list { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel); }
 
 .file-list button { width: 100%; min-height: 40px; padding: 4px 8px; display: grid; grid-template-columns: 19px minmax(0, 1fr) auto; align-items: center; gap: 5px; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); text-align: left; background: transparent; cursor: pointer; }
 
@@ -248,7 +248,7 @@
 
 .diff-omitted { min-height: 24px; display: flex; align-items: center; color: var(--text-secondary); letter-spacing: .01em; }
 
-.code-row { min-width: 660px; min-height: 22px; display: grid; grid-template-columns: 4.5ch 4.5ch 2ch 1fr; align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+.code-row { position: relative; min-width: 660px; min-height: 22px; display: grid; grid-template-columns: 9.5ch 4.5ch 2ch 1fr; align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
 .code-row:hover { background: var(--code-hover); }
 
@@ -269,6 +269,18 @@
 .code-row.del .change-sign { color: var(--danger); }
 
 .code-row code { padding: 3px 9px; line-height: 1.5; white-space: pre; }
+
+.diff-stage-action, .diff-restore-action { position: absolute; z-index: 2; top: 2px; border-radius: 4px; background: var(--code-surface-raised); font-size: 10px; cursor: pointer; opacity: .92; transition: opacity .12s, background .12s, color .12s; }
+
+.diff-stage-action { left: 4px; padding: 2px 7px; border: 1px solid var(--accent); color: var(--accent); }
+
+.diff-restore-action { left: 45px; width: 22px; height: 18px; padding: 0; display: grid; place-items: center; border: 1px solid var(--danger); color: var(--danger); }
+
+.code-row:hover .diff-stage-action, .code-row:hover .diff-restore-action, .diff-stage-action:focus-visible, .diff-restore-action:focus-visible { opacity: 1; }
+
+.diff-stage-action:hover { color: var(--accent-contrast, #fff); background: var(--accent); }
+
+.diff-restore-action:hover { color: #fff; background: var(--danger); }
 
 .syntax { min-width: max-content; color: inherit; }
 
@@ -766,17 +778,17 @@
 
 .stash-heading .eyebrow, .staging-heading .eyebrow { margin-bottom: 2px; }
 
-.stash-workspace { min-width: 0; min-height: 0; display: grid; grid-template-columns: 330px minmax(0, 1fr); transition: grid-template-columns .22s ease; }
+.stash-workspace { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(260px, var(--stash-control-width, 330px)) 1px minmax(0, 1fr); transition: grid-template-columns .22s ease; }
 
-.stash-workspace.preview-wide { grid-template-columns: 0 minmax(0, 1fr); }
+.stash-workspace.preview-wide { grid-template-columns: 0 0 minmax(0, 1fr); }
 
-.stash-control-pane { min-width: 0; min-height: 0; padding: 12px; display: grid; grid-template-rows: auto 39px minmax(0, 1fr); overflow: hidden; border-right: 1px solid var(--line); opacity: 1; transition: opacity .16s ease; }
+.stash-control-pane { min-width: 0; min-height: 0; padding: 12px; display: grid; grid-template-rows: auto 39px minmax(0, 1fr); overflow: hidden; opacity: 1; transition: opacity .16s ease; }
 
 .stash-workspace.preview-wide .stash-control-pane, .staging-workspace.preview-wide .staging-control-pane { opacity: 0; pointer-events: none; }
 
 .stash-compose { padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 
-.stash-compose input[type="text"], .stash-compose > input { height: 31px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; outline: 0; color: var(--text); background: var(--bg); font-size: 12px; }
+.stash-compose input[type="text"], .stash-compose > input { height: 31px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; outline: 0; color: var(--text); background: var(--panel); font-size: 12px; }
 
 .stash-compose > input { grid-column: 1 / -1; }
 
@@ -960,9 +972,9 @@
 
 .stage-section-count { min-width: 18px; padding: 1px 5px; border-radius: 9px; color: var(--muted); background: var(--panel-3); font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; }
 
-.staged-section .stage-section-count { color: #69b1ff; background: var(--accent-dim); }
+.staged-section .stage-section-count { color: var(--accent); background: var(--accent-dim); }
 
-.unstaged-section .stage-section-count { color: #ffc53d; background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.unstaged-section .stage-section-count { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
 
 .stage-section-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
 
@@ -1028,7 +1040,7 @@
 
 .stage-empty { min-height: 38px; padding: 0 7px; display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 10px; }
 
-.commit-compose { min-height: 0; margin-top: 8px; padding-top: 10px; display: grid; grid-template-rows: auto 38px minmax(130px, 1fr) 35px 36px; border-top: 1px solid var(--line); }
+.commit-compose { min-height: 0; margin-top: 8px; padding-top: 10px; display: grid; grid-template-rows: auto 38px minmax(130px, 1fr) 35px 36px; }
 
 .commit-compose input, .commit-compose textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); outline: 0; color: var(--text); background: var(--panel-2); font-size: 10px; }
 

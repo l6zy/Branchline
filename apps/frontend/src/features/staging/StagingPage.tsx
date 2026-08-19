@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Archive, ArrowDown, Check, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Plus, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
@@ -7,12 +7,17 @@ import {
   createScopedRepositoryStash,
   discardRepositoryFiles,
   loadRepository,
+  loadRepositoryFileDiff,
+  loadRepositoryUnstagedFileDiff,
+  restoreRepositoryPatch,
   stageRepositoryFiles,
+  stageRepositoryPatch,
   unstageRepositoryFiles,
   type RepositoryFile,
   type RepositorySnapshot,
 } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
+import { useResizablePane } from '../../components/useResizablePane'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
@@ -62,6 +67,8 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [contextFile, setContextFile] = useState<{ file: RepositoryFile; scope: 'staged' | 'unstaged'; x: number; y: number } | null>(null)
   const [widePreview, setWidePreview] = useState(false)
+  const stagingWidth = useResizablePane('branchline.stagingWidth.v1', 430, 300, 720, 'horizontal')
+  const filesHeight = useResizablePane('branchline.stagingFilesHeight.v1', 360, 150, 720, 'vertical')
   const appliedTemplateKey = useRef<string | null>(null)
   const files = repository?.files ?? []
   const conflictFilePaths = useMemo(() => {
@@ -76,6 +83,12 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
   const stagedFiles = useMemo(() => files.filter((file) => file.staged && !conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const unstagedFiles = useMemo(() => files.filter((file) => !conflictFilePaths.has(file.path) && (file.unstaged || (!file.staged && !file.unstaged))), [conflictFilePaths, files])
   const selectedIndex = Math.max(0, files.findIndex((file) => file.path === selectedPath))
+  const loadStagingRows = useCallback((path: string) => {
+    const file = files.find((item) => item.path === path)
+    return file?.unstaged
+      ? loadRepositoryUnstagedFileDiff(repository?.path ?? '', path)
+      : loadRepositoryFileDiff(repository?.path ?? '', path)
+  }, [files, repository?.path])
 
   useEffect(() => {
     if (!selectedPath || !files.some((file) => file.path === selectedPath)) setSelectedPath(files[0]?.path ?? null)
@@ -152,6 +165,32 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
   }
   const stage = (paths: string[], force = false) => updateStaging(paths, 'stage', force)
   const unstage = (paths: string[]) => updateStaging(paths, 'unstage')
+  const stagePatch = async (_filePath: string, patch: string, description: string) => {
+    if (!repository || !patch) return
+    setBusy(true)
+    try {
+      const updatedFiles = await stageRepositoryPatch(repository.path, patch)
+      onSnapshot({ ...repository, files: updatedFiles })
+      onNotice(`已暂存${description}`)
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const restorePatch = async (_filePath: string, patch: string, description: string) => {
+    if (!repository || !patch) return
+    setBusy(true)
+    try {
+      const updatedFiles = await restoreRepositoryPatch(repository.path, patch)
+      onSnapshot({ ...repository, files: updatedFiles })
+      onNotice(`已还原${description}`)
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
   const discard = async (paths: string[]) => {
     if (!repository) return onNotice('请先打开本地仓库')
     if (!paths.length) return
@@ -200,9 +239,11 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
     <div className="stage-file-actions"><button className="stage-file-action force-stage" onClick={() => forceStageConflict(file)} disabled={busy} title="强制暂存冲突文件" aria-label="强制暂存冲突文件"><Plus size={14}/></button></div>
   </div>
 
-  return <section className="workspace-page staging-page">
-    <div className={`staging-workspace ${widePreview ? 'preview-wide' : ''}`}>
-      <div className="staging-control-pane">
+  const workspaceStyle = { '--staging-control-width': `${stagingWidth.value}px` } as CSSProperties
+  const resizingClass = filesHeight.resizing ? 'pane-resizing-vertical' : stagingWidth.resizing ? 'pane-resizing' : ''
+  return <section className={`workspace-page staging-page ${resizingClass}`}>
+    <div className={`staging-workspace ${widePreview ? 'preview-wide' : ''}`} style={workspaceStyle}>
+      <div className="staging-control-pane" style={{ gridTemplateRows: `${filesHeight.value}px 1px minmax(230px, 1fr)` }}>
         <div className="staging-file-sections">
           {conflictFiles.length > 0 && <div className="stage-section conflict-section">
             <div className="stage-section-header"><div className="stage-section-name"><span className="stage-section-marker"/><strong>冲突</strong><span className="stage-section-count">{conflictFiles.length}</span></div><span className="stage-section-hint">解决后可暂存</span></div>
@@ -217,9 +258,11 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
             <div className="stage-section-files">{unstagedFiles.length ? unstagedFiles.map((file) => fileRow(file, () => stage([file.path]), 'add', 'unstaged')) : <div className="stage-empty"><Check size={14}/> 工作区干净</div>}</div>
           </div>
         </div>
+        <span className={`workspace-resizer workspace-resizer-row ${filesHeight.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件列表和提交面板高度" onPointerDown={filesHeight.beginResize}/>
         <div className="commit-compose"><div className="template-row"><span title={repository?.commitTemplate?.path}><FileText size={14}/> {repository?.commitTemplate ? `模板：${fileName(repository.commitTemplate.path)}` : '未配置 commit.template'}</span><button type="button" onClick={applyConfiguredTemplate} disabled={!repository?.commitTemplate}>重新应用模板</button></div><input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="提交标题" placeholder="提交标题"/><textarea value={body} onChange={(event) => setBody(event.target.value)} aria-label="提交正文" placeholder="补充提交说明（可选）"/><div className="commit-options"><label><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)}/> Amend</label><label><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)}/> 签名</label></div><Button variant="primary" onClick={commit} disabled={!stagedFiles.length || busy}><GitCommitHorizontal size={16}/> {busy ? '处理中…' : `提交 ${stagedFiles.length} 个文件`} <span>⌘↵</span></Button></div>
       </div>
-      <div className="staging-preview-pane">{selectedPath && files.length ? <DiffPanel files={files} repositoryPath={repository?.path} wide={widePreview} onWideChange={setWidePreview} initialFile={selectedIndex} hideFileList onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice('未提交的新增或修改行尚无提交历史，请查询对应旧版本行或提交后再查看'); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>选择文件查看变更</strong><span>点击左侧文件即可查看完整内容、统一 Diff 或并排 Diff。</span></div>}</div>
+      <span className={`workspace-resizer workspace-resizer-column ${stagingWidth.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件面板和 Diff 宽度" onPointerDown={stagingWidth.beginResize}/>
+      <div className="staging-preview-pane">{selectedPath && files.length ? <DiffPanel files={files} repositoryPath={repository?.path} loadRows={loadStagingRows} wide={widePreview} onWideChange={setWidePreview} initialFile={selectedIndex} hideFileList allowStage={Boolean(files[selectedIndex]?.unstaged)} onStagePatch={(path, patch, description) => void stagePatch(path, patch, description)} onRestorePatch={(path, patch, description) => void restorePatch(path, patch, description)} onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice('未提交的新增或修改行尚无提交历史，请查询对应旧版本行或提交后再查看'); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>选择文件查看变更</strong><span>点击左侧文件即可查看完整内容、统一 Diff 或并排 Diff。</span></div>}</div>
     </div>
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>查看文件历史</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>查看逐行归属（Blame）</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>复制文件路径</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>丢弃未暂存改动…</span></Button></>}</ContextMenu>}
   </section>

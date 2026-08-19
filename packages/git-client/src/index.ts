@@ -65,12 +65,24 @@ export async function loadRepositoryFileDiff(repositoryPath: string, filePath: s
   return invoke<RepositoryDiffLine[]>('load_file_diff', { repositoryPath, filePath })
 }
 
+export async function loadRepositoryUnstagedFileDiff(repositoryPath: string, filePath: string) {
+  return invoke<RepositoryDiffLine[]>('load_unstaged_file_diff', { repositoryPath, filePath })
+}
+
 export async function fetchRepository(repositoryPath: string) {
   return invoke<RepositorySnapshot>('fetch_repository', { repositoryPath })
 }
 
 export async function stageRepositoryFiles(repositoryPath: string, filePaths: string[], force = false) {
   return invoke<RepositoryFile[]>('stage_files', { repositoryPath, filePaths, force })
+}
+
+export async function stageRepositoryPatch(repositoryPath: string, patch: string) {
+  return invoke<RepositoryFile[]>('stage_patch', { repositoryPath, patch })
+}
+
+export async function restoreRepositoryPatch(repositoryPath: string, patch: string) {
+  return invoke<RepositoryFile[]>('restore_patch', { repositoryPath, patch })
 }
 
 export async function unstageRepositoryFiles(repositoryPath: string, filePaths: string[]) {

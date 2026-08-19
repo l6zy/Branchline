@@ -84,6 +84,18 @@ pub async fn load_file_diff(
 }
 
 #[tauri::command]
+pub async fn load_unstaged_file_diff(
+    repository_path: String,
+    file_path: String,
+) -> Result<Vec<DiffLine>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::parse_unstaged_diff(Path::new(&repository_path), &file_path)
+    })
+    .await
+    .map_err(|error| task_error("读取未暂存 Diff", error))?
+}
+
+#[tauri::command]
 pub async fn fetch_repository(repository_path: String) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         git::fetch_repository(&repository_path)?;
@@ -102,6 +114,26 @@ pub async fn stage_files(
     tauri::async_runtime::spawn_blocking(move || git::stage_files(&repository_path, &file_paths, force))
         .await
         .map_err(|error| task_error("暂存文件", error))?
+}
+
+#[tauri::command]
+pub async fn stage_patch(
+    repository_path: String,
+    patch: String,
+) -> Result<Vec<RepositoryFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::stage_patch(&repository_path, &patch))
+        .await
+        .map_err(|error| task_error("暂存修改块", error))?
+}
+
+#[tauri::command]
+pub async fn restore_patch(
+    repository_path: String,
+    patch: String,
+) -> Result<Vec<RepositoryFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::restore_patch(&repository_path, &patch))
+        .await
+        .map_err(|error| task_error("还原修改块", error))?
 }
 
 #[tauri::command]

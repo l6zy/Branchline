@@ -62,11 +62,7 @@
 
 .theme-light .conflict-code-editor { background: #f6f8fa; }
 .theme-light .conflict-code-editor .cm-scroller { scrollbar-color: var(--scroll-thumb) #f6f8fa; }
-.theme-light .conflict-overview { background: #e8edf2; }
-.theme-light .conflict-overview span.active { box-shadow: 0 0 0 1px #ffffff; }
-.theme-light .cm-conflict-actions button { color: var(--accent-text); background: transparent; }
-.theme-light .cm-conflict-actions button:hover { color: var(--accent); background: transparent; }
-
+.theme-light .conflict-overview span.active { box-shadow: 0 0 0 2px orange; }
 /* Scrollbars are a browser-specific exception, so keep their light tuning here. */
 .theme-light * { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 .theme-light *::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: content-box; }

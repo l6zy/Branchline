@@ -52,6 +52,8 @@
 
 .history-diff-overlay .diff-panel { height: 100%; }
 
+.history-operation-overlay .operation-page { height: 100%; box-sizing: border-box; }
+
 .graph-segment.stash, .graph-segment.working { stroke-dasharray: 4 4; opacity: .76; }
 
 .commit-dot { position: absolute; top: 50%; width: 16px; height: 16px; border: 0; border-radius: 50%; box-shadow: none; transform: translate(-50%, -50%); z-index: 2; }
@@ -84,7 +86,7 @@
 
 .commit-time { padding-left: 10px; color: var(--faint); font-size: 10px; white-space: nowrap; }
 
-.commit-details { padding: 8px; border-bottom: 1px solid var(--border); background: var(--surface-raised); }
+.commit-details { padding: 8px; background: var(--surface-raised); }
 
 .commit-text-panel { margin-top: 14px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-base); height: 0; flex: 1; display: flex; flex-direction: column; }
 
@@ -114,7 +116,7 @@
 
 .commit-text-panel textarea::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 10px; background: var(--scroll-thumb); background-clip: content-box; }
 
-.changed-files-panel { min-height: 0; display: grid; grid-template-rows: 40px 1fr; border-top: 1px solid var(--border); background: var(--surface-raised); }
+.changed-files-panel { min-height: 0; display: grid; grid-template-rows: 40px 1fr; background: var(--surface-raised); }
 
 .changed-files-heading { padding: 0 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line-soft); }
 
@@ -161,6 +163,20 @@
 .diff-panel { min-height: 0; display: grid; grid-template-rows: 41px 1fr; overflow: hidden; }
 
 .diff-toolbar { padding: 0 10px 0 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--code-border); background: var(--code-surface-raised); }
+
+.diff-search-bar { min-width: 180px; max-width: 330px; height: 28px; padding: 2px 4px 2px 7px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); }
+
+.diff-search-bar input { min-width: 0; flex: 1; height: 22px; padding: 0 2px; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px var(--font-code); }
+
+.diff-search-bar input::placeholder { color: var(--faint); }
+
+.diff-search-bar > span { min-width: 48px; color: var(--faint); font: 10px var(--font-code); text-align: center; white-space: nowrap; }
+
+.diff-search-bar button { width: 23px; height: 23px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+
+.diff-search-bar button:hover:not(:disabled) { color: var(--accent); background: var(--accent-dim); }
+
+.diff-search-bar button:disabled { opacity: .4; cursor: not-allowed; }
 
 .diff-title { display: flex; align-items: center; gap: 6px; }
 
@@ -263,6 +279,10 @@
 .code-row.line-context-active, .split-code-side.line-context-active { position: relative; box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px var(--accent-ring); }
 
 .code-row.diff-navigation-active, .split-code-side.diff-navigation-active { position: relative; z-index: 1; box-shadow: inset 3px 0 var(--accent-hover), inset 0 0 0 1px var(--accent-ring); }
+
+.code-row.diff-search-match, .split-code-side.diff-search-match { box-shadow: inset 3px 0 color-mix(in srgb, #fadb14 72%, transparent); }
+
+.code-row.diff-search-current, .split-code-side.diff-search-current { position: relative; z-index: 2; box-shadow: inset 3px 0 #fa8c16, inset 0 0 0 1px color-mix(in srgb, #fa8c16 78%, transparent); }
 
 .code-row.add .change-sign { color: var(--accent); }
 
@@ -782,6 +802,8 @@
 
 .stash-workspace { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(260px, var(--stash-control-width, 330px)) 1px minmax(0, 1fr); transition: grid-template-columns .22s ease; }
 
+.stash-manager { grid-template-columns: minmax(320px, 1fr) minmax(280px, 1fr); }
+
 .stash-workspace.preview-wide { grid-template-columns: 0 0 minmax(0, 1fr); }
 
 .stash-control-pane { min-width: 0; min-height: 0; padding: 12px; display: grid; grid-template-rows: auto 39px minmax(0, 1fr); overflow: hidden; opacity: 1; transition: opacity .16s ease; }
@@ -845,6 +867,14 @@
 .stash-preview-pane .diff-panel, .staging-preview-pane .diff-panel { height: 100%; }
 
 .stash-preview-pane .diff-toolbar, .staging-preview-pane .diff-toolbar { background: var(--panel); }
+
+.stash-graph-handoff { min-width: 0; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 32px; color: var(--faint); background: var(--bg); text-align: center; }
+
+.stash-graph-handoff svg { color: var(--accent); }
+
+.stash-graph-handoff strong { color: var(--text); font-size: 14px; }
+
+.stash-graph-handoff span { max-width: 340px; font-size: 11px; line-height: 1.5; }
 
 .history-drawer { width: min(1060px, 84vw); height: 100%; padding: 18px; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -20px 0 60px rgba(0,0,0,.4); animation: slideIn .25s ease-out; }
 
@@ -1035,6 +1065,16 @@
 
 .stage-section-files { padding: 0; }
 
+.staging-context-heading { min-height: 34px; padding: 0 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line-soft); color: var(--muted); background: var(--panel-2); }
+
+.staging-context-heading > div { min-width: 0; display: flex; align-items: center; gap: 6px; }
+
+.staging-context-heading svg { color: var(--accent); }
+
+.staging-context-heading strong { color: var(--text); font-size: 11px; }
+
+.staging-context-heading span { color: var(--faint); font-size: 10px; }
+
 .stage-section-files .stage-file:last-child { border-bottom: 0; }
 
 .stage-file { min-height: 30px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px; border-bottom: 1px solid var(--line-soft); font-size: 10px; transition: background .14s ease; }
@@ -1179,15 +1219,31 @@
 
 .conflict-code-editor { position: relative; height: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; background: #1e1e1e; }
 
+.conflict-search-bar { position: absolute; z-index: 8; top: 8px; right: 12px; left: 42px; min-height: 30px; padding: 3px 5px 3px 8px; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 5px 18px rgba(0,0,0,.28); }
+
+.conflict-search-bar input { min-width: 0; flex: 1; height: 24px; padding: 0 3px; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px var(--font-code); }
+
+.conflict-search-bar input::placeholder { color: var(--faint); }
+
+.conflict-search-count { min-width: 52px; color: var(--faint); font: 10px var(--font-code); text-align: center; white-space: nowrap; }
+
+.conflict-search-bar button, .conflict-search-trigger { width: 25px; height: 25px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+
+.conflict-search-bar button:hover:not(:disabled), .conflict-search-trigger:hover { color: var(--accent); background: var(--accent-dim); }
+
+.conflict-search-bar button:disabled { opacity: .4; cursor: not-allowed; }
+
+.conflict-search-trigger { position: absolute; z-index: 7; top: 8px; right: 12px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent); }
+
 .conflict-code-editor-host, .conflict-code-editor .cm-editor, .conflict-code-editor .cm-scroller { width: 100%; height: 100%; min-height: 0; }
 
 .conflict-code-editor .cm-editor { outline: 0; }
 
 .conflict-code-editor .cm-scroller { padding-right: 7px; scrollbar-color: #5a5a5a #1e1e1e; }
 
-.conflict-overview { position: absolute; z-index: 4; top: 8px; right: 2px; bottom: 8px; width: 7px; overflow: hidden; border-radius: 3px; cursor: pointer; background: color-mix(in srgb, var(--panel-3) 74%, transparent); }
+.conflict-overview { position: absolute; z-index: 4; top: 8px; right: 2px; bottom: 8px; width: 7px; overflow: hidden; border-radius: 3px; cursor: pointer; background: transparent; }
 
-.conflict-overview span { position: absolute; left: 0; right: 0; min-height: 3px; border-radius: 2px; opacity: .82; }
+.conflict-overview span { position: absolute; left: 0; right: 0; min-height: 3px; border-radius: 0; opacity: .82; }
 
 .conflict-overview span.current { background: #36cfc9; }
 

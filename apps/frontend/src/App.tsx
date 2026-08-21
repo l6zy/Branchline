@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
 import { CompactSelect } from './components/CompactSelect'
@@ -275,7 +275,7 @@ function Sidebar({ repository, parentRepository, recentRepositories, openingRepo
       <Button variant="icon" className="sidebar-toggle" onClick={onToggle} title="收起左侧面板"><PanelLeftClose size={16}/></Button>
     </div>
     <nav>{repository ? <>
-      <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>工作台</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>工作区变更</span><span className="nav-badge">{repository.files.length}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>Stash</span></button></div>
+      <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>提交图谱</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>暂存与提交</span><span className="nav-badge">{repository.files.length}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>Stash 管理</span></button></div>
       <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} currentBranch={repository.branch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
       <RepositoryStructureTree repository={repository} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path, true) }}/>
       <div className="nav-section structure-tags-section"><button className={`nav-row ${activeView === 'tags' ? 'active' : ''}`} onClick={() => onSelectView('tags')}><Tag size={15}/><span>标签</span><span className="nav-badge muted">{repository.tags.length}</span></button></div>
@@ -311,7 +311,7 @@ function commitDay(commit: Commit) {
   }
 }
 
-function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReference, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onUndoLastCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onOpenStash, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReference: string; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onUndoLastCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onOpenStash: () => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
+function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onUndoLastCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onUndoLastCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
   const [widths, setWidths] = useState({ branch: 140, graph: 200, time: 104, hash: 82, author: 110 })
   const [visibleColumns, setVisibleColumns] = useState({ time: false, hash: false })
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
@@ -330,6 +330,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   const currentHead = useMemo(() => commits.find((commit) => commit.status !== 'working' && commit.branches?.includes(currentBranch)), [commits, currentBranch])
   const remoteBranchSet = useMemo(() => new Set(remoteBranches), [remoteBranches])
   const tagSet = useMemo(() => new Set(tags), [tags])
+  const contextStashReference = contextCommit?.commit.fullHash ? stashReferences[contextCommit.commit.fullHash] : undefined
   const branchCommitIds = useMemo(() => {
     if (branchFilter === 'all') return null
     const byReference = new Map<string, Commit>()
@@ -494,12 +495,12 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     </div>
     {contextCommit && <ContextMenu x={contextCommit.x} y={contextCommit.y} onClose={() => setContextCommit(null)}>
       {contextCommit.commit.status === 'stash' ? <>
-        <div className="context-menu-title"><Archive size={13}/><span>{stashReference} · {contextCommit.commit.title}</span></div>
-        <button onClick={() => { onOpenStash(); setContextCommit(null) }}><Archive size={14}/><span>查看 Stash 内容</span></button>
-        <button onClick={() => { onApplyStash(stashReference); setContextCommit(null) }}><Check size={14}/><span>应用并保留</span></button>
-        <button onClick={() => { onPopStash(stashReference); setContextCommit(null) }}><CornerDownLeft size={14}/><span>弹出并删除</span></button>
+        <div className="context-menu-title"><Archive size={13}/><span>{contextStashReference ?? 'Stash'} · {contextCommit.commit.title}</span></div>
+        <button onClick={() => { if (inspectorCollapsed) onToggleInspector(); setContextCommit(null) }}><PanelRightOpen size={14}/><span>在右侧查看文件与 Diff</span></button>
+        <button disabled={!contextStashReference} onClick={() => { if (contextStashReference) onApplyStash(contextStashReference); setContextCommit(null) }}><Check size={14}/><span>应用并保留</span></button>
+        <button disabled={!contextStashReference} onClick={() => { if (contextStashReference) onPopStash(contextStashReference); setContextCommit(null) }}><CornerDownLeft size={14}/><span>弹出并删除</span></button>
         <div className="context-menu-separator"/>
-        <Button variant="danger" onClick={() => { onDropStash(stashReference); setContextCommit(null) }}><Trash2 size={14}/><span>删除 Stash</span></Button>
+        <Button variant="danger" disabled={!contextStashReference} onClick={() => { if (contextStashReference) onDropStash(contextStashReference); setContextCommit(null) }}><Trash2 size={14}/><span>删除 Stash</span></Button>
         <div className="context-menu-separator"/>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'hash'); setContextCommit(null) }}><Copy size={14}/><span>复制 Stash Hash</span></button>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'details'); setContextCommit(null) }}><FileText size={14}/><span>复制完整 Stash 信息</span></button>
@@ -522,11 +523,12 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   </div>
 }
 
-function CommitDetails({ commit }: { commit: Commit }) {
+function CommitDetails({ commit, stashReference }: { commit: Commit; stashReference?: string | null }) {
   const [copied, setCopied] = useState(false)
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null)
   const commitTextRef = useRef<HTMLTextAreaElement>(null)
   const isWorkingTree = commit.status === 'working'
+  const isStash = commit.status === 'stash'
   const fullHash = isWorkingTree ? '未提交' : commit.fullHash ?? `${commit.id}4b92d7e08f7e16f85b16d0c`
   const parentHash = commit.parents?.length ? commit.parents.join(', ') : commit.parent ? (commit.parent.length > 7 ? commit.parent : `${commit.parent}019be47a1d40d5406a8f61b0`) : '—'
   const email = isWorkingTree ? '本地工作区' : commit.email ?? 'zhou@example.com'
@@ -537,6 +539,14 @@ function CommitDetails({ commit }: { commit: Commit }) {
   const commitText = (isWorkingTree ? [
     '状态：未提交',
     `基于：${parentHash}`,
+    '',
+    message,
+  ] : isStash ? [
+    `Stash：${stashReference ?? '—'}`,
+    `节点：${fullHash}`,
+    `基于：${parentHash}`,
+    `作者：${commit.author} <${email}>`,
+    `保存日期：${formatLocalDateTime(commitTime)}`,
     '',
     message,
   ] : [
@@ -562,13 +572,13 @@ function CommitDetails({ commit }: { commit: Commit }) {
     window.setTimeout(() => setCopied(false), 1500)
   }
   return <section className="commit-details">
-    <div className="detail-heading"><div><span className="eyebrow">{isWorkingTree ? '工作区详情' : '提交详情'}</span><h2>{commit.title}</h2></div>{!isWorkingTree && <Button variant="icon" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多提交操作"><MoreHorizontal size={17}/></Button>}</div>
-    <div className="identity-row"><div className="avatar large">{commit.avatar}</div><div><strong>{commit.author}</strong><span>{isWorkingTree ? `${email} · 尚未提交` : `${email} · ${formatLocalDateTime(commitTime)}`}</span></div>{!commit.fullHash && !isWorkingTree && <span className="verified"><Check size={11}/> 已验证</span>}</div>
+    <div className="detail-heading"><div><span className="eyebrow">{isWorkingTree ? '工作区详情' : isStash ? 'Stash 详情' : '提交详情'}</span><h2>{commit.title}</h2></div>{!isWorkingTree && <Button variant="icon" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多操作"><MoreHorizontal size={17}/></Button>}</div>
+    <div className="identity-row"><div className="avatar large">{commit.avatar}</div><div><strong>{commit.author}</strong><span>{isWorkingTree ? `${email} · 尚未提交` : isStash ? `${stashReference ?? 'Stash'} · ${formatLocalDateTime(commitTime)}` : `${email} · ${formatLocalDateTime(commitTime)}`}</span></div>{!commit.fullHash && !isWorkingTree && <span className="verified"><Check size={11}/> 已验证</span>}</div>
     <div className="commit-text-panel">
-      <div className="commit-text-toolbar"><div><FileText size={14}/><span>{isWorkingTree ? '工作区信息' : '完整提交信息'}</span></div><button className="icon-tool-button" onClick={copy} title={copied ? '已复制' : '复制全部'} aria-label={copied ? '已复制' : '复制全部'}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
+      <div className="commit-text-toolbar"><div><FileText size={14}/><span>{isWorkingTree ? '工作区信息' : isStash ? 'Stash 信息' : '完整提交信息'}</span></div><button className="icon-tool-button" onClick={copy} title={copied ? '已复制' : '复制全部'} aria-label={copied ? '已复制' : '复制全部'}>{copied ? <Check size={14}/> : <Copy size={14}/>}</button></div>
       <textarea ref={commitTextRef} aria-label="完整提交信息" readOnly value={commitText} onFocus={(event) => event.currentTarget.select()}/>
     </div>
-    {moreMenu && !isWorkingTree && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><GitCommitHorizontal size={13}/><span>提交详情操作</span></div><button onClick={() => { copyHash(); setMoreMenu(null) }}><Copy size={14}/><span>复制提交 Hash</span></button><button onClick={() => { copy(); setMoreMenu(null) }}><FileText size={14}/><span>复制完整提交信息</span></button></ContextMenu>}
+    {moreMenu && !isWorkingTree && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><GitCommitHorizontal size={13}/><span>{isStash ? 'Stash 详情操作' : '提交详情操作'}</span></div><button onClick={() => { copyHash(); setMoreMenu(null) }}><Copy size={14}/><span>复制{isStash ? ' Stash' : '提交'} Hash</span></button><button onClick={() => { copy(); setMoreMenu(null) }}><FileText size={14}/><span>复制完整{isStash ? ' Stash' : '提交'}信息</span></button></ContextMenu>}
   </section>
 }
 
@@ -663,6 +673,7 @@ export default function App() {
   const [historyTarget, setHistoryTarget] = useState<HistoryTarget | null>(null)
   const [activeOperation, setActiveOperation] = useState<ActiveOperation | null>(null)
   const [operationPath, setOperationPath] = useState<string | null>(null)
+  const [historyConflictPath, setHistoryConflictPath] = useState<string | null>(null)
   const [commitStats, setCommitStats] = useState<Record<string, RepositoryCommitStats>>({})
   const [commitFiles, setCommitFiles] = useState<Record<string, RepositoryFile[]>>({})
   const searchRef = useRef<HTMLInputElement>(null)
@@ -677,9 +688,13 @@ export default function App() {
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
     : repository?.commits ?? [], [repository?.commits, workingTreeCommit])
   const availableBranches = repository?.branches ?? []
+  const stashReferences = useMemo(() => Object.fromEntries((repository?.stashes ?? []).map((stash) => [stash.hash, stash.reference])), [repository?.stashes])
   const selectedCommitBase = activeCommits.find((commit) => commit.id === selected) ?? activeCommits[0] ?? emptyCommit
   const selectedWorkingTree = selectedCommitBase.status === 'working'
   const selectedStatsKey = selectedCommitBase.fullHash ?? selectedCommitBase.id
+  const selectedStashReference = selectedCommitBase.status === 'stash'
+    ? repository?.stashes.find((stash) => stash.hash === selectedStatsKey)?.reference ?? null
+    : null
   useEffect(() => {
     if (!repository) {
       structureRepositoryPath.current = null
@@ -693,9 +708,12 @@ export default function App() {
     }
     setStructureSelection((current) => resolveRepositoryStructureSelection(repository, current))
   }, [repository])
-  const selectedCommit = !selectedWorkingTree && commitStats[selectedStatsKey]
-    ? { ...selectedCommitBase, ...commitStats[selectedStatsKey] }
-    : selectedCommitBase
+  const selectedStashFiles = selectedStashReference ? commitFiles[selectedStatsKey] : undefined
+  const selectedCommit = selectedStashFiles
+    ? { ...selectedCommitBase, files: selectedStashFiles.length, additions: selectedStashFiles.reduce((total, file) => total + file.add, 0), deletions: selectedStashFiles.reduce((total, file) => total + file.del, 0) }
+    : !selectedWorkingTree && commitStats[selectedStatsKey]
+      ? { ...selectedCommitBase, ...commitStats[selectedStatsKey] }
+      : selectedCommitBase
   const selectedCommitFiles = selectedWorkingTree ? repository?.files ?? [] : repository ? (commitFiles[selectedStatsKey] ?? []) : []
   const selectedCommitFilesLoading = !selectedWorkingTree && Boolean(repository) && selectedCommitBase.id !== '—' && !Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)
   useEffect(() => {
@@ -726,7 +744,7 @@ export default function App() {
     previousCommits.current = repository?.commits ?? []
   }, [repository?.commits, repository?.files.length, repository?.path])
   useEffect(() => {
-    if (!repository || selectedWorkingTree || selectedCommitBase.id === '—' || commitStats[selectedStatsKey]) return
+    if (!repository || selectedWorkingTree || selectedStashReference || selectedCommitBase.id === '—' || commitStats[selectedStatsKey]) return
     let cancelled = false
     loadRepositoryCommitStats(repository.path, selectedStatsKey)
       .then((stats) => {
@@ -734,11 +752,14 @@ export default function App() {
       })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [commitStats, repository?.path, selectedStatsKey, selectedWorkingTree])
+  }, [commitStats, repository?.path, selectedStashReference, selectedStatsKey, selectedWorkingTree])
   useEffect(() => {
     if (!repository || selectedWorkingTree || selectedCommitBase.id === '—' || Object.prototype.hasOwnProperty.call(commitFiles, selectedStatsKey)) return
     let cancelled = false
-    loadRepositoryCommitFiles(repository.path, selectedStatsKey)
+    const loadFiles = selectedStashReference
+      ? loadRepositoryStashFiles(repository.path, selectedStashReference)
+      : loadRepositoryCommitFiles(repository.path, selectedStatsKey)
+    loadFiles
       .then((files) => {
         if (!cancelled) setCommitFiles((current) => ({ ...current, [selectedStatsKey]: files }))
       })
@@ -748,28 +769,32 @@ export default function App() {
         setRepositoryNotice(error instanceof Error ? error.message : String(error))
       })
     return () => { cancelled = true }
-  }, [commitFiles, repository?.path, selectedStatsKey, selectedWorkingTree])
+  }, [commitFiles, repository?.path, selectedStashReference, selectedStatsKey, selectedWorkingTree])
   useEffect(() => {
     setDiffFile(null)
     setWideDiff(false)
+    setHistoryConflictPath(null)
+    setOperationPath(null)
   }, [selectedStatsKey])
   const loadSelectedCommitDiff = useCallback((filePath: string) => {
     if (!repository) return Promise.resolve([])
     if (selectedWorkingTree) return loadRepositoryFileDiff(repository.path, filePath)
-    return loadFileCommitDiff(repository.path, selectedStatsKey, filePath)
-  }, [repository?.path, selectedStatsKey, selectedWorkingTree])
+    return selectedStashReference
+      ? loadRepositoryStashFileDiff(repository.path, selectedStashReference, filePath)
+      : loadFileCommitDiff(repository.path, selectedStatsKey, filePath)
+  }, [repository?.path, selectedStashReference, selectedStatsKey, selectedWorkingTree])
   const handleOpenSnapshot = (snapshot: RepositorySnapshot | null) => {
     if (!snapshot) return
     setUndoCommitMessage(snapshot.undoCommitMessage ?? null)
     setCommitStats({})
     setCommitFiles({})
-    setSelected(snapshot.commits[0]?.id ?? '')
+    setSelected(snapshot.files.length ? WORKING_TREE_COMMIT_ID : snapshot.commits[0]?.id ?? '')
     setDiffFile(null)
     setWideDiff(false)
     setQuery('')
     setBranchFilter('all')
     setTimeFilter('all')
-    setWorkspaceView(snapshot.operation ? 'changes' : 'history')
+    setWorkspaceView('history')
   }
   const handleOpenRepository = async () => handleOpenSnapshot(await openRepository())
   const handleOpenRepositoryPath = async (path: string, preserveTrail = false) => handleOpenSnapshot(await openRepositoryPath(path, preserveTrail))
@@ -781,7 +806,11 @@ export default function App() {
     setSelected((current) => current === WORKING_TREE_COMMIT_ID && snapshot.files.length
       ? current
       : resolveCommitSelection(activeCommits, snapshot.commits, current))
-    if (!snapshot.operation && workspaceView === 'operation') setWorkspaceView('history')
+    if (!snapshot.operation) {
+      setHistoryConflictPath(null)
+      setOperationPath(null)
+      if (workspaceView === 'operation') setWorkspaceView('history')
+    }
   }
   const handleDeleteBranchPrefix = async (prefix: string) => {
     if (!repository) return setRepositoryNotice('请先打开本地仓库')
@@ -841,8 +870,10 @@ export default function App() {
       handleSnapshot(snapshot)
       if (snapshot.operation) {
         setOperationPath(snapshot.operation.conflicts[0] ?? null)
-        setWorkspaceView('operation')
-        setRepositoryNotice(`${snapshot.operation.label}：请处理 ${snapshot.operation.conflicts.length} 个冲突文件`)
+        setSelected(WORKING_TREE_COMMIT_ID)
+        setInspectorCollapsed(false)
+        setWorkspaceView('history')
+        setRepositoryNotice(`${snapshot.operation.label}：已定位到工作区节点，请选择冲突文件处理`)
       } else {
         setRepositoryNotice(success)
       }
@@ -925,6 +956,19 @@ export default function App() {
       `已删除 ${reference}`,
       { key: 'stash', label: `正在删除 ${reference}…`, detail: '正在从 Stash 列表中移除该记录' },
     )
+  }
+  const handleSelectStash = (reference: string) => {
+    const stash = repository?.stashes.find((item) => item.reference === reference)
+    const stashCommit = stash ? activeCommits.find((commit) => commit.fullHash === stash.hash) : undefined
+    if (!stashCommit) {
+      setRepositoryNotice('该 Stash 没有对应的图谱节点')
+      return
+    }
+    setQuery('')
+    setBranchFilter('all')
+    setTimeFilter('all')
+    setSelected(stashCommit.id)
+    setWorkspaceView('history')
   }
   const handlePullBranch = async (branch: string) => {
     const hasLocalChanges = branch === repository?.branch && Boolean(repository?.files.length)
@@ -1039,7 +1083,7 @@ export default function App() {
       }
       if (modifier && event.key === '/') { event.preventDefault(); setTheme((value) => value === 'dark' ? 'light' : 'dark') }
       if (event.key === '?' && !modifier) { setShortcutOpen((value) => !value) }
-      if (event.key === 'Escape') { setShortcutOpen(false); setHistoryTarget(null); setDiffFile(null); setWideDiff(false); setFilterMenu(null); setNotificationOpen(false) }
+      if (event.key === 'Escape') { setShortcutOpen(false); setHistoryTarget(null); setHistoryConflictPath(null); setDiffFile(null); setWideDiff(false); setFilterMenu(null); setNotificationOpen(false) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -1072,18 +1116,19 @@ export default function App() {
           </div>
         </header>
       }
-      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="提交历史和提交图谱"><GitCommitHorizontal size={14}/><span className="tab-label">提交历史</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="查看和暂存工作区变更"><FileDiff size={14}/><span className="tab-label">工作区变更</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="浏览和管理 Stash"><Archive size={14}/><span className="tab-label">Stash</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
+      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="在统一图谱中查看提交、工作区和 Stash"><GitCommitHorizontal size={14}/><span className="tab-label">提交图谱</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="暂存文件并创建提交"><FileDiff size={14}/><span className="tab-label">暂存与提交</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="创建、应用或删除 Stash"><Archive size={14}/><span className="tab-label">Stash 管理</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选提交</span></div><div className="context-menu-options"><button className={branchFilter === 'all' ? 'selected-option' : ''} onClick={() => { setBranchFilter('all'); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <button className={branchFilter === branch ? 'selected-option' : ''} key={branch} onClick={() => { setBranchFilter(branch); setFilterMenu(null) }}><GitBranch size={14}/><span>{branch}</span></button>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
       <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
-          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReference={repository.stashes[0]?.reference ?? 'stash@{0}'} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onUndoLastCommit={(commit) => void handleUndoLastCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onOpenStash={() => setWorkspaceView('stash')} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
-          {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
+          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onUndoLastCommit={(commit) => void handleUndoLastCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
+          {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} onActiveFileChange={setDiffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
+          {historyConflictPath && repository.operation && <div className="history-diff-overlay history-operation-overlay"><Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={historyConflictPath} onReturnToChanges={() => { setHistoryConflictPath(null); setOperationPath(null) }} onClose={() => { setHistoryConflictPath(null); setOperationPath(null) }}/></Suspense></div>}
         </section>}
         {workspaceView === 'compare' && <ComparePanel repository={repository} initialBase={compareBase ?? undefined} initialTarget={compareBase ? repository?.branch : undefined} onNotice={setRepositoryNotice}/>} 
         {workspaceView === 'merge' && <MergeQueuePanel repository={repository} onNotice={setRepositoryNotice} onSwitchBranch={handleSwitchBranch}/>} 
-        {workspaceView === 'operation' && <Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong><span>编辑器组件仅在处理合并、变基或 Cherry-pick 时按需加载。</span></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={operationPath} onReturnToChanges={() => setWorkspaceView('changes')}/></Suspense>}
+         {workspaceView === 'operation' && <Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong><span>编辑器组件仅在处理合并、变基或 Cherry-pick 时按需加载。</span></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={operationPath} onReturnToChanges={() => setWorkspaceView('changes')} onClose={() => setWorkspaceView('history')}/></Suspense>}
         {workspaceView === 'changes' && (
           <StagingPage
             repository={repository}
@@ -1091,16 +1136,19 @@ export default function App() {
             onSnapshot={handleSnapshot}
             onNotice={setRepositoryNotice}
             onOperationChange={(label) => setActiveOperation(label ? { key: 'commit', label, detail: '正在写入提交并刷新仓库状态' } : null)}
-            onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}
-            onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: 'HEAD' })}
-            onOpenConflict={(path) => { setOperationPath(path); setWorkspaceView('operation') }}
-          />
+             onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}
+             onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: 'HEAD' })}
+             onOpenConflict={(path) => { setOperationPath(path); setHistoryConflictPath(path); setSelected(WORKING_TREE_COMMIT_ID); setWorkspaceView('history') }}
+             onOpenWorkingTree={() => { setSelected(WORKING_TREE_COMMIT_ID); setWorkspaceView('history') }}
+           />
         )}
-        {workspaceView === 'stash' && <StashPage repository={repository} onSnapshot={(snapshot) => {
+        {workspaceView === 'stash' && <StashPage repository={repository} onSelectStash={handleSelectStash} onSnapshot={(snapshot) => {
           handleSnapshot(snapshot)
           if (snapshot.operation) {
             setOperationPath(snapshot.operation.conflicts[0] ?? null)
-            setWorkspaceView('operation')
+            setSelected(WORKING_TREE_COMMIT_ID)
+            setInspectorCollapsed(false)
+            setWorkspaceView('history')
           }
         }} onNotice={setRepositoryNotice}/>}
         {(workspaceView === 'structure' || workspaceView === 'tags') && (
@@ -1116,9 +1164,20 @@ export default function App() {
         )}
         <span className={`panel-resizer inspector-resizer ${inspectorVisible ? '' : 'hidden'} ${panelResizing === 'inspector' ? 'active' : ''}`} role="separator" aria-label="拖动调整右侧面板宽度" onPointerDown={(event) => beginPanelResize('inspector', event)}/>
         {workspaceView === 'history' && <section className="inspector-pane" style={{ gridTemplateRows: `${detailsHeight}px 1px minmax(0, 1fr)` }}>
-          <CommitDetails commit={selectedCommit}/>
+          <CommitDetails commit={selectedCommit} stashReference={selectedStashReference}/>
           <span className={`panel-resizer inspector-vertical-resizer ${panelResizing === 'details' ? 'active' : ''}`} role="separator" aria-label="拖动调整提交信息和变更文件高度" onPointerDown={beginDetailsResize}/>
-          <ChangedFilesPanel files={selectedCommitFiles} loading={selectedCommitFilesLoading} activeFile={diffFile} onOpenFile={(index) => { setDiffFile(index); setWideDiff(false) }} onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}/>
+          <ChangedFilesPanel files={selectedCommitFiles} loading={selectedCommitFilesLoading} activeFile={diffFile} onOpenFile={(index) => {
+            const file = selectedCommitFiles[index]
+            const isConflict = selectedWorkingTree && Boolean(file) && (file.type.toUpperCase() === 'U' || repository.operation?.conflicts.includes(file.path))
+            if (isConflict) {
+              setOperationPath(file.path)
+              setHistoryConflictPath(file.path)
+              setDiffFile(null)
+              return
+            }
+            setDiffFile(index)
+            setWideDiff(false)
+          }} onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}/>
         </section>}
       </div>
       <footer className="statusbar">

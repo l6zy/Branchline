@@ -1,50 +1,18 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { Archive, Check, CornerDownLeft, FileCode2, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Archive, Check, CornerDownLeft, GitCommitHorizontal, Plus, Trash2 } from 'lucide-react'
 import {
   applyRepositoryStash,
   createRepositoryStash,
   dropRepositoryStash,
-  loadRepositoryStashFileDiff,
-  loadRepositoryStashFiles,
-  type RepositoryFile,
   type RepositorySnapshot,
 } from '../../repository'
-import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
 import { Button } from '../../components/Button'
-import { useResizablePane } from '../../components/useResizablePane'
 
-export function StashPage({ repository, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
+export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSelectStash: (reference: string) => void; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
   const [message, setMessage] = useState('')
   const [includeUntracked, setIncludeUntracked] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
-  const [selectedReference, setSelectedReference] = useState<string | null>(null)
-  const [stashFiles, setStashFiles] = useState<RepositoryFile[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
-  const [filesError, setFilesError] = useState<string | null>(null)
-  const [widePreview, setWidePreview] = useState(false)
-  const stashWidth = useResizablePane('branchline.stashWidth.v1', 330, 260, 620, 'horizontal')
-
-  useEffect(() => {
-    const stashes = repository?.stashes ?? []
-    if (!selectedReference || !stashes.some((stash) => stash.reference === selectedReference)) setSelectedReference(stashes[0]?.reference ?? null)
-  }, [repository?.stashes, selectedReference])
-  useEffect(() => {
-    if (!repository || !selectedReference) {
-      setStashFiles([])
-      setFilesError(null)
-      return
-    }
-    let cancelled = false
-    setFilesLoading(true)
-    setFilesError(null)
-    loadRepositoryStashFiles(repository.path, selectedReference)
-      .then((files) => { if (!cancelled) setStashFiles(files) })
-      .catch((error) => { if (!cancelled) setFilesError(error instanceof Error ? error.message : String(error)) })
-      .finally(() => { if (!cancelled) setFilesLoading(false) })
-    return () => { cancelled = true }
-  }, [repository?.path, selectedReference])
-  const loadRows = useCallback((filePath: string) => repository && selectedReference ? loadRepositoryStashFileDiff(repository.path, selectedReference, filePath) : Promise.resolve([]), [repository?.path, selectedReference])
   const run = async (key: string, operation: () => Promise<RepositorySnapshot>, notice: string) => {
     if (!repository) return onNotice('Stash 需要先打开本地仓库')
     setBusy(key)
@@ -60,28 +28,25 @@ export function StashPage({ repository, onSnapshot, onNotice }: { repository: Re
       setBusy(null)
     }
   }
+  const selectStash = (reference: string) => {
+    onSelectStash(reference)
+  }
 
-  const workspaceStyle = { '--stash-control-width': `${stashWidth.value}px` } as CSSProperties
-  return <section className={`workspace-page stash-page ${stashWidth.resizing ? 'pane-resizing' : ''}`}>
-    <div className={`stash-workspace ${widePreview ? 'preview-wide' : ''}`} style={workspaceStyle}>
+  return <section className="workspace-page stash-page">
+    <div className="stash-workspace stash-manager">
       <div className="stash-control-pane">
         <div className="stash-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="可选：输入 Stash 说明"/><label><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)}/>包含未跟踪文件</label><Button variant="primary" disabled={!repository || busy !== null} onClick={() => void run('create', () => createRepositoryStash(repository!.path, message, includeUntracked), '已保存工作区到 Stash')}><Plus size={14}/>{busy === 'create' ? '正在保存…' : '创建 Stash'}</Button></div>
         <div className="stash-list-heading"><strong>已保存的工作区</strong><span>{repository?.stashes.length ?? 0}</span></div>
-        <div className="stash-list">{repository?.stashes.map((stash) => <article className={selectedReference === stash.reference ? 'active' : ''} key={stash.reference}>
-          <button className="stash-select" onClick={() => { setSelectedReference(stash.reference); setWidePreview(false) }}><span className="stash-icon"><Archive size={15}/></span><span><strong>{stash.message}</strong><small>{stash.reference} · {stash.author} · {formatLocalDateTime(stash.time)}</small></span></button>
+        <div className="stash-list">{repository?.stashes.map((stash) => <article key={stash.reference}>
+          <button className="stash-select" onClick={() => selectStash(stash.reference)} title="在提交图谱中查看"><span className="stash-icon"><Archive size={15}/></span><span><strong>{stash.message}</strong><small>{stash.reference} · {stash.author} · {formatLocalDateTime(stash.time)}</small></span></button>
           <div className="stash-actions"><Button variant="icon" disabled={busy !== null} title="应用并保留" onClick={() => void run(`apply-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, false), `已应用 ${stash.reference}`)}><Check size={13}/></Button><Button variant="icon" disabled={busy !== null} title="弹出并删除" onClick={() => void run(`pop-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, true), `已弹出 ${stash.reference}`)}><CornerDownLeft size={13}/></Button><Button variant="danger" disabled={busy !== null} title="删除" onClick={() => { if (window.confirm(`确定删除 ${stash.reference}？`)) void run(`drop-${stash.reference}`, () => dropRepositoryStash(repository.path, stash.reference), `已删除 ${stash.reference}`) }}><Trash2 size={13}/></Button></div>
         </article>)}
           {repository && repository.stashes.length === 0 && <div className="workspace-hint"><Archive size={26}/><strong>暂无 Stash</strong><span>保存当前工作区后会显示在这里。</span></div>}
           {!repository && <div className="workspace-hint"><Archive size={26}/><strong>请先打开本地仓库</strong></div>}
         </div>
       </div>
-      <span className={`workspace-resizer workspace-resizer-column ${stashWidth.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整 Stash 列表和 Diff 宽度" onPointerDown={stashWidth.beginResize}/>
-      <div className="stash-preview-pane">
-        {filesLoading && <div className="drawer-preview-empty"><Archive size={28}/><strong>正在读取 Stash…</strong></div>}
-        {filesError && <div className="drawer-preview-empty error"><Archive size={28}/><strong>无法读取 Stash</strong><span>{filesError}</span></div>}
-        {!filesLoading && !filesError && selectedReference && stashFiles.length > 0 && <DiffPanel key={selectedReference} files={stashFiles} repositoryPath={repository?.path} wide={widePreview} onWideChange={setWidePreview} loadRows={loadRows}/>} 
-        {!filesLoading && !filesError && selectedReference && stashFiles.length === 0 && <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>该 Stash 没有文本变更</strong></div>}
-        {!selectedReference && <div className="drawer-preview-empty"><Archive size={30}/><strong>选择 Stash 查看内容</strong><span>文件列表和完整 Diff 会显示在这里。</span></div>}
+      <div className="stash-graph-handoff">
+        <GitCommitHorizontal size={32}/><strong>Stash 已并入提交图谱</strong><span>选择左侧任意 Stash，会回到对应图谱节点；文件列表和 Diff 都在统一的右侧详情中查看。</span>
       </div>
     </div>
   </section>

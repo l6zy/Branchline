@@ -191,6 +191,7 @@ pub struct RepositoryBranchTracking {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryStash {
     pub reference: String,
+    pub hash: String,
     pub message: String,
     pub author: String,
     pub time: String,

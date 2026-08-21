@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalLink, GitBranch, GitMerge, GitPullRequest, RotateCcw, SkipForward, Square, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalLink, GitBranch, GitMerge, GitPullRequest, RotateCcw, SkipForward, Square, Trash2, X } from 'lucide-react'
 import { ConflictCodeEditor, type ConflictCodeEditorHandle } from './ConflictCodeEditor'
 import { abortRepositoryOperation, continueRepositoryOperation, launchConflictMergetool, loadConflictFile, resolveConflictBlock, resolveConflictFile, skipRepositoryOperation, type ConflictFileContent, type RepositorySnapshot } from '../../repository'
 import { Button } from '../../components/Button'
@@ -10,6 +10,7 @@ type OperationPanelProps = {
   onNotice: (message: string) => void
   initialPath?: string | null
   onReturnToChanges: () => void
+  onClose?: () => void
 }
 
 type ConflictBlock = {
@@ -23,6 +24,12 @@ type ConflictBlock = {
 }
 
 type ResolutionStrategy = 'current' | 'incoming' | 'both'
+
+const resolutionLabels: Record<ResolutionStrategy, string> = {
+  current: '采用当前更改',
+  incoming: '采用传入的更改',
+  both: '保留双方更改',
+}
 
 function parseConflictBlocks(value: string): ConflictBlock[] {
   const blocks: ConflictBlock[] = []
@@ -52,7 +59,7 @@ function parseConflictBlocks(value: string): ConflictBlock[] {
   return blocks
 }
 
-export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, onReturnToChanges }: OperationPanelProps) {
+export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, onReturnToChanges, onClose }: OperationPanelProps) {
   const operation = repository.operation
   const conflicts = operation?.conflicts ?? []
   const [selectedPath, setSelectedPath] = useState<string | null>(conflicts[0] ?? null)
@@ -61,6 +68,8 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
   const [loading, setLoading] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
   const [activeBlock, setActiveBlock] = useState(0)
+  const [lastResolution, setLastResolution] = useState<{ block: number; strategy: ResolutionStrategy; from: number; to: number } | null>(null)
+  const [resolvedRanges, setResolvedRanges] = useState<Array<{ from: number; to: number }>>([])
   const editorRef = useRef<ConflictCodeEditorHandle>(null)
 
   useEffect(() => {
@@ -79,6 +88,8 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
     let cancelled = false
     setLoading(true)
     setActiveBlock(0)
+    setLastResolution(null)
+    setResolvedRanges([])
     loadConflictFile(repository.path, selectedPath)
       .then((value) => {
         if (!cancelled) {
@@ -118,15 +129,39 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
       `已解决 ${selectedPath}`,
     ).then((resolved) => { if (resolved) onReturnToChanges() })
   }
+  const blocks = useMemo(() => parseConflictBlocks(draft), [draft])
   const resolveBlock = (blockIndex: number, strategy: ResolutionStrategy) => {
-    if (!selectedPath) return
-    void runOperation(
-      () => resolveConflictBlock(repository.path, selectedPath, blockIndex, strategy),
-      `已解决 ${selectedPath} 的第 ${blockIndex + 1} 个冲突块`,
-    )
+    if (!selectedPath || loading) return
+    const currentBlocks = parseConflictBlocks(draft)
+    const currentTarget = currentBlocks[blockIndex]
+    setLoading(true)
+    void resolveConflictBlock(repository.path, selectedPath, blockIndex, strategy)
+      .then((value) => {
+        const nextDraft = value.replace(/\r\n/g, '\n')
+        const nextBlocks = parseConflictBlocks(nextDraft)
+        const nextIndex = nextBlocks.length ? Math.min(blockIndex, nextBlocks.length - 1) : 0
+        const nextTarget = nextBlocks[nextIndex]
+        // Keep the viewport anchored to the resolved block; the result may be shorter than its markers.
+        const focusOffset = Math.min(currentTarget?.offset ?? nextTarget?.offset ?? 0, nextDraft.length)
+        const removedLength = currentTarget ? currentTarget.endOffset - currentTarget.offset : 0
+        const resolvedLength = Math.max(0, nextDraft.length - (draft.length - removedLength))
+        const resolvedTo = Math.min(focusOffset + resolvedLength, nextDraft.length)
+        const delta = resolvedLength - removedLength
+        const mappedRanges = resolvedRanges.map((range) => {
+          if (range.to <= currentTarget.offset) return range
+          if (range.from >= currentTarget.endOffset) return { from: range.from + delta, to: range.to + delta }
+          return { from: Math.min(range.from, currentTarget.offset), to: Math.min(range.to, currentTarget.offset + resolvedLength) }
+        })
+        setDraft(nextDraft)
+        setActiveBlock(nextIndex)
+        setLastResolution({ block: blockIndex, strategy, from: focusOffset, to: resolvedTo })
+        setResolvedRanges([...mappedRanges, { from: focusOffset, to: resolvedTo }])
+        onNotice(`已应用第 ${blockIndex + 1} 个冲突块：${resolutionLabels[strategy]}`)
+      })
+      .catch((error) => onNotice(error instanceof Error ? error.message : String(error)))
+      .finally(() => setLoading(false))
   }
 
-  const blocks = useMemo(() => parseConflictBlocks(draft), [draft])
   const jumpBlock = (direction: -1 | 1) => {
     if (!blocks.length) return
     const next = (activeBlock + direction + blocks.length) % blocks.length
@@ -157,6 +192,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
         <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), '操作已继续')} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}><ChevronRight size={14}/>{operation.kind === 'rebase' ? '继续变基' : '继续操作'}</Button>
         {(operation.kind === 'rebase' || operation.kind === 'cherry-pick') && <Button variant="secondary" onClick={() => void runOperation(() => skipRepositoryOperation(repository.path), '已跳过当前提交')} disabled={loading}><SkipForward size={14}/>跳过提交</Button>}
         <Button variant="danger" onClick={() => { if (window.confirm('确定中止当前 Git 操作？未完成的合并或变基将被撤销。')) void runOperation(() => abortRepositoryOperation(repository.path), '已中止 Git 操作') }} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>中止</Button>
+        {onClose && <Button variant="icon" onClick={onClose} title="返回提交图谱"><X size={15}/></Button>}
       </div>
     </div>
 
@@ -169,11 +205,11 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
         {file?.binary && <div className="conflict-binary"><AlertTriangle size={28}/><strong>{file.gitlink ? '此文件是 Gitlink / Submodule 引用' : '此文件包含二进制内容'}</strong><span>无法进行文本编辑，请选择一侧、删除文件或使用外部合并工具。</span><div><Button variant="secondary" onClick={() => resolveFile('current')} disabled={loading || file.current == null}><RotateCcw size={13}/>采用当前</Button><Button variant="secondary" onClick={() => resolveFile('incoming')} disabled={loading || file.incoming == null}><GitPullRequest size={13}/>采用对方</Button><Button variant="danger" onClick={() => resolveFile('delete')} disabled={loading}><Trash2 size={13}/>删除文件</Button></div></div>}
         {file && !file.binary && <div className="conflict-result">
             <div className="conflict-result-heading">
-              <div><strong>合并结果</strong><span>{blocks.length ? `第 ${Math.min(activeBlock + 1, blocks.length)} / ${blocks.length} 个冲突块` : '没有未处理的冲突标记'}</span></div>
+              <div><strong>合并结果</strong><span>{lastResolution ? `刚刚已应用第 ${lastResolution.block + 1} 个冲突块：${resolutionLabels[lastResolution.strategy]}` : blocks.length ? `第 ${Math.min(activeBlock + 1, blocks.length)} / ${blocks.length} 个冲突块` : '没有未处理的冲突标记'}</span></div>
               <div className="conflict-navigation"><button onClick={() => jumpBlock(-1)} disabled={!blocks.length} title="上一处冲突"><ChevronLeft size={14}/></button><span>{blocks.length ? `${activeBlock + 1} / ${blocks.length}` : '0 / 0'}</span><button onClick={() => jumpBlock(1)} disabled={!blocks.length} title="下一处冲突"><ChevronRight size={14}/></button></div>
               {blocks.length > 0 && <div className="conflict-active-actions"><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'current')} disabled={loading}>采用当前更改</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'incoming')} disabled={loading}>采用传入的更改</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'both')} disabled={loading}>保留双方更改</Button></div>}
             </div>
-            <ConflictCodeEditor ref={editorRef} value={draft} filePath={file.path} blocks={blocks} activeBlock={activeBlock} disabled={loading} onChange={setDraft} onResolveBlock={resolveBlock} onSave={() => resolveFile('result')} saveLabel={blocks.length ? '保存结果' : '标记已解决'}/>
+            <ConflictCodeEditor ref={editorRef} value={draft} filePath={file.path} blocks={blocks} activeBlock={activeBlock} resolvedRanges={resolvedRanges} disabled={loading} onChange={(value) => { setDraft(value); if (value !== draft) setLastResolution(null) }} onResolveBlock={resolveBlock} onSave={() => resolveFile('result')} saveLabel={blocks.length ? '保存结果' : '标记已解决'}/>
           </div>}
       </div>
     </div>

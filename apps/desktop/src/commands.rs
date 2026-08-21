@@ -269,10 +269,9 @@ pub async fn resolve_conflict_block(
     file_path: String,
     block_index: usize,
     strategy: String,
-) -> Result<RepositorySnapshot, String> {
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::resolve_conflict_block(&repository_path, &file_path, block_index, &strategy)?;
-        git::read_repository(&repository_path)
+        git::resolve_conflict_block(&repository_path, &file_path, block_index, &strategy)
     })
     .await
     .map_err(|error| task_error("解决冲突块", error))?

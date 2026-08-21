@@ -92,9 +92,9 @@
 
 .panel-resizer { position: relative; display: block; border: 0; background: transparent; cursor: col-resize; touch-action: none; z-index: 6; }
 
-.panel-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; z-index: 1; width: 1px; background: color-mix(in srgb, var(--line) 68%, transparent); transform: translateX(-50%); transition: background .14s ease, box-shadow .14s ease; }
+.panel-resizer::before { content: ''; position: absolute; top: 0; bottom: 0; z-index: 1; width: 1px; background: var(--line); transition: background .14s ease, box-shadow .14s ease; }
 
-.panel-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; z-index: 2; width: 9px; background: transparent; transform: translateX(-50%); }
+.panel-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; z-index: 2; width: 9px; background: transparent; }
 
 .panel-resizer:hover::before, .panel-resizer.active::before { background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); }
 
@@ -108,9 +108,9 @@
 
 .inspector-vertical-resizer { grid-row: 2; grid-column: 1; width: 100%; min-height: 1px; cursor: row-resize; }
 
-.inspector-vertical-resizer::before { top: 50%; right: 0; bottom: auto; left: 0; width: 100%; height: 1px; transform: translateY(-50%); }
+.inspector-vertical-resizer::before { top: 50%; right: 0; bottom: auto; left: 0; width: 100%; height: 1px; }
 
-.inspector-vertical-resizer::after { top: 50%; right: 0; bottom: auto; left: 0; width: 100%; height: 9px; transform: translateY(-50%); }
+.inspector-vertical-resizer::after { top: 50%; right: 0; bottom: auto; left: 0; width: 100%; height: 9px; }
 
 .inspector-vertical-resizer:hover::before, .inspector-vertical-resizer.active::before { width: 100%; }
 
@@ -214,6 +214,9 @@
 }
 
 @media (max-width: 900px) {
+  .stash-manager { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(260px, 1fr) minmax(180px, .7fr); }
+  .stash-manager .stash-control-pane { min-height: 0; }
+  .stash-graph-handoff { min-height: 180px; padding: 24px; }
   .topbar { grid-template-columns: 1fr auto; }
   .global-search { grid-row: 2; grid-column: 1 / -1; display: none; }
   .workspace-grid { grid-template-columns: minmax(0, 1fr) 300px; }

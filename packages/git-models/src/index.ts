@@ -187,6 +187,7 @@ export type RepositoryCommitTemplate = {
 
 export type RepositoryStash = {
   reference: string
+  hash: string
   message: string
   author: string
   time: string

@@ -1361,17 +1361,18 @@ fn parse_stashes(path: &Path) -> Vec<RepositoryStash> {
         &[
             "stash",
             "list",
-            "--pretty=format:%x1e%gd%x1f%gs%x1f%an%x1f%aI",
+            "--pretty=format:%x1e%gd%x1f%H%x1f%gs%x1f%an%x1f%aI",
         ],
     )
     .split('\x1e')
     .filter_map(|record| {
         let fields: Vec<&str> = record.trim().split('\x1f').collect();
-        (fields.len() >= 4).then(|| RepositoryStash {
+        (fields.len() >= 5).then(|| RepositoryStash {
             reference: fields[0].to_string(),
-            message: fields[1].to_string(),
-            author: fields[2].to_string(),
-            time: fields[3].to_string(),
+            hash: fields[1].to_string(),
+            message: fields[2].to_string(),
+            author: fields[3].to_string(),
+            time: fields[4].to_string(),
         })
     })
     .collect()
@@ -2977,7 +2978,7 @@ pub fn resolve_conflict_block(
     file_path: &str,
     block_index: usize,
     strategy: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     if !unresolved_paths(&root)
@@ -3046,7 +3047,8 @@ pub fn resolve_conflict_block(
     if content.ends_with('\n') {
         output.push('\n');
     }
-    write_conflict_result(&root, &file_path, &output)
+    write_conflict_result(&root, &file_path, &output)?;
+    Ok(output)
 }
 
 pub fn load_conflict_file(
@@ -3880,6 +3882,7 @@ mod tests {
         }
 
         let reference = snapshot.stashes[0].reference.clone();
+        assert_eq!(snapshot.stashes[0].hash, stash_commit.full_hash);
         let stash_files = load_stash_files(&path, &reference).expect("load stash files");
         assert!(stash_files.iter().any(|file| file.path == "README.md"));
         assert!(stash_files.iter().any(|file| file.path == "untracked.txt"));
@@ -4482,8 +4485,9 @@ mod tests {
             .incoming
             .as_deref()
             .is_some_and(|value| value.contains("feature version")));
-        resolve_conflict_block(&path, "README.md", 0, "current")
+        let resolved = resolve_conflict_block(&path, "README.md", 0, "current")
             .expect("choose current merge conflict block");
+        assert_eq!(resolved.replace("\r\n", "\n"), "main version\n");
         assert_eq!(
             fs::read_to_string(repository.0.join("README.md"))
                 .expect("read resolved merge file")

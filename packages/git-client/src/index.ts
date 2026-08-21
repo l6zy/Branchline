@@ -135,7 +135,7 @@ export async function resolveConflictFile(repositoryPath: string, filePath: stri
 }
 
 export async function resolveConflictBlock(repositoryPath: string, filePath: string, blockIndex: number, strategy: 'current' | 'incoming' | 'both') {
-  return invoke<RepositorySnapshot>('resolve_conflict_block', { repositoryPath, filePath, blockIndex, strategy })
+  return invoke<string>('resolve_conflict_block', { repositoryPath, filePath, blockIndex, strategy })
 }
 
 export async function launchConflictMergetool(repositoryPath: string, filePath: string) {

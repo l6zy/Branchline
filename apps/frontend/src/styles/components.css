@@ -106,7 +106,7 @@
 
 .key, .count, .nav-badge { margin-left: auto; color: var(--faint); font-size: 12px; }
 
-.nav-badge { min-width: 18px; height: 17px; padding: 0 5px; display: grid; place-items: center; border-radius: 5px; color: #69b1ff; background: var(--accent-dim); }
+.nav-badge { min-width: 18px; height: 17px; padding: 0 5px; display: grid; place-items: center; border-radius: 5px; color: var(--accent); background: var(--accent-dim); }
 
 .nav-badge.muted { color: var(--muted); background: var(--surface-sunken); }
 
@@ -202,7 +202,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .button-secondary:disabled, .button-primary:disabled, .button-danger:disabled, .button-icon:disabled { opacity: .6; cursor: not-allowed; }
 
-.fetch-button:disabled { cursor: wait; }
+.fetch-button:disabled { cursor: not-allowed; }
 
 .button-secondary.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
 
@@ -416,7 +416,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
 
-.split-code-side { position: relative; width: 100%; min-width: 0; min-height: 22px; display: grid; grid-template-columns: 10ch 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+.split-code-side { position: relative; width: 100%; min-width: 0; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+
+.diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: 10ch 2ch minmax(max-content, 1fr); }
 
 .split-code-side.add { background: var(--code-add); }
 
@@ -810,15 +812,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 /* 冲突编辑器：左右两侧保持行对齐，最终结果采用高亮层叠加可编辑文本层。 */
 
-.cm-conflict-actions { min-height: 24px; margin: 2px 12px 0; padding: 0; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 0; color: var(--text); background: transparent; box-shadow: none; }
+.cm-conflict-actions { min-height: 24px; margin: 4px 8px; padding: 0; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 0; color: var(--text); background: transparent; box-shadow: none; }
 
 .cm-conflict-actions.active { background: transparent; }
 
-.cm-conflict-actions button { min-height: 20px; padding: 0; border: 0; border-radius: 0; color: #69b1ff; background: transparent; font: 12px var(--font-ui); line-height: 20px; white-space: nowrap; cursor: pointer; }
-
-.cm-conflict-actions button:hover { color: #91caff; text-decoration: underline; background: transparent; }
-
-.cm-conflict-actions button:disabled { opacity: .45; cursor: wait; }
+.cm-conflict-actions .button-secondary { height: 24px; min-height: 24px; padding: 0 8px; flex: 0 0 auto; border-radius: 5px; font-size: 11px; line-height: 1; }
 
 /* 应用级阅读基线与统一滚动条。局部组件仍可提供自己的背景，但不再改变滚动条形态。 */
 

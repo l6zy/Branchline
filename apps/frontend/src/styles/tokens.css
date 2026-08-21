@@ -114,7 +114,7 @@
   --border: var(--line);
   --border-subtle: var(--line-soft);
   --text-primary: var(--text);
-  --text-secondary: var(--muted);
+  --text-secondary: #434343;
   --text-tertiary: var(--faint);
   --text-on-accent: #ffffff;
   --accent-text: #0958d9;

@@ -30,7 +30,7 @@
 
 .commit-row.search-match:hover { background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
 
-.commit-row.selected { color: var(--selection-text); background: var(--selection-surface); box-shadow: inset 2px 0 var(--accent); }
+.commit-row.selected { color: var(--selection-text); background: var(--selection-surface); box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent); }
 
 .commit-row.working-tree { background: color-mix(in srgb, #faad14 7%, transparent); }
 
@@ -144,7 +144,7 @@
 
 .changed-files-list button > div strong { font-size: 8.5px; }
 
-.changed-files-list button > div span { color: var(--faint); font-size: 7px; }
+.changed-files-list button > div span { color: var(--text-tertiary); font-size: 7px; }
 
 .changed-files-list button > svg { color: var(--faint); }
 
@@ -347,6 +347,8 @@
 .welcome-capabilities small { color: var(--faint); font-size: 12px; line-height: 1.4; }
 
 .branch-dialog { width: min(460px, calc(100vw - 32px)); overflow: hidden; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--panel); box-shadow: 0 24px 72px rgba(0,0,0,.46); animation: popIn .18s ease-out; }
+
+.branch-dialog.worktree-dialog { overflow: visible; }
 
 .branch-dialog-heading { min-height: 78px; padding: 18px 18px 14px; display: grid; grid-template-columns: 36px minmax(0, 1fr) 30px; align-items: start; gap: 11px; border-bottom: 1px solid var(--line-soft); }
 

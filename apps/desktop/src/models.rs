@@ -252,5 +252,6 @@ pub struct RepositorySnapshot {
     pub tags: Vec<String>,
     pub stashes: Vec<RepositoryStash>,
     pub commit_template: Option<RepositoryCommitTemplate>,
+    pub undo_commit_message: Option<String>,
     pub operation: Option<RepositoryOperationState>,
 }

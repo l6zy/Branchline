@@ -89,10 +89,10 @@
   --panel-2: #fafafa;
   --panel-3: #f0f0f0;
   --line: #d9d9d9;
-  --line-soft: #f0f0f0;
+  --line-soft: #dfe3e8;
   --text: #1f1f1f;
   --muted: #595959;
-  --faint: #8c8c8c;
+  --faint: #6b7280;
   --accent: #1677ff;
   --accent-dim: #e6f4ff;
   --violet: #722ed1;
@@ -108,7 +108,7 @@
   --surface-chrome: var(--panel-2);
   --surface-control: var(--panel);
   --surface-raised: var(--panel);
-  --surface-hover: #f0f7ff;
+  --surface-hover: #eaf3ff;
   --surface-sunken: var(--panel-3);
   --border-strong: var(--line);
   --border: var(--line);
@@ -147,7 +147,7 @@
   --code-del-hover: #f3caca;
   --code-hunk: #d7ebf8;
   --code-hunk-text: #123b5d;
-  --selection-surface: #e6f4ff;
+  --selection-surface: #d9ebff;
   --selection-text: #0958d9;
   --operation-text: #ad6800;
   --operation-hover: #874d00;

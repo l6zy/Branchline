@@ -464,6 +464,18 @@ pub async fn reset_repository_to_commit(
 }
 
 #[tauri::command]
+pub async fn undo_last_commit(repository_path: String) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let message = git::undo_last_commit(&repository_path)?;
+        let mut snapshot = git::read_repository(&repository_path)?;
+        snapshot.undo_commit_message = Some(message);
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|error| task_error("撤回上一次提交", error))?
+}
+
+#[tauri::command]
 pub async fn rebase_repository_onto(
     repository_path: String,
     commit: String,

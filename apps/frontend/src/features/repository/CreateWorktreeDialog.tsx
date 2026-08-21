@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { GitFork, X } from 'lucide-react'
 import { Button } from '../../components/Button'
+import { CompactSelect } from '../../components/CompactSelect'
 
 export function CreateWorktreeDialog({ branches, busy, onClose, onSubmit }: {
   branches: string[]
@@ -19,7 +20,7 @@ export function CreateWorktreeDialog({ branches, busy, onClose, onSubmit }: {
       <form onSubmit={(event) => { event.preventDefault(); if (valid) void onSubmit(path.trim(), branch.trim(), mode === 'new') }}>
         <label>目标目录</label><div className="branch-name-input"><input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如 E:\\code\\mono-web-feature"/></div>
         <label>分支方式</label><div className="segmented worktree-mode"><button type="button" className={mode === 'existing' ? 'active' : ''} onClick={() => { setMode('existing'); setBranch(branches[0] ?? '') }}>使用现有分支</button><button type="button" className={mode === 'new' ? 'active' : ''} onClick={() => { setMode('new'); setBranch('') }}>创建新分支</button></div>
-        <label>{mode === 'existing' ? '本地分支' : '新分支名'}</label>{mode === 'existing' ? <select className="worktree-branch-select" value={branch} onChange={(event) => setBranch(event.target.value)}>{branches.map((item) => <option key={item} value={item}>{item}</option>)}</select> : <div className="branch-name-input"><input value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="feat/new-worktree"/></div>}
+        <label>{mode === 'existing' ? '本地分支' : '新分支名'}</label>{mode === 'existing' ? <CompactSelect className="worktree-branch-select" value={branch} options={branches.map((item) => ({ value: item, label: item }))} onChange={setBranch} ariaLabel="选择本地分支"/> : <div className="branch-name-input"><input value={branch} onChange={(event) => setBranch(event.target.value)} placeholder="feat/new-worktree"/></div>}
         <div className="branch-dialog-hint">Worktree 移除不会使用强制模式，脏工作区会由 Git 拒绝。</div>
         <div className="branch-dialog-actions"><Button type="button" variant="secondary" onClick={onClose} disabled={busy}>取消</Button><Button type="submit" variant="primary" disabled={!valid || busy}>{busy ? '正在创建…' : '创建 Worktree'}</Button></div>
       </form>

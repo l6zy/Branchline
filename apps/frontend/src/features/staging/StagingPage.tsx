@@ -23,6 +23,7 @@ import { useResizablePane } from '../../components/useResizablePane'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
+  undoCommitMessage?: string | null
   onSnapshot: (snapshot: RepositorySnapshot) => void
   onNotice: (message: string) => void
   onOperationChange?: (label: string | null) => void
@@ -58,7 +59,7 @@ function getFileStatus(type: string) {
   return fileStatusMeta[code] ?? { label: type || '变更', className: 'modified', description: '文件变更' }
 }
 
-export function StagingPage({ repository, onSnapshot, onNotice, onOperationChange, onOpenHistory, onOpenLineHistory, onOpenConflict }: StagingPageProps) {
+export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotice, onOperationChange, onOpenHistory, onOpenLineHistory, onOpenConflict }: StagingPageProps) {
   const [fullMessage, setFullMessage] = useState('')
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
   const [templateDraft, setTemplateDraft] = useState('')
@@ -108,6 +109,10 @@ export function StagingPage({ repository, onSnapshot, onNotice, onOperationChang
     setFullMessage(templateMessage(template?.content ?? ''))
     setTemplateDraft(template?.content ?? '')
   }, [repository?.commitTemplate?.content, repository?.commitTemplate?.path, repository?.path])
+
+  useEffect(() => {
+    if (undoCommitMessage !== null && undoCommitMessage !== undefined) setFullMessage(undoCommitMessage)
+  }, [undoCommitMessage])
 
   const run = async (action: () => Promise<RepositorySnapshot>, success: string, operationLabel?: string) => {
     setBusy(true)

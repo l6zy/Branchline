@@ -4,6 +4,16 @@ export type BranchTrackingMap = Record<string, {
   behind: number
 }>
 
+export function trackedRemoteReference(
+  reference: string,
+  references: string[],
+  remoteBranches: Set<string>,
+  branchTracking: BranchTrackingMap,
+) {
+  const upstream = branchTracking[reference]?.upstream
+  return upstream && remoteBranches.has(upstream) && references.includes(upstream) ? upstream : null
+}
+
 export function visibleCommitReferences(
   references: string[],
   remoteBranches: Set<string>,

@@ -176,6 +176,7 @@ export type RepositorySnapshot = {
   tags: string[]
   stashes: RepositoryStash[]
   commitTemplate?: RepositoryCommitTemplate
+  undoCommitMessage?: string
   operation?: RepositoryOperationState
 }
 

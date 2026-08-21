@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { visibleCommitReferences } from './historyReferences'
+import { trackedRemoteReference, visibleCommitReferences } from './historyReferences'
 
 describe('commit reference labels', () => {
   const tracking = {
@@ -28,5 +28,14 @@ describe('commit reference labels', () => {
       new Set(['origin/feature/demo']),
       {},
     )).toEqual(['feature/demo', 'origin/feature/demo'])
+  })
+
+  it('identifies the tracked remote shown on the same commit badge', () => {
+    expect(trackedRemoteReference(
+      'main',
+      ['main', 'origin/main'],
+      new Set(['origin/main']),
+      tracking,
+    )).toBe('origin/main')
   })
 })

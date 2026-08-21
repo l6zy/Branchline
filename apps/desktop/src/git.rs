@@ -1769,6 +1769,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
         tags,
         stashes,
         commit_template,
+        undo_commit_message: None,
         operation: repository_operation(root_path),
     })
 }
@@ -1848,8 +1849,7 @@ pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Res
     let root = repository_root(repository_path)?;
     let reference = reference.trim();
     resolve_commit(&root, reference)?;
-    ensure_clean_worktree(&root, "合并")?;
-    git_output_owned(
+    let merge_result = git_output_owned(
         &root,
         &[
             "merge".into(),
@@ -1857,8 +1857,15 @@ pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Res
             "--".into(),
             reference.into(),
         ],
-    )
-    .map(|_| ())
+    );
+    // Git treats submodule pointers as unmerged index entries. Resolve only
+    // those entries automatically; regular file conflicts remain for review.
+    let gitlink_result = resolve_gitlink_conflicts_local(repository_path);
+    match (merge_result, gitlink_result) {
+        (Ok(_), Ok(_)) => Ok(()),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) | (Err(_), Err(error)) => Err(error),
+    }
 }
 
 pub fn cherry_pick_repository_commit(repository_path: &str, commit: &str) -> Result<(), String> {
@@ -2038,8 +2045,21 @@ pub fn push_repository(repository_path: &str) -> Result<(), String> {
 pub fn reset_repository_to_commit(repository_path: &str, commit: &str) -> Result<(), String> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
-    ensure_clean_worktree(&root, "回退")?;
-    git_output_owned(&root, &["reset".into(), "--mixed".into(), commit]).map(|_| ())
+    if repository_operation(&root).is_some() {
+        return Err("当前存在未完成的 Git 操作，请先完成或中止后再回退".into());
+    }
+    git_output_owned(&root, &["reset".into(), "--hard".into(), commit]).map(|_| ())
+}
+
+pub fn undo_last_commit(repository_path: &str) -> Result<String, String> {
+    let root = repository_root(repository_path)?;
+    ensure_clean_worktree(&root, "撤回上一次提交")?;
+    let message = git_output(&root, &["show", "-s", "--format=%B", "HEAD"])?;
+    let parent = git_output(&root, &["rev-parse", "HEAD^"])
+        .map_err(|_| "当前提交没有父提交，无法撤回".to_string())?
+        .trim()
+        .to_string();
+    git_output_owned(&root, &["reset".into(), "--mixed".into(), parent]).map(|_| message)
 }
 
 pub fn rebase_repository_onto(repository_path: &str, commit: &str) -> Result<(), String> {
@@ -2889,26 +2909,21 @@ pub fn fetch_repository(repository_path: &str) -> Result<(), String> {
     git_output(&root, &["fetch", "--all", "--prune"]).map(|_| ())
 }
 
-pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, String> {
-    let root = repository_root(repository_path)?;
-    let entries = git_output(&root, &["ls-files", "-u"])?;
-    let paths: HashSet<String> = entries
+fn unresolved_gitlink_paths(root: &Path) -> Result<HashSet<String>, String> {
+    let entries = git_output(root, &["ls-files", "-u"])?;
+    Ok(entries
         .lines()
         .filter_map(|line| {
             let (metadata, path) = line.split_once('\t')?;
             metadata.starts_with("160000 ").then(|| path.to_string())
         })
-        .collect();
+        .collect())
+}
+
+pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, String> {
+    let root = repository_root(repository_path)?;
+    let paths = unresolved_gitlink_paths(&root)?;
     for path in &paths {
-        git_output_owned(
-            &root,
-            &[
-                "checkout".into(),
-                "--ours".into(),
-                "--".into(),
-                path.clone(),
-            ],
-        )?;
         git_output_owned(&root, &["add".into(), "--".into(), path.clone()])?;
     }
     Ok(paths.len())
@@ -3108,6 +3123,7 @@ pub fn resolve_conflict_file(
         return Err(format!("文件当前没有未解决冲突：{file_path}"));
     }
     let target = repository_file_target(&root, &file_path)?;
+    let gitlink = unresolved_gitlink_paths(&root)?.contains(&file_path);
     match strategy {
         "current" | "incoming" => {
             let side = if strategy == "current" {
@@ -3124,6 +3140,9 @@ pub fn resolve_conflict_file(
                     file_path.clone(),
                 ],
             )?;
+            if gitlink {
+                git_output_owned(&root, &["add".into(), "--".into(), file_path.clone()])?;
+            }
         }
         "both" => {
             let (current, _) = conflict_stage_text(&root, 2, &file_path);
@@ -3569,6 +3588,38 @@ mod tests {
     }
 
     #[test]
+    fn undoes_last_commit_while_preserving_changes_as_unstaged() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "second\n").expect("write second commit");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage second commit");
+        let parent = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read parent commit")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["commit", "-m", "第二次提交"])
+            .expect("create second commit");
+
+        let message = undo_last_commit(&path).expect("undo latest commit");
+
+        assert_eq!(message.trim(), "第二次提交");
+        assert_eq!(
+            git_output(&repository.0, &["rev-parse", "HEAD"])
+                .expect("read restored head")
+                .trim(),
+            parent
+        );
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read preserved changes"),
+            "second\n"
+        );
+        assert!(git_output(&repository.0, &["status", "--porcelain"])
+            .expect("read undo status")
+            .lines()
+            .any(|line| line.starts_with(" M README.md")));
+    }
+
+    #[test]
     fn saves_and_clears_a_repository_commit_template() {
         let repository = test_repository();
         let path = repository.0.to_string_lossy().to_string();
@@ -4007,9 +4058,9 @@ mod tests {
         fs::write(repository.0.join("reset.txt"), "reset\n").expect("write reset file");
         git_output(&repository.0, &["add", "reset.txt"]).expect("add reset file");
         git_output(&repository.0, &["commit", "-m", "待回退提交"]).expect("commit reset file");
-        reset_repository_to_commit(&path, &current_head).expect("reset while preserving files");
-        assert!(repository.0.join("reset.txt").exists());
-        assert!(git_output(&repository.0, &["status", "--porcelain"])
+        reset_repository_to_commit(&path, &current_head).expect("hard reset to selected commit");
+        assert!(!repository.0.join("reset.txt").exists());
+        assert!(!git_output(&repository.0, &["status", "--porcelain"])
             .expect("read reset status")
             .contains("reset.txt"));
         git_output(&repository.0, &["reset", "--hard", "HEAD"]).expect("clean reset result");
@@ -4020,6 +4071,124 @@ mod tests {
             .iter()
             .any(|branch| branch == "feat/merge"));
         assert!(delete_repository_branch(&path, &base_branch).is_err());
+    }
+
+    #[test]
+    fn merge_preserves_unrelated_worktree_changes() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", "-c", "feat/unrelated-merge"])
+            .expect("create merge branch");
+        fs::write(repository.0.join("merged.txt"), "merged\n").expect("write merged file");
+        git_output(&repository.0, &["add", "merged.txt"]).expect("add merged file");
+        git_output(&repository.0, &["commit", "-m", "新增合并文件"])
+            .expect("commit merged file");
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+
+        fs::write(repository.0.join("README.md"), "local change\n")
+            .expect("write unrelated local change");
+        merge_repository_reference(&path, "feat/unrelated-merge")
+            .expect("merge with unrelated local change");
+
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read local change"),
+            "local change\n"
+        );
+        assert!(repository.0.join("merged.txt").exists());
+        assert!(git_output(&repository.0, &["status", "--porcelain"])
+            .expect("read status")
+            .contains("README.md"));
+    }
+
+    #[test]
+    fn merge_automatically_stages_gitlink_conflicts_with_current_reference() {
+        let repository = test_repository();
+        let submodule = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+        let initial_gitlink = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read initial gitlink")
+            .trim()
+            .to_string();
+
+        git_output(&submodule.0, &["switch", "-c", "left"])
+            .expect("create left source branch");
+        fs::write(submodule.0.join("left.txt"), "left\n").expect("write left source change");
+        git_output(&submodule.0, &["add", "left.txt"]).expect("stage left source change");
+        git_output(&submodule.0, &["commit", "-m", "left source commit"])
+            .expect("commit left source change");
+        let left_gitlink = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read left gitlink")
+            .trim()
+            .to_string();
+
+        git_output(&submodule.0, &["switch", "-c", "right", &initial_gitlink])
+            .expect("create right source branch");
+        fs::write(submodule.0.join("right.txt"), "right\n").expect("write right source change");
+        git_output(&submodule.0, &["add", "right.txt"]).expect("stage right source change");
+        git_output(&submodule.0, &["commit", "-m", "right source commit"])
+            .expect("commit right source change");
+        let right_gitlink = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read right gitlink")
+            .trim()
+            .to_string();
+
+        let submodule_path = submodule.0.to_string_lossy().to_string();
+        git_output(
+            &repository.0,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &submodule_path,
+                "vendor/module",
+            ],
+        )
+        .expect("add test submodule");
+        let checkout = repository.0.join("vendor/module");
+        git_output(&checkout, &["checkout", &initial_gitlink]).expect("checkout initial gitlink");
+        git_output(&repository.0, &["add", ".gitmodules", "vendor/module"])
+            .expect("stage initial submodule");
+        git_output(&repository.0, &["commit", "-m", "添加 Submodule 引用"])
+            .expect("commit initial gitlink");
+
+        git_output(&repository.0, &["switch", "-c", "feat/gitlink"])
+            .expect("create feature branch");
+        git_output(&checkout, &["checkout", &left_gitlink]).expect("checkout feature gitlink");
+        git_output(&repository.0, &["add", "vendor/module"]).expect("stage feature gitlink");
+        git_output(&repository.0, &["commit", "-m", "更新 feature Gitlink"])
+            .expect("commit feature gitlink");
+
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+        git_output(&checkout, &["checkout", &right_gitlink]).expect("checkout current gitlink");
+        git_output(&repository.0, &["add", "vendor/module"]).expect("stage current gitlink");
+        git_output(&repository.0, &["commit", "-m", "更新 current Gitlink"])
+            .expect("commit current gitlink");
+
+        merge_repository_reference(&path, "feat/gitlink").expect_err("merge should report conflict");
+
+        assert!(
+            unresolved_paths(&repository.0)
+                .iter()
+                .all(|conflict| conflict != "vendor/module"),
+            "gitlink conflict should be staged automatically"
+        );
+        let stage = git_output(&repository.0, &["ls-files", "--stage", "--", "vendor/module"])
+            .expect("read staged gitlink");
+        assert_eq!(
+            stage.trim(),
+            format!("160000 {right_gitlink} 0\tvendor/module"),
+            "current branch gitlink must remain staged"
+        );
     }
 
     #[test]

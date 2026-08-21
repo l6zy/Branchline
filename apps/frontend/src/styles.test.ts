@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 const tokens = readFileSync(new URL('./styles/tokens.css', import.meta.url), 'utf8')
 const components = readFileSync(new URL('./styles/components.css', import.meta.url), 'utf8')
+const features = readFileSync(new URL('./styles/features.css', import.meta.url), 'utf8')
 const themeOverrides = readFileSync(new URL('./styles/theme-overrides.css', import.meta.url), 'utf8')
 
 describe('semantic style architecture', () => {
@@ -40,5 +41,10 @@ describe('semantic style architecture', () => {
     const noticeRule = components.match(/\.app-notice \{[^}]+\}/)?.[0] ?? ''
     expect(noticeRule).toContain('color: var(--accent-text);')
     expect(noticeRule).toContain('background: var(--accent-dim);')
+  })
+
+  it('keeps the worktree select menu outside the dialog clipping boundary', () => {
+    expect(features).toContain('.branch-dialog.worktree-dialog { overflow: visible; }')
+    expect(components).not.toContain('.worktree-dialog { overflow: visible; }')
   })
 })

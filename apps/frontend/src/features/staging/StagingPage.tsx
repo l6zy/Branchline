@@ -30,7 +30,6 @@ type StagingPageProps = {
   onOpenHistory: (path: string, tab: 'history' | 'blame') => void
   onOpenLineHistory: (path: string, line: number) => void
   onOpenConflict?: (path: string) => void
-  onOpenWorkingTree?: () => void
 }
 
 function templateMessageLines(content: string) {
@@ -43,6 +42,19 @@ function templateMessage(content: string) {
 
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() || path
+}
+
+function fileDirectory(path: string) {
+  const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return separator >= 0 ? path.slice(0, separator + 1) : ''
+}
+
+function StageFilePath({ path }: { path: string }) {
+  const directory = fileDirectory(path)
+  return <span className={`stage-file-path${directory ? ' has-directory' : ''}`} title={path}>
+    <span className="stage-file-name">{fileName(path)}</span>
+    {directory && <span className="stage-file-directory">{directory}</span>}
+  </span>
 }
 
 const fileStatusMeta: Record<string, { label: string; className: string; description: string }> = {
@@ -60,7 +72,7 @@ function getFileStatus(type: string) {
   return fileStatusMeta[code] ?? { label: type || '变更', className: 'modified', description: '文件变更' }
 }
 
-export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotice, onOperationChange, onOpenHistory, onOpenLineHistory, onOpenConflict, onOpenWorkingTree }: StagingPageProps) {
+export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotice, onOperationChange, onOpenHistory, onOpenLineHistory, onOpenConflict }: StagingPageProps) {
   const [fullMessage, setFullMessage] = useState('')
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
   const [templateDraft, setTemplateDraft] = useState('')
@@ -130,6 +142,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     } finally {
       setBusy(false)
       if (operationLabel) onOperationChange?.(null)
+      applyConfiguredTemplate()
     }
   }
   const updateStaging = async (paths: string[], mode: 'stage' | 'unstage', force = false) => {
@@ -257,7 +270,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     const FileIcon = file.path.includes('.') ? FileCode2 : FileText
     const status = getFileStatus(file.type)
     return <div className={`stage-file ${selectedPath === file.path ? 'active' : ''}`} key={`${icon}-${file.path}`} onContextMenu={(event) => { event.preventDefault(); setSelectedPath(file.path); setContextFile({ file, scope, x: event.clientX, y: event.clientY }) }}>
-      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedPath(file.path); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><span className="stage-file-path">{file.path}</span>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
+      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedPath(file.path); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><StageFilePath path={file.path}/>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
       <div className="stage-file-actions">
         {scope === 'unstaged' && <Button variant="danger" className="stage-file-action" onClick={() => void discard([file.path])} disabled={busy} title="丢弃未暂存改动"><Trash2 size={13}/></Button>}
         <button className="stage-file-action" onClick={action} disabled={busy} title={icon === 'add' ? '暂存文件' : '取消暂存'}><Icon size={13}/></button>
@@ -271,7 +284,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   }
 
   const conflictRow = (file: RepositoryFile) => <div className="stage-file conflict-file" key={`conflict-${file.path}`}>
-    <button className="stage-file-open" onClick={() => onOpenConflict?.(file.path)} title={`处理 ${file.path} 的冲突`}><FileCode2 size={15}/><span className="stage-file-status conflicted">冲突</span><span className="stage-file-path">{file.path}</span><span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
+    <button className="stage-file-open" onClick={() => onOpenConflict?.(file.path)} title={`处理 ${file.path} 的冲突`}><FileCode2 size={15}/><span className="stage-file-status conflicted">冲突</span><StageFilePath path={file.path}/><span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
     <div className="stage-file-actions"><button className="stage-file-action force-stage" onClick={() => forceStageConflict(file)} disabled={busy} title="强制暂存冲突文件" aria-label="强制暂存冲突文件"><Plus size={14}/></button></div>
   </div>
 
@@ -281,7 +294,6 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     <div className={`staging-workspace ${widePreview ? 'preview-wide' : ''}`} style={workspaceStyle}>
       <div className="staging-control-pane" style={{ gridTemplateRows: `${filesHeight.value}px 1px minmax(230px, 1fr)` }}>
         <div className="staging-file-sections">
-          <div className="staging-context-heading"><div><GitCommitHorizontal size={14}/><strong>当前工作区节点</strong><span>统一图谱入口</span></div>{onOpenWorkingTree && <Button variant="secondary" size="compact" onClick={onOpenWorkingTree} title="在提交图谱中查看当前工作区"><GitCommitHorizontal size={13}/>查看图谱</Button>}</div>
           {conflictFiles.length > 0 && <div className="stage-section conflict-section">
             <div className="stage-section-header"><div className="stage-section-name"><span className="stage-section-marker"/><strong>冲突</strong><span className="stage-section-count">{conflictFiles.length}</span></div><span className="stage-section-hint">解决后可暂存</span></div>
             <div className="stage-section-files">{conflictFiles.map(conflictRow)}</div>

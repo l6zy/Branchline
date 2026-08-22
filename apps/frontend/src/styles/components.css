@@ -416,7 +416,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
 
-.split-code-side { position: relative; width: 100%; min-width: 0; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+.split-code-side { position: relative; width: max-content; min-width: 100%; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
 .diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: 10ch 2ch minmax(max-content, 1fr); }
 

@@ -1139,7 +1139,6 @@ export default function App() {
              onOpenHistory={(path, tab) => setHistoryTarget({ path, tab })}
              onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: 'HEAD' })}
              onOpenConflict={(path) => { setOperationPath(path); setHistoryConflictPath(path); setSelected(WORKING_TREE_COMMIT_ID); setWorkspaceView('history') }}
-             onOpenWorkingTree={() => { setSelected(WORKING_TREE_COMMIT_ID); setWorkspaceView('history') }}
            />
         )}
         {workspaceView === 'stash' && <StashPage repository={repository} onSelectStash={handleSelectStash} onSnapshot={(snapshot) => {

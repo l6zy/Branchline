@@ -404,6 +404,29 @@
 
 .branch-dialog-actions .button-primary, .branch-dialog-actions .button-secondary { min-width: 84px; height: 32px; }
 
+.cherry-pick-dialog { width: min(520px, calc(100vw - 32px)); }
+.cherry-pick-dialog-body { padding: 16px 18px 18px; }
+.cherry-pick-commit-summary { min-width: 0; padding: 10px 11px; display: grid; gap: 4px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-2); }
+.cherry-pick-dialog .branch-dialog-heading h2 { font-size: 19px; line-height: 27px; }
+.cherry-pick-dialog .branch-dialog-heading p { font-size: 12px; }
+.cherry-pick-commit-summary strong { overflow: hidden; color: var(--text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.cherry-pick-commit-summary code { overflow: hidden; color: var(--faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.cherry-pick-mainline { margin-top: 14px; }
+.cherry-pick-section-heading { min-height: 30px; display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+.cherry-pick-section-heading svg { color: var(--accent); }
+.cherry-pick-section-heading strong { color: var(--text); }
+.cherry-pick-section-heading span { margin-left: auto; color: var(--faint); font-size: 11px; }
+.cherry-pick-parent-list { display: grid; gap: 6px; }
+.cherry-pick-parent-option { min-height: 62px; padding: 9px 11px; display: grid; grid-template-columns: 18px 28px minmax(0, 1fr); align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--panel-2); cursor: pointer; }
+.cherry-pick-parent-option:hover, .cherry-pick-parent-option.selected { border-color: var(--accent); background: var(--accent-dim); }
+.cherry-pick-parent-option input { margin: 0; accent-color: var(--accent); }
+.cherry-pick-parent-index { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); font: 13px var(--font-code); }
+.cherry-pick-parent-option > span:last-child { min-width: 0; display: grid; gap: 2px; }
+.cherry-pick-parent-option strong, .cherry-pick-parent-option code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cherry-pick-parent-option strong { color: var(--text); font-size: 13px; line-height: 18px; }
+.cherry-pick-parent-option code { color: var(--faint); font-size: 11px; line-height: 16px; }
+.cherry-pick-dialog .branch-dialog-actions { margin-top: 16px; }
+
 .compare-controls { margin-top: 12px; padding: 12px; display: grid; grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr) auto; align-items: end; gap: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 
 .reference-field { min-width: 0; display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
@@ -1159,7 +1182,7 @@
 
 .commit-compose .commit-full-message, .commit-compose .commit-template-editor textarea { min-height: 120px; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); font: 11px/1.55 var(--font-code); }
 
-.commit-compose .commit-full-message { min-height: 150px; }
+.commit-compose .commit-full-message { min-height: 150px; height: 0; flex: 1; }
 
 .commit-columns-header { font-size: 12px; }
 

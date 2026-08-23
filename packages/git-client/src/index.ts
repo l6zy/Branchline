@@ -194,8 +194,8 @@ export async function mergeRepositoryReference(repositoryPath: string, reference
   return invoke<RepositorySnapshot>('merge_repository_reference', { repositoryPath, reference })
 }
 
-export async function cherryPickRepositoryCommit(repositoryPath: string, commit: string) {
-  return invoke<RepositorySnapshot>('cherry_pick_repository_commit', { repositoryPath, commit })
+export async function cherryPickRepositoryCommit(repositoryPath: string, commit: string, mainline?: number) {
+  return invoke<RepositorySnapshot>('cherry_pick_repository_commit', { repositoryPath, commit, mainline: mainline ?? null })
 }
 
 export async function pullRepositoryBranch(repositoryPath: string, branch: string) {

@@ -1870,10 +1870,58 @@ pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Res
 }
 
 pub fn cherry_pick_repository_commit(repository_path: &str, commit: &str) -> Result<(), String> {
+    cherry_pick_repository_commit_with_mainline(repository_path, commit, None)
+}
+
+pub fn cherry_pick_repository_commit_with_mainline(
+    repository_path: &str,
+    commit: &str,
+    mainline: Option<usize>,
+) -> Result<(), String> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
-    ensure_clean_worktree(&root, "Cherry-pick")?;
-    git_output_owned(&root, &["cherry-pick".into(), "--".into(), commit]).map(|_| ())
+    let parent_count = git_output_owned(
+        &root,
+        &[
+            "rev-list".into(),
+            "--parents".into(),
+            "-n".into(),
+            "1".into(),
+            commit.clone(),
+        ],
+    )?
+    .split_whitespace()
+    .count()
+    .saturating_sub(1);
+    let mut args = vec!["cherry-pick".into()];
+    if parent_count > 1 {
+        let mainline = mainline.ok_or_else(|| {
+            "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号".to_string()
+        })?;
+        if !(1..=parent_count).contains(&mainline) {
+            return Err(format!(
+                "主线父提交编号无效：请输入 1 到 {parent_count} 之间的编号"
+            ));
+        }
+        args.push("-m".into());
+        args.push(mainline.to_string());
+    } else if mainline.is_some() {
+        return Err("普通提交不能指定主线父提交".into());
+    }
+    args.extend(["--".into(), commit]);
+    match git_output_owned(&root, &args) {
+        Ok(_) => Ok(()),
+        Err(error) if error.to_ascii_lowercase().contains("cherry-pick is now empty") => {
+            // A duplicate or already-applied commit leaves CHERRY_PICK_HEAD behind even
+            // though there is nothing to resolve. Treat it as a successful no-op.
+            git_output_owned(
+                &root,
+                &["cherry-pick".into(), "--skip".into()],
+            )
+            .map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
@@ -3264,7 +3312,20 @@ pub fn continue_repository_operation(repository_path: &str) -> Result<(), String
         ],
         _ => return Err("当前操作不支持继续".into()),
     };
-    git_output_owned(&root, &args).map(|_| ())
+    match git_output_owned(&root, &args) {
+        Ok(_) => Ok(()),
+        Err(error)
+            if operation.kind == "cherry-pick"
+                && error.to_ascii_lowercase().contains("cherry-pick is now empty") =>
+        {
+            git_output_owned(
+                &root,
+                &["cherry-pick".into(), "--skip".into()],
+            )
+            .map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn skip_repository_operation(repository_path: &str) -> Result<(), String> {
@@ -4074,6 +4135,182 @@ mod tests {
             .iter()
             .any(|branch| branch == "feat/merge"));
         assert!(delete_repository_branch(&path, &base_branch).is_err());
+    }
+
+    #[test]
+    fn cherry_picks_merge_commit_with_selected_mainline() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+        let base = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read base commit")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", "-c", "feat/merge-pick", &base])
+            .expect("create merge feature branch");
+        fs::write(repository.0.join("merge-pick.txt"), "from feature\n")
+            .expect("write merge feature file");
+        git_output(&repository.0, &["add", "merge-pick.txt"]).expect("stage merge feature file");
+        git_output(&repository.0, &["commit", "-m", "merge feature change"])
+            .expect("commit merge feature change");
+
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+        fs::write(repository.0.join("base-only.txt"), "from base\n")
+            .expect("write base-only file");
+        git_output(&repository.0, &["add", "base-only.txt"]).expect("stage base-only file");
+        git_output(&repository.0, &["commit", "-m", "base-only change"])
+            .expect("commit base-only change");
+        let first_parent = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read first merge parent")
+            .trim()
+            .to_string();
+        git_output(
+            &repository.0,
+            &["merge", "--no-ff", "feat/merge-pick", "-m", "create merge commit"],
+        )
+        .expect("create merge commit");
+        let merge_commit = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read merge commit")
+            .trim()
+            .to_string();
+        let parents = git_output(&repository.0, &["rev-list", "--parents", "-n", "1", &merge_commit])
+            .expect("read merge parents")
+            .split_whitespace()
+            .count();
+        assert_eq!(parents, 3);
+
+        git_output(&repository.0, &["branch", "cherry-pick-merge-target", &first_parent])
+            .expect("create cherry-pick target branch");
+        git_output(&repository.0, &["switch", "cherry-pick-merge-target"])
+            .expect("switch cherry-pick target branch");
+        assert!(cherry_pick_repository_commit(&path, &merge_commit).is_err());
+        cherry_pick_repository_commit_with_mainline(&path, &merge_commit, Some(1))
+            .expect("cherry-pick merge commit with first mainline");
+        assert_eq!(
+            fs::read_to_string(repository.0.join("merge-pick.txt"))
+                .expect("read cherry-picked merge file")
+                .replace("\r\n", "\n"),
+            "from feature\n"
+        );
+        assert!(cherry_pick_repository_commit_with_mainline(&path, &merge_commit, Some(3)).is_err());
+    }
+
+    #[test]
+    fn cherry_pick_preserves_unrelated_worktree_changes() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", "-c", "feat/cherry-dirty"])
+            .expect("create cherry feature branch");
+        fs::write(repository.0.join("cherry.txt"), "cherry\n").expect("write cherry file");
+        git_output(&repository.0, &["add", "cherry.txt"]).expect("stage cherry file");
+        git_output(&repository.0, &["commit", "-m", "待挑选的独立修改"])
+            .expect("commit cherry file");
+        let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read cherry hash")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+
+        fs::write(repository.0.join("local.txt"), "local\n").expect("write local change");
+        cherry_pick_repository_commit(&path, &cherry_hash)
+            .expect("cherry-pick with unrelated local change");
+        assert_eq!(
+            fs::read_to_string(repository.0.join("local.txt"))
+                .expect("read local change")
+                .replace("\r\n", "\n"),
+            "local\n"
+        );
+        assert!(repository.0.join("cherry.txt").exists());
+
+        // Picking the same commit again creates Git's empty cherry-pick state;
+        // the command should resolve it as a no-op instead of leaving the user
+        // in an operation that has nothing to edit.
+        cherry_pick_repository_commit(&path, &cherry_hash)
+            .expect("empty cherry-pick should be skipped");
+        assert!(read_repository(&path)
+            .expect("read after empty cherry-pick")
+            .operation
+            .is_none());
+    }
+
+    #[test]
+    fn continues_empty_cherry_pick_by_skipping_it() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["switch", "-c", "feat/empty-continue"])
+            .expect("create empty continue branch");
+        fs::write(repository.0.join("empty.txt"), "empty\n").expect("write empty test file");
+        git_output(&repository.0, &["add", "empty.txt"]).expect("stage empty test file");
+        git_output(&repository.0, &["commit", "-m", "empty continue source"])
+            .expect("commit empty continue source");
+        let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read empty continue hash")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch empty continue base");
+        cherry_pick_repository_commit(&path, &cherry_hash).expect("initial empty continue pick");
+        git_output(&repository.0, &["cherry-pick", &cherry_hash])
+            .expect_err("second pick should be empty");
+        assert_eq!(
+            read_repository(&path)
+                .expect("read empty operation")
+                .operation
+                .as_ref()
+                .map(|operation| operation.kind.as_str()),
+            Some("cherry-pick")
+        );
+        continue_repository_operation(&path).expect("continue should skip empty cherry-pick");
+        assert!(read_repository(&path)
+            .expect("read completed empty operation")
+            .operation
+            .is_none());
+    }
+
+    #[test]
+    fn cherry_pick_conflict_exposes_cherry_pick_operation() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", "-c", "feat/cherry-conflict"])
+            .expect("create cherry conflict branch");
+        fs::write(repository.0.join("README.md"), "feature version\n")
+            .expect("write feature version");
+        git_output(&repository.0, &["commit", "-am", "feature conflict"])
+            .expect("commit feature conflict");
+        let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read conflict cherry hash")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
+        fs::write(repository.0.join("README.md"), "main version\n")
+            .expect("write main version");
+        git_output(&repository.0, &["commit", "-am", "main conflict"])
+            .expect("commit main conflict");
+
+        cherry_pick_repository_commit(&path, &cherry_hash).expect_err("cherry-pick should conflict");
+        let snapshot = read_repository(&path).expect("read cherry-pick conflict state");
+        assert!(snapshot.files.iter().any(|file| file.path == "README.md"));
+        let operation = snapshot.operation.expect("cherry-pick operation");
+        assert_eq!(operation.kind, "cherry-pick");
+        assert_eq!(operation.conflicts, vec!["README.md"]);
+        abort_repository_operation(&path).expect("abort cherry-pick conflict");
     }
 
     #[test]

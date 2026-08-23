@@ -414,11 +414,20 @@ pub async fn merge_repository_reference(
 pub async fn cherry_pick_repository_commit(
     repository_path: String,
     commit: String,
+    mainline: Option<usize>,
 ) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let result = match mainline {
+            Some(mainline) => git::cherry_pick_repository_commit_with_mainline(
+                &repository_path,
+                &commit,
+                Some(mainline),
+            ),
+            None => git::cherry_pick_repository_commit(&repository_path, &commit),
+        };
         operation_snapshot(
             &repository_path,
-            git::cherry_pick_repository_commit(&repository_path, &commit),
+            result,
             "Cherry-pick",
         )
     })

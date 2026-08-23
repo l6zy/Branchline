@@ -19,6 +19,7 @@ import { RepositoryQuickSwitcher } from './features/repository/RepositoryQuickSw
 import { resolveRepositoryStructureSelection, type RepositoryStructureSelection } from './features/repository/repositoryTree'
 import { StashPage } from './features/stash/StashPage'
 import { RebaseDialog } from './features/operation/RebaseDialog'
+import { CherryPickDialog } from './features/operation/CherryPickDialog'
 import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './features/graph/commitGraphLayout'
 import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { trackedRemoteReference, visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
@@ -662,6 +663,7 @@ export default function App() {
   const [compareBase, setCompareBase] = useState<string | null>(null)
   const [branchDialog, setBranchDialog] = useState<{ prefix?: string } | null>(null)
   const [rebaseDialog, setRebaseDialog] = useState<{ commit: string; label: string } | null>(null)
+  const [cherryPickDialog, setCherryPickDialog] = useState<{ commit: Commit; parents: Array<{ hash: string; title: string; author: string; time: string }> } | null>(null)
   const [gitConfigOpen, setGitConfigOpen] = useState(false)
   const [commandLogOpen, setCommandLogOpen] = useState(false)
   const [wideDiff, setWideDiff] = useState(false)
@@ -682,7 +684,7 @@ export default function App() {
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
   const workingTreeCommit = useMemo(() => repository
-    ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository))
+    ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository), repository.operation)
     : null, [repository])
   const activeCommits = useMemo<Commit[]>(() => workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
@@ -736,7 +738,7 @@ export default function App() {
     if (path && expandedRepositoryPath.current !== path) {
       setSelected(repository?.commits[0]?.id ?? '')
     } else if (path) {
-      setSelected((current) => current === WORKING_TREE_COMMIT_ID && Boolean(repository?.files.length)
+      setSelected((current) => current === WORKING_TREE_COMMIT_ID && Boolean(repository?.files.length || repository?.operation)
         ? current
         : resolveCommitSelection(previousCommits.current, repository?.commits ?? [], current))
     }
@@ -803,7 +805,7 @@ export default function App() {
   const handleSnapshot = (snapshot: RepositorySnapshot) => {
     setUndoCommitMessage(snapshot.undoCommitMessage ?? null)
     applySnapshot(snapshot)
-    setSelected((current) => current === WORKING_TREE_COMMIT_ID && snapshot.files.length
+    setSelected((current) => current === WORKING_TREE_COMMIT_ID && (snapshot.files.length || snapshot.operation)
       ? current
       : resolveCommitSelection(activeCommits, snapshot.commits, current))
     if (!snapshot.operation) {
@@ -869,11 +871,15 @@ export default function App() {
       const snapshot = await action(repository.path)
       handleSnapshot(snapshot)
       if (snapshot.operation) {
-        setOperationPath(snapshot.operation.conflicts[0] ?? null)
+        const conflictPath = snapshot.operation.conflicts[0] ?? null
+        setOperationPath(conflictPath)
+        setHistoryConflictPath(conflictPath)
         setSelected(WORKING_TREE_COMMIT_ID)
         setInspectorCollapsed(false)
-        setWorkspaceView('history')
-        setRepositoryNotice(`${snapshot.operation.label}：已定位到工作区节点，请选择冲突文件处理`)
+        setWorkspaceView(conflictPath ? 'history' : 'operation')
+        setRepositoryNotice(conflictPath
+          ? `${snapshot.operation.label}：已打开冲突文件处理面板`
+          : `${snapshot.operation.label}：请在操作面板中继续处理`)
       } else {
         setRepositoryNotice(success)
       }
@@ -899,8 +905,21 @@ export default function App() {
   const handleCherryPickCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('Cherry-pick 需要先打开本地仓库')
     if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
-    if (!window.confirm(`将提交 ${commit.id} Cherry-pick 到 ${repository.branch}？\n\n${commit.title}`)) return
-    await executeRepositoryAction((path) => cherryPickRepositoryCommit(path, commit.fullHash ?? commit.id), `已 Cherry-pick 提交 ${commit.id}`)
+    const parents = commit.parents ?? (commit.parent ? [commit.parent] : [])
+    const parentDetails = parents.map((hash) => {
+      const parentCommit = activeCommits.find((candidate) => candidate.fullHash === hash || candidate.id === hash)
+      return {
+        hash,
+        title: parentCommit?.title ?? '父提交信息不可用',
+        author: parentCommit?.author ?? '未知作者',
+        time: parentCommit ? formatLocalDateTime(parentCommit.commitTime ?? parentCommit.authorTime ?? parentCommit.time) : '—',
+      }
+    })
+    setCherryPickDialog({ commit, parents: parentDetails })
+  }
+  const confirmCherryPick = async (mainline?: number) => {
+    if (!repository || !cherryPickDialog) return
+    await executeRepositoryAction((path) => cherryPickRepositoryCommit(path, cherryPickDialog.commit.fullHash ?? cherryPickDialog.commit.id, mainline), `已 Cherry-pick 提交 ${cherryPickDialog.commit.id}`)
   }
   const handleResetCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('回退提交需要先打开本地仓库')
@@ -1189,6 +1208,13 @@ export default function App() {
     <HistoryDrawer repositoryPath={repository?.path} filePath={historyTarget?.path ?? null} initialTab={historyTarget?.tab ?? 'history'} lineNumber={historyTarget?.line} revision={historyTarget?.revision} onClose={() => setHistoryTarget(null)}/>
     <CreateBranchDialog open={Boolean(branchDialog)} prefix={branchDialog?.prefix} currentBranch={repository?.branch ?? ''} onClose={() => setBranchDialog(null)} onCreate={handleCreateBranch}/>
     <RebaseDialog open={Boolean(rebaseDialog)} repository={repository} onto={rebaseDialog?.commit ?? null} targetLabel={rebaseDialog?.label ?? ''} onClose={() => setRebaseDialog(null)} onStart={startRebase}/>
+    {cherryPickDialog && <CherryPickDialog
+      open
+      commit={{ id: cherryPickDialog.commit.id, title: cherryPickDialog.commit.title, parents: cherryPickDialog.parents }}
+      currentBranch={repository?.branch ?? ''}
+      onClose={() => setCherryPickDialog(null)}
+      onConfirm={confirmCherryPick}
+    />}
     <GitConfigDialog open={gitConfigOpen} onClose={() => setGitConfigOpen(false)} onNotice={setRepositoryNotice}/>
     <CommandLogPanel open={commandLogOpen} onClose={() => setCommandLogOpen(false)}/>
     <ShortcutOverlay open={shortcutOpen} onClose={() => setShortcutOpen(false)}/>

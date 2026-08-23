@@ -26,6 +26,25 @@ describe('working tree history commit', () => {
     })
   })
 
+  it('creates an operation node when Git has no file changes yet', () => {
+    const commit = createWorkingTreeCommit([], 'abcdef0123456789', {
+      kind: 'cherry-pick',
+      label: 'Cherry-pick 进行中',
+      currentStep: 1,
+      totalSteps: 1,
+      conflicts: [],
+      steps: [],
+    })
+
+    expect(commit).toMatchObject({
+      id: WORKING_TREE_COMMIT_ID,
+      status: 'working',
+      title: 'Cherry-pick 进行中：待处理',
+      author: 'Git 操作',
+      files: 0,
+    })
+  })
+
   it('uses the current worktree HEAD when another branch commit sorts first', () => {
     const repository = {
       path: 'E:\\repo',

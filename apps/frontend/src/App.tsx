@@ -326,6 +326,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   const pendingScrollTop = useRef(0)
   const viewportAnchor = useRef<CommitViewportAnchor | null>(null)
   const handledSearchAction = useRef(0)
+  const autoLocatedSearch = useRef('')
   const deferredQuery = useDeferredValue(query)
   const authors = useMemo(() => Array.from(new Set(commits.map((commit) => commit.author))), [commits])
   const currentHead = useMemo(() => commits.find((commit) => commit.status !== 'working' && commit.branches?.includes(currentBranch)), [commits, currentBranch])
@@ -399,9 +400,12 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     onSearchSummaryChange({ current: searchMatchIndex >= 0 ? searchMatchIndex + 1 : 0, total: searchMatchCount })
   }, [onSearchSummaryChange, searchMatchCount, searchMatchIndex])
   useEffect(() => {
+    const searchKey = `${searchMode}\0${deferredQuery.trim()}`
+    if (autoLocatedSearch.current === searchKey) return
+    autoLocatedSearch.current = searchKey
     if (!deferredQuery.trim() || !searchMatches.length || searchMatchSet.has(selected)) return
     onSelect(searchMatches[0])
-  }, [deferredQuery, onSelect, searchMatches, searchMatchSet, selected])
+  }, [deferredQuery, onSelect, searchMatches, searchMatchSet, searchMode, selected])
   useEffect(() => {
     if (searchAction.sequence === handledSearchAction.current) return
     handledSearchAction.current = searchAction.sequence

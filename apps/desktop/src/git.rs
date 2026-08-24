@@ -2102,13 +2102,51 @@ pub fn reset_repository_to_commit(repository_path: &str, commit: &str) -> Result
 
 pub fn undo_last_commit(repository_path: &str) -> Result<String, String> {
     let root = repository_root(repository_path)?;
-    ensure_clean_worktree(&root, "撤回上一次提交")?;
     let message = git_output(&root, &["show", "-s", "--format=%B", "HEAD"])?;
     let parent = git_output(&root, &["rev-parse", "HEAD^"])
         .map_err(|_| "当前提交没有父提交，无法撤回".to_string())?
         .trim()
         .to_string();
     git_output_owned(&root, &["reset".into(), "--mixed".into(), parent]).map(|_| message)
+}
+
+pub fn revert_repository_commit(
+    repository_path: &str,
+    commit: &str,
+    mainline: Option<usize>,
+) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let commit = resolve_commit(&root, commit.trim())?;
+    let parent_count = git_output_owned(
+        &root,
+        &[
+            "rev-list".into(),
+            "--parents".into(),
+            "-n".into(),
+            "1".into(),
+            commit.clone(),
+        ],
+    )?
+    .split_whitespace()
+    .count()
+    .saturating_sub(1);
+    let mut args = vec!["revert".into(), "--no-edit".into()];
+    if parent_count > 1 {
+        let mainline = mainline.ok_or_else(|| {
+            "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号".to_string()
+        })?;
+        if !(1..=parent_count).contains(&mainline) {
+            return Err(format!(
+                "主线父提交编号无效：请输入 1 到 {parent_count} 之间的编号"
+            ));
+        }
+        args.push("-m".into());
+        args.push(mainline.to_string());
+    } else if mainline.is_some() {
+        return Err("普通提交不能指定主线父提交".into());
+    }
+    args.extend(["--".into(), commit]);
+    git_output_owned(&root, &args).map(|_| ())
 }
 
 pub fn rebase_repository_onto(repository_path: &str, commit: &str) -> Result<(), String> {
@@ -3680,6 +3718,57 @@ mod tests {
             .expect("read undo status")
             .lines()
             .any(|line| line.starts_with(" M README.md")));
+    }
+
+    #[test]
+    fn undoes_last_commit_without_rejecting_existing_worktree_changes() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "second\n").expect("write second commit");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage second commit");
+        git_output(&repository.0, &["commit", "-m", "第二次提交"])
+            .expect("create second commit");
+        fs::write(repository.0.join("README.md"), "second\nlocal\n")
+            .expect("write existing worktree change");
+
+        let message = undo_last_commit(&path).expect("undo latest commit with dirty worktree");
+
+        assert_eq!(message.trim(), "第二次提交");
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read preserved changes"),
+            "second\nlocal\n"
+        );
+        assert!(git_output(&repository.0, &["status", "--porcelain"])
+            .expect("read undo status")
+            .lines()
+            .any(|line| line.starts_with(" M README.md")));
+    }
+
+    #[test]
+    fn reverts_a_regular_commit_into_a_new_commit() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "second\n").expect("write second commit");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage second commit");
+        git_output(&repository.0, &["commit", "-m", "第二次提交"])
+            .expect("create second commit");
+        let reverted = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read reverted source")
+            .trim()
+            .to_string();
+
+        revert_repository_commit(&path, &reverted, None).expect("revert latest commit");
+
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read reverted file"),
+            "first\n"
+        );
+        assert_eq!(
+            git_output(&repository.0, &["log", "-1", "--format=%s"])
+                .expect("read revert subject")
+                .trim(),
+            "Revert \"第二次提交\""
+        );
     }
 
     #[test]

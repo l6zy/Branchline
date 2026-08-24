@@ -8,11 +8,13 @@ import {
 } from '../../repository'
 import { formatLocalDateTime } from '../../dateTime'
 import { Button } from '../../components/Button'
+import { useConfirmDialog } from '../../components/ConfirmDialog'
 
 export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSelectStash: (reference: string) => void; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
   const [message, setMessage] = useState('')
   const [includeUntracked, setIncludeUntracked] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  const { confirm, confirmDialog } = useConfirmDialog()
   const run = async (key: string, operation: () => Promise<RepositorySnapshot>, notice: string) => {
     if (!repository) return onNotice('Stash 需要先打开本地仓库')
     setBusy(key)
@@ -31,6 +33,10 @@ export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: {
   const selectStash = (reference: string) => {
     onSelectStash(reference)
   }
+  const dropStash = async (reference: string) => {
+    if (!await confirm({ title: '删除 Stash', message: `确定删除 ${reference}？`, confirmLabel: '删除', variant: 'danger' })) return
+    await run(`drop-${reference}`, () => dropRepositoryStash(repository!.path, reference), `已删除 ${reference}`)
+  }
 
   return <section className="workspace-page stash-page">
     <div className="stash-workspace stash-manager">
@@ -39,7 +45,7 @@ export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: {
         <div className="stash-list-heading"><strong>已保存的工作区</strong><span>{repository?.stashes.length ?? 0}</span></div>
         <div className="stash-list">{repository?.stashes.map((stash) => <article key={stash.reference}>
           <button className="stash-select" onClick={() => selectStash(stash.reference)} title="在提交图谱中查看"><span className="stash-icon"><Archive size={15}/></span><span><strong>{stash.message}</strong><small>{stash.reference} · {stash.author} · {formatLocalDateTime(stash.time)}</small></span></button>
-          <div className="stash-actions"><Button variant="icon" disabled={busy !== null} title="应用并保留" onClick={() => void run(`apply-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, false), `已应用 ${stash.reference}`)}><Check size={13}/></Button><Button variant="icon" disabled={busy !== null} title="弹出并删除" onClick={() => void run(`pop-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, true), `已弹出 ${stash.reference}`)}><CornerDownLeft size={13}/></Button><Button variant="danger" disabled={busy !== null} title="删除" onClick={() => { if (window.confirm(`确定删除 ${stash.reference}？`)) void run(`drop-${stash.reference}`, () => dropRepositoryStash(repository.path, stash.reference), `已删除 ${stash.reference}`) }}><Trash2 size={13}/></Button></div>
+          <div className="stash-actions"><Button variant="icon" disabled={busy !== null} title="应用并保留" onClick={() => void run(`apply-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, false), `已应用 ${stash.reference}`)}><Check size={13}/></Button><Button variant="icon" disabled={busy !== null} title="弹出并删除" onClick={() => void run(`pop-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, true), `已弹出 ${stash.reference}`)}><CornerDownLeft size={13}/></Button><Button variant="danger" disabled={busy !== null} title="删除" onClick={() => void dropStash(stash.reference)}><Trash2 size={13}/></Button></div>
         </article>)}
           {repository && repository.stashes.length === 0 && <div className="workspace-hint"><Archive size={26}/><strong>暂无 Stash</strong><span>保存当前工作区后会显示在这里。</span></div>}
           {!repository && <div className="workspace-hint"><Archive size={26}/><strong>请先打开本地仓库</strong></div>}
@@ -48,6 +54,7 @@ export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: {
       <div className="stash-graph-handoff">
         <GitCommitHorizontal size={32}/><strong>Stash 已并入提交图谱</strong><span>选择左侧任意 Stash，会回到对应图谱节点；文件列表和 Diff 都在统一的右侧详情中查看。</span>
       </div>
+      {confirmDialog}
     </div>
   </section>
 }

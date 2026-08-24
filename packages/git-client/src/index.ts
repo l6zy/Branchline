@@ -214,6 +214,10 @@ export async function undoLastCommit(repositoryPath: string) {
   return invoke<RepositorySnapshot>('undo_last_commit', { repositoryPath })
 }
 
+export async function revertRepositoryCommit(repositoryPath: string, commit: string, mainline?: number) {
+  return invoke<RepositorySnapshot>('revert_repository_commit', { repositoryPath, commit, mainline: mainline ?? null })
+}
+
 export async function rebaseRepositoryOnto(repositoryPath: string, commit: string) {
   return invoke<RepositorySnapshot>('rebase_repository_onto', { repositoryPath, commit })
 }

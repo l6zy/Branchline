@@ -442,6 +442,24 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
 
+.confirm-backdrop { z-index: 1200; }
+
+.confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); box-shadow: var(--shadow-dialog); animation: popIn .16s ease-out; }
+
+.confirm-dialog-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; color: var(--accent); background: var(--accent-dim); }
+
+.confirm-dialog-icon.danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 13%, transparent); }
+
+.confirm-dialog-content { min-width: 0; }
+
+.confirm-dialog-content h2 { margin: 0; color: var(--text); font-size: 15px; line-height: 21px; }
+
+.confirm-dialog-content p { max-height: min(300px, 42vh); margin: 8px 0 0; overflow-y: auto; color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-line; }
+
+.confirm-dialog-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; padding-top: 5px; }
+
+.confirm-dialog-actions .button { min-width: 76px; }
+
 .branch-name-input { height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--faint); background: var(--panel-2); transition: border-color .15s, box-shadow .15s, background .15s; }
 
 .branch-name-input:focus-within { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); background: var(--panel); }

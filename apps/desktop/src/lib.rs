@@ -45,6 +45,7 @@ pub fn run() {
             commands::push_repository,
             commands::reset_repository_to_commit,
             commands::undo_last_commit,
+            commands::revert_repository_commit,
             commands::rebase_repository_onto,
             commands::preview_repository_rebase,
             commands::continue_repository_operation,

@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalL
 import { ConflictCodeEditor, type ConflictCodeEditorHandle } from './ConflictCodeEditor'
 import { abortRepositoryOperation, continueRepositoryOperation, launchConflictMergetool, loadConflictFile, resolveConflictBlock, resolveConflictFile, skipRepositoryOperation, type ConflictFileContent, type RepositorySnapshot } from '../../repository'
 import { Button } from '../../components/Button'
+import { useConfirmDialog } from '../../components/ConfirmDialog'
 
 type OperationPanelProps = {
   repository: RepositorySnapshot
@@ -70,6 +71,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
   const [activeBlock, setActiveBlock] = useState(0)
   const [lastResolution, setLastResolution] = useState<{ block: number; strategy: ResolutionStrategy; from: number; to: number } | null>(null)
   const [resolvedRanges, setResolvedRanges] = useState<Array<{ from: number; to: number }>>([])
+  const { confirm, confirmDialog } = useConfirmDialog()
   const editorRef = useRef<ConflictCodeEditorHandle>(null)
 
   useEffect(() => {
@@ -191,7 +193,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
       <div className="operation-actions">
         <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), '操作已继续')} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}><ChevronRight size={14}/>{operation.kind === 'rebase' ? '继续变基' : '继续操作'}</Button>
         {(operation.kind === 'rebase' || operation.kind === 'cherry-pick') && <Button variant="secondary" onClick={() => void runOperation(() => skipRepositoryOperation(repository.path), '已跳过当前提交')} disabled={loading}><SkipForward size={14}/>跳过提交</Button>}
-        <Button variant="danger" onClick={() => { if (window.confirm('确定中止当前 Git 操作？未完成的合并或变基将被撤销。')) void runOperation(() => abortRepositoryOperation(repository.path), '已中止 Git 操作') }} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>中止</Button>
+        <Button variant="danger" onClick={() => void (async () => { if (await confirm({ title: '中止 Git 操作', message: '确定中止当前 Git 操作？未完成的合并或变基将被撤销。', confirmLabel: '中止', variant: 'danger' })) await runOperation(() => abortRepositoryOperation(repository.path), '已中止 Git 操作') })()} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>中止</Button>
         {onClose && <Button variant="icon" onClick={onClose} title="返回提交图谱"><X size={15}/></Button>}
       </div>
     </div>
@@ -213,5 +215,6 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
           </div>}
       </div>
     </div>
+    {confirmDialog}
   </section>
 }

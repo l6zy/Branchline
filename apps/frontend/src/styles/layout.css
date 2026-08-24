@@ -82,6 +82,8 @@
 
 .content-tabs .filter-button { width: auto; height: 27px; margin-bottom: 4px; border: 1px solid var(--line); }
 
+.content-tabs .history-undo-button { width: auto; height: 27px; min-height: 27px; margin-bottom: 4px; padding: 0 9px; }
+
 .workspace-grid { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 1px 360px; transition: grid-template-columns .22s ease; }
 
 .workspace-grid.diff-wide .inspector-pane, .workspace-grid.inspector-collapsed .inspector-pane { opacity: 0; transform: translateX(16px); pointer-events: none; }
@@ -211,6 +213,8 @@
   .content-tabs .tab-label { display: none; }
   .content-tabs .filter-button { width: 30px; }
   .content-tabs .filter-button span, .content-tabs .filter-button svg:last-child { display: none; }
+  .content-tabs .history-undo-button { width: 30px; padding: 0; }
+  .content-tabs .history-undo-button span { display: none; }
 }
 
 @media (max-width: 900px) {

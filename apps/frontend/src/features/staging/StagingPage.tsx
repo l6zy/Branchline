@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { Archive, ArrowDown, Check, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
+import { useConfirmDialog } from '../../components/ConfirmDialog'
 import {
   commitRepository,
   createScopedRepositoryStash,
@@ -81,6 +82,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const [busy, setBusy] = useState(false)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [contextFile, setContextFile] = useState<{ file: RepositoryFile; scope: 'staged' | 'unstaged'; x: number; y: number } | null>(null)
+  const { confirm, confirmDialog } = useConfirmDialog()
   const [widePreview, setWidePreview] = useState(false)
   const stagingWidth = useResizablePane('branchline.stagingWidth.v1', 430, 300, 720, 'horizontal')
   const filesHeight = useResizablePane('branchline.stagingFilesHeight.v1', 360, 150, 720, 'vertical')
@@ -215,7 +217,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const discard = async (paths: string[]) => {
     if (!repository) return onNotice('请先打开本地仓库')
     if (!paths.length) return
-    const confirmed = window.confirm(`确定丢弃选中的 ${paths.length} 个文件的未暂存改动？\n\n跟踪文件会恢复到当前暂存区版本，已暂存内容会保留；未跟踪文件会从磁盘永久删除。此操作无法撤销。`)
+    const confirmed = await confirm({ title: '丢弃工作区修改', message: `确定丢弃选中的 ${paths.length} 个文件的未暂存改动？\n\n跟踪文件会恢复到当前暂存区版本，已暂存内容会保留；未跟踪文件会从磁盘永久删除。此操作无法撤销。`, confirmLabel: '丢弃', variant: 'danger' })
     if (!confirmed) return
     setBusy(true)
     try {
@@ -278,9 +280,9 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     </div>
   }
 
-  const forceStageConflict = (file: RepositoryFile) => {
-    if (!window.confirm(`“${file.path}”仍处于冲突状态。\n\n强行暂存会将当前工作区内容写入暂存区，包括未处理的冲突标记。确定继续吗？`)) return
-    void stage([file.path], true)
+  const forceStageConflict = async (file: RepositoryFile) => {
+    if (!await confirm({ title: '强制暂存冲突文件', message: `“${file.path}”仍处于冲突状态。\n\n强行暂存会将当前工作区内容写入暂存区，包括未处理的冲突标记。确定继续吗？`, confirmLabel: '强制暂存', variant: 'danger' })) return
+    await stage([file.path], true)
   }
 
   const conflictRow = (file: RepositoryFile) => <div className="stage-file conflict-file" key={`conflict-${file.path}`}>
@@ -315,5 +317,6 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     </div>
     {templateEditorOpen && <div className="template-editor-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) setTemplateEditorOpen(false) }}><section className="template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="template-editor-title"><header className="template-editor-heading"><div><h2 id="template-editor-title">编辑提交模板</h2><span title={repository?.commitTemplate?.path}>{repository?.commitTemplate?.path ?? '当前仓库 commit.template'}</span></div><button type="button" className="template-editor-close" onClick={() => setTemplateEditorOpen(false)} disabled={busy} aria-label="关闭模板编辑器">×</button></header><div className="template-editor-body"><textarea value={templateDraft} onChange={(event) => setTemplateDraft(event.target.value)} aria-label="当前仓库完整提交模板" placeholder="输入当前仓库的完整提交模板" spellCheck={false} autoFocus /></div><footer className="template-editor-actions"><Button variant="secondary" onClick={() => setTemplateEditorOpen(false)} disabled={busy}>取消</Button><Button variant="secondary" onClick={() => void restoreGlobalTemplate()} disabled={busy}>恢复全局模板</Button><Button variant="primary" onClick={() => void saveRepositoryTemplate()} disabled={busy}>保存当前仓库模板</Button></footer></section></div>}
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>查看文件历史</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>查看逐行归属（Blame）</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>复制文件路径</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>丢弃未暂存改动…</span></Button></>}</ContextMenu>}
+    {confirmDialog}
   </section>
 }

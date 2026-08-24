@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
 import { CompactSelect } from './components/CompactSelect'
+import { useConfirmDialog } from './components/ConfirmDialog'
 import { useRepositoryWorkspace, type RecentRepository, type RepositoryParent } from './features/repository/useRepositoryWorkspace'
 import { StagingPage } from './features/staging/StagingPage'
 import { HistoryDrawer } from './features/history/HistoryDrawer'
@@ -108,7 +109,7 @@ type TimeFilter = 'all' | 'day' | 'week' | 'month'
 type SearchNavigationAction = { sequence: number; direction: 1 | -1 }
 type SearchSummary = HistorySearchSummary
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
-type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash'; label: string; detail: string }
+type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash' | 'revert'; label: string; detail: string }
 
 const isTheme = (value: unknown): value is 'dark' | 'light' => value === 'dark' || value === 'light'
 const isSidebarWidth = (value: unknown): value is number => typeof value === 'number' && value >= 200 && value <= 360
@@ -312,7 +313,7 @@ function commitDay(commit: Commit) {
   }
 }
 
-function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onUndoLastCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onUndoLastCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
+function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onRevertCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onRevertCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
   const [widths, setWidths] = useState({ branch: 140, graph: 200, time: 104, hash: 82, author: 110 })
   const [visibleColumns, setVisibleColumns] = useState({ time: false, hash: false })
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
@@ -329,7 +330,6 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   const autoLocatedSearch = useRef('')
   const deferredQuery = useDeferredValue(query)
   const authors = useMemo(() => Array.from(new Set(commits.map((commit) => commit.author))), [commits])
-  const currentHead = useMemo(() => commits.find((commit) => commit.status !== 'working' && commit.branches?.includes(currentBranch)), [commits, currentBranch])
   const remoteBranchSet = useMemo(() => new Set(remoteBranches), [remoteBranches])
   const tagSet = useMemo(() => new Set(tags), [tags])
   const contextStashReference = contextCommit?.commit.fullHash ? stashReferences[contextCommit.commit.fullHash] : undefined
@@ -517,8 +517,8 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
         <button onClick={() => { onRebaseCommit(contextCommit.commit); setContextCommit(null) }}><GitFork size={14}/><span>将当前分支变基到此提交</span></button>
         <button onClick={() => { onTagCommit(contextCommit.commit); setContextCommit(null) }}><Tag size={14}/><span>在此提交创建标签</span></button>
         <div className="context-menu-separator"/>
-        {currentHead?.id === contextCommit.commit.id && <Button variant="danger" onClick={() => { onUndoLastCommit(contextCommit.commit); setContextCommit(null) }}><Undo2 size={14}/><span>撤回上一次提交</span></Button>}
-        {currentHead?.id === contextCommit.commit.id && <div className="context-menu-separator"/>}
+        <button onClick={() => { onRevertCommit(contextCommit.commit); setContextCommit(null) }}><Undo2 size={14}/><span>还原此提交</span></button>
+        <div className="context-menu-separator"/>
         <Button variant="danger" onClick={() => { onResetCommit(contextCommit.commit); setContextCommit(null) }}><RotateCcw size={14}/><span>回退到此提交（丢弃修改）</span></Button>
         <div className="context-menu-separator"/>
         <button onClick={() => { onCopyCommit(contextCommit.commit, 'hash'); setContextCommit(null) }}><Copy size={14}/><span>复制提交 Hash</span></button>
@@ -670,6 +670,7 @@ export default function App() {
   const [cherryPickDialog, setCherryPickDialog] = useState<{ commit: Commit; parents: Array<{ hash: string; title: string; author: string; time: string }> } | null>(null)
   const [gitConfigOpen, setGitConfigOpen] = useState(false)
   const [commandLogOpen, setCommandLogOpen] = useState(false)
+  const { confirm, confirmDialog } = useConfirmDialog()
   const [wideDiff, setWideDiff] = useState(false)
   const [diffFile, setDiffFile] = useState<number | null>(null)
   const [inspectorCollapsed, setInspectorCollapsed] = usePersistentState('branchline.inspectorCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
@@ -693,6 +694,12 @@ export default function App() {
   const activeCommits = useMemo<Commit[]>(() => workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
     : repository?.commits ?? [], [repository?.commits, workingTreeCommit])
+  const currentBranchHead = useMemo(
+    () => activeCommits.find((commit) => commit.status !== 'working' && commit.branches?.includes(repository?.branch ?? ''))
+      ?? activeCommits.find((commit) => commit.status !== 'working')
+      ?? null,
+    [activeCommits, repository?.branch],
+  )
   const availableBranches = repository?.branches ?? []
   const stashReferences = useMemo(() => Object.fromEntries((repository?.stashes ?? []).map((stash) => [stash.hash, stash.reference])), [repository?.stashes])
   const selectedCommitBase = activeCommits.find((commit) => commit.id === selected) ?? activeCommits[0] ?? emptyCommit
@@ -823,7 +830,7 @@ export default function App() {
     try {
       const branches = await previewBranchPrefix(repository.path, prefix)
       if (!branches.length) return setRepositoryNotice(`前缀 ${prefix} 下没有可删除的本地分支`)
-      const confirmed = window.confirm(`将永久删除以下 ${branches.length} 个本地分支：\n\n${branches.join('\n')}\n\n此操作不会删除远程分支，是否继续？`)
+      const confirmed = await confirm({ title: '删除分支', message: `将永久删除以下 ${branches.length} 个本地分支：\n\n${branches.join('\n')}\n\n此操作不会删除远程分支，是否继续？`, confirmLabel: '删除', variant: 'danger' })
       if (!confirmed) return
       const snapshot = await deleteBranchPrefix(repository.path, prefix, branches)
       applySnapshot(snapshot, `已删除 ${branches.length} 个 ${prefix} 前缀分支`)
@@ -903,7 +910,7 @@ export default function App() {
   const handleMergeReference = async (reference: string, label = reference) => {
     if (!repository) return setRepositoryNotice('合并操作需要先打开本地仓库')
     if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
-    if (!window.confirm(`将 ${label} 合并到 ${repository.branch}？\n\n与合并内容无关的本地修改会保留；如果本地修改会被覆盖，Git 将拒绝合并。如产生冲突，将保留 Git 的冲突状态供后续处理。`)) return
+    if (!await confirm({ title: '确认合并', message: `将 ${label} 合并到 ${repository.branch}？\n\n与合并内容无关的本地修改会保留；如果本地修改会被覆盖，Git 将拒绝合并。如产生冲突，将保留 Git 的冲突状态供后续处理。`, confirmLabel: '开始合并' })) return
     await executeRepositoryAction((path) => mergeRepositoryReference(path, reference), `已将 ${label} 合并到 ${repository.branch}`)
   }
   const handleCherryPickCommit = async (commit: Commit) => {
@@ -927,15 +934,28 @@ export default function App() {
   }
   const handleResetCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('回退提交需要先打开本地仓库')
-    if (!window.confirm(`将 ${repository.branch} 回退到提交 ${commit.id}？\n\n目标提交之后的提交和文件修改都会被丢弃，此操作无法撤销。`)) return
+    if (!await confirm({ title: '回退提交', message: `将 ${repository.branch} 回退到提交 ${commit.id}？\n\n目标提交之后的提交和文件修改都会被丢弃，此操作无法撤销。`, confirmLabel: '回退', variant: 'danger' })) return
     await executeRepositoryAction((path) => resetRepositoryToCommit(path, commit.fullHash ?? commit.id), `已回退到提交 ${commit.id}，后续修改已丢弃`)
   }
   const handleUndoLastCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('撤回提交需要先打开本地仓库')
     if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
-    if (!window.confirm(`撤回提交 ${commit.id}？\n\n该提交的修改会保留在工作区，完整提交信息会带回提交编辑器。`)) return
+    if (!await confirm({ title: '撤回上次提交', message: `撤回提交 ${commit.id}？\n\n该提交的修改会保留在工作区，完整提交信息会带回提交编辑器。`, confirmLabel: '撤回', variant: 'danger' })) return
     await executeRepositoryAction((path) => undoLastCommit(path), `已撤回提交 ${commit.id}，修改已保留在工作区`)
     setWorkspaceView('changes')
+  }
+  const handleRevertCommit = async (commit: Commit) => {
+    if (!repository) return setRepositoryNotice('还原提交需要先打开本地仓库')
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    const parents = commit.parents ?? (commit.parent ? [commit.parent] : [])
+    const mainline = parents.length > 1 ? 1 : undefined
+    const mergeHint = parents.length > 1 ? '\n\n这是合并提交，将按第 1 个父提交作为主线还原。' : ''
+    if (!await confirm({ title: '还原提交', message: `还原提交 ${commit.id}？${mergeHint}\n\nGit 将创建一个新的反向提交；如果内容无法自动应用，将进入冲突处理。`, confirmLabel: '还原' })) return
+    await executeRepositoryAction(
+      (path) => revertRepositoryCommit(path, commit.fullHash ?? commit.id, mainline),
+      `已还原提交 ${commit.id}`,
+      { key: 'revert', label: `正在还原提交 ${commit.id}…`, detail: '正在创建反向提交' },
+    )
   }
   const handleRebaseCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('变基操作需要先打开本地仓库')
@@ -965,7 +985,7 @@ export default function App() {
     )
   }
   const handlePopStash = async (reference: string) => {
-    if (!window.confirm(`弹出 ${reference}？\n\n修改会应用到工作区，成功后该 Stash 将被删除。`)) return
+    if (!await confirm({ title: '弹出 Stash', message: `弹出 ${reference}？\n\n修改会应用到工作区，成功后该 Stash 将被删除。`, confirmLabel: '弹出' })) return
     await executeRepositoryAction(
       (path) => applyRepositoryStash(path, reference, true),
       `已弹出并删除 ${reference}`,
@@ -973,7 +993,7 @@ export default function App() {
     )
   }
   const handleDropStash = async (reference: string) => {
-    if (!window.confirm(`确定永久删除 ${reference}？\n\n此操作不会把其中的修改恢复到工作区。`)) return
+    if (!await confirm({ title: '删除 Stash', message: `确定永久删除 ${reference}？\n\n此操作不会把其中的修改恢复到工作区。`, confirmLabel: '删除', variant: 'danger' })) return
     await executeRepositoryAction(
       (path) => dropRepositoryStash(path, reference),
       `已删除 ${reference}`,
@@ -1016,7 +1036,7 @@ export default function App() {
   const handleDeleteBranch = async (branch: string) => {
     if (!repository) return setRepositoryNotice('删除分支需要先打开本地仓库')
     const remote = branch.includes('/') && branch.startsWith('origin/')
-    if (!window.confirm(`${remote ? '远程' : '本地'}分支 ${branch} 将被永久删除，是否继续？`)) return
+    if (!await confirm({ title: '删除分支', message: `${remote ? '远程' : '本地'}分支 ${branch} 将被永久删除，是否继续？`, confirmLabel: '删除', variant: 'danger' })) return
     await executeRepositoryAction((path) => deleteRepositoryBranch(path, branch), `已删除分支 ${branch}`)
   }
   const copyText = async (value: string, success: string) => {
@@ -1139,13 +1159,13 @@ export default function App() {
           </div>
         </header>
       }
-      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="在统一图谱中查看提交、工作区和 Stash"><GitCommitHorizontal size={14}/><span className="tab-label">提交图谱</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="暂存文件并创建提交"><FileDiff size={14}/><span className="tab-label">暂存与提交</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="创建、应用或删除 Stash"><Archive size={14}/><span className="tab-label">Stash 管理</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
+      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="在统一图谱中查看提交、工作区和 Stash"><GitCommitHorizontal size={14}/><span className="tab-label">提交图谱</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="暂存文件并创建提交"><FileDiff size={14}/><span className="tab-label">暂存与提交</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="创建、应用或删除 Stash"><Archive size={14}/><span className="tab-label">Stash 管理</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} title="撤回当前分支的上一次提交，修改保留在工作区"><Undo2 size={14}/><span>撤回上次提交</span></Button><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选提交</span></div><div className="context-menu-options"><button className={branchFilter === 'all' ? 'selected-option' : ''} onClick={() => { setBranchFilter('all'); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <button className={branchFilter === branch ? 'selected-option' : ''} key={branch} onClick={() => { setBranchFilter(branch); setFilterMenu(null) }}><GitBranch size={14}/><span>{branch}</span></button>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
       <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
-          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onUndoLastCommit={(commit) => void handleUndoLastCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
+          <CommitList key={repository.path} commits={activeCommits} selected={selected} onSelect={setSelected} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => void handleMergeReference(commit.fullHash ?? commit.id, `提交 ${commit.id}`)} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRevertCommit={(commit) => void handleRevertCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
           {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} onActiveFileChange={setDiffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
           {historyConflictPath && repository.operation && <div className="history-diff-overlay history-operation-overlay"><Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={historyConflictPath} onReturnToChanges={() => { setHistoryConflictPath(null); setOperationPath(null) }} onClose={() => { setHistoryConflictPath(null); setOperationPath(null) }}/></Suspense></div>}
         </section>}
@@ -1222,6 +1242,7 @@ export default function App() {
     <GitConfigDialog open={gitConfigOpen} onClose={() => setGitConfigOpen(false)} onNotice={setRepositoryNotice}/>
     <CommandLogPanel open={commandLogOpen} onClose={() => setCommandLogOpen(false)}/>
     <ShortcutOverlay open={shortcutOpen} onClose={() => setShortcutOpen(false)}/>
+    {confirmDialog}
     {repositoryNotice && <button className="app-notice" onMouseEnter={pauseRepositoryNotice} onMouseLeave={resumeRepositoryNotice} onFocus={pauseRepositoryNotice} onBlur={resumeRepositoryNotice} onClick={() => setRepositoryNotice(null)}>{repositoryNotice}<X size={14}/></button>}
   </main>
 }

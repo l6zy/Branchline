@@ -484,6 +484,23 @@ pub async fn undo_last_commit(repository_path: String) -> Result<RepositorySnaps
 }
 
 #[tauri::command]
+pub async fn revert_repository_commit(
+    repository_path: String,
+    commit: String,
+    mainline: Option<usize>,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        operation_snapshot(
+            &repository_path,
+            git::revert_repository_commit(&repository_path, &commit, mainline),
+            "还原提交",
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn rebase_repository_onto(
     repository_path: String,
     commit: String,

@@ -99,6 +99,18 @@ pub async fn load_repository(path: String) -> Result<RepositorySnapshot, String>
 }
 
 #[tauri::command]
+pub async fn load_repository_history(
+    path: String,
+    commit_limit: usize,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::read_repository_with_commit_limit(&path, commit_limit)
+    })
+    .await
+    .map_err(|error| task_error("读取扩展提交图谱", error))?
+}
+
+#[tauri::command]
 pub async fn load_repository_state_token(repository_path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || git::repository_state_token(&repository_path))
         .await

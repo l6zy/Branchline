@@ -26,9 +26,9 @@
 
 .commit-row:hover { background: var(--surface-hover); }
 
-.commit-row.search-match { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.commit-row.search-match { background: color-mix(in srgb, var(--warning) 16%, var(--surface-raised)); box-shadow: inset 3px 0 var(--warning); }
 
-.commit-row.search-match:hover { background: color-mix(in srgb, var(--accent) 13%, var(--panel)); }
+.commit-row.search-match:hover { background: color-mix(in srgb, var(--warning) 24%, var(--surface-raised)); }
 
 .commit-row.selected { color: var(--selection-text); background: var(--selection-surface); box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent); }
 
@@ -38,7 +38,7 @@
 
 .commit-row.working-tree.selected { background: color-mix(in srgb, #faad14 15%, var(--bg)); box-shadow: inset 2px 0 #faad14; }
 
-.commit-row.search-current { box-shadow: inset 2px 0 var(--accent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent); }
+.commit-row.search-current { background: color-mix(in srgb, var(--warning) 30%, var(--surface-raised)); box-shadow: inset 3px 0 var(--warning), inset 0 0 0 1px color-mix(in srgb, var(--warning) 76%, transparent); }
 
 .commit-row.time-break::before { content: ''; position: absolute; top: 0; right: 8px; left: var(--time-divider-left); height: 1px; background: color-mix(in srgb, var(--accent) 34%, transparent); z-index: 3; }
 
@@ -246,7 +246,7 @@
 
 .code-diff.split > .file-header { flex: 0 0 34px; }
 
-.file-header { position: sticky; top: 0; left: 0; z-index: 2; width: max-content; min-width: 100%; height: 34px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); font-size: 10px; }
+.file-header { position: sticky; top: 0; left: 0; z-index: 2; width: max-content; min-width: 100%; height: 34px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); background: var(--code-surface); font-size: 10px; }
 
 .file-header-path { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow: hidden; }
 

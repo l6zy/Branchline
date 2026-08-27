@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
 import { CompactSelect } from './components/CompactSelect'
@@ -26,6 +26,7 @@ import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type 
 import { trackedRemoteReference, visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits, type HistorySearchMode, type HistorySearchSummary } from './features/history/historySearch'
 import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
+import { DEFAULT_HISTORY_LOAD_LIMIT, nextHistoryLoadLimit } from './features/history/historyDepth'
 import { formatLocalDateTime } from './dateTime'
 import { isBooleanRecord, usePersistentState } from './persistentState'
 import {
@@ -109,7 +110,7 @@ type TimeFilter = 'all' | 'day' | 'week' | 'month'
 type SearchNavigationAction = { sequence: number; direction: 1 | -1 }
 type SearchSummary = HistorySearchSummary
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
-type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash' | 'revert'; label: string; detail: string }
+type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash' | 'revert' | 'cherry-pick' | 'history'; label: string; detail: string }
 
 const isTheme = (value: unknown): value is 'dark' | 'light' => value === 'dark' || value === 'light'
 const isSidebarWidth = (value: unknown): value is number => typeof value === 'number' && value >= 200 && value <= 360
@@ -165,7 +166,7 @@ function formatCommitListTime(commit: Commit) {
   return value.getFullYear() === new Date().getFullYear() ? `${date} ${time}` : `${value.getFullYear()}-${date} ${time}`
 }
 
-function BranchTree({ branches, remoteBranches = [], branchTracking = {}, currentBranch, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; currentBranch?: string; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
+function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktreeBranches = [], currentBranch, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; worktreeBranches?: string[]; currentBranch?: string; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
   const [open, setOpen] = usePersistentState('branchline.branchTreeOpen.v1', { local: true, feat: true, fix: true, remote: false }, isBooleanRecord)
   const [contextBranch, setContextBranch] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [contextPrefix, setContextPrefix] = useState<{ prefix: string; x: number; y: number } | null>(null)
@@ -183,6 +184,7 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
     setContextPrefix({ prefix, x: event.clientX, y: event.clientY })
   }
   const remoteBranchSet = new Set(remoteBranches)
+  const worktreeBranchSet = new Set(worktreeBranches)
   const incomingBadge = (branch: string) => {
     const count = branchTracking[branch]?.behind ?? 0
     return count > 0 ? <span className="branch-sync" title={`${branch} 有 ${count} 个未拉取提交`} aria-label={`${count} 个未拉取提交`}>↓{count}</span> : null
@@ -205,8 +207,8 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, curren
     <div className="section-title"><span>分支</span><button className="section-add" onClick={() => onCreateBranch()} title="创建分支"><Plus size={14}/></button></div>
     <button className="tree-row group" onClick={() => toggle('local')}>{open.local ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<GitBranch size={14}/><span>本地</span><span className="count">{branchNames.length}</span></button>
     {open.local && <div className="tree-children">
-      {(grouped[''] ?? []).map((branch) => <button className={`tree-row ${branch === currentBranch ? 'active' : ''}`} key={branch} onClick={() => onJumpBranch(branch)} onDoubleClick={() => onSwitchBranch(branch)} onContextMenu={(event) => openContextMenu(event, branch)} title={branch}><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{incomingBadge(branch)}</button>)}
-      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} title="单击展开或收起，右键管理分支组">{open[prefix] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{children.length}</span></button>{open[prefix] && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
+      {(grouped[''] ?? []).map((branch) => <button className={`tree-row ${branch === currentBranch ? 'active' : ''}`} key={branch} onClick={() => onJumpBranch(branch)} onDoubleClick={() => onSwitchBranch(branch)} onContextMenu={(event) => openContextMenu(event, branch)} title={branch}><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{worktreeBranchSet.has(branch) && <span className="branch-worktree">Worktree</span>}{incomingBadge(branch)}</button>)}
+      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} title="单击展开或收起，右键管理分支组">{open[prefix] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{children.length}</span></button>{open[prefix] && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => onSwitchBranch(fullBranch)} onContextMenu={(event) => openContextMenu(event, fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{worktreeBranchSet.has(fullBranch) && <span className="branch-worktree">Worktree</span>}{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
     </div>}
     <button className="tree-row group" onClick={() => toggle('remote')}>{open.remote ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<CloudDownload size={14}/><span>远程</span><span className="count">{remoteBranches.length}</span></button>
     {open.remote && <div className="tree-children remote-tree">{Object.entries(remoteGroups).map(([remote, remoteBranchNames]) => {
@@ -278,7 +280,7 @@ function Sidebar({ repository, parentRepository, recentRepositories, openingRepo
     </div>
     <nav>{repository ? <>
       <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>提交图谱</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>暂存与提交</span><span className="nav-badge">{repository.files.length}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>Stash 管理</span></button></div>
-      <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} currentBranch={repository.branch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
+      <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} worktreeBranches={repository.worktrees.flatMap((worktree) => worktree.branch ? [worktree.branch] : [])} currentBranch={repository.branch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
       <RepositoryStructureTree repository={repository} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path, true) }}/>
       <div className="nav-section structure-tags-section"><button className={`nav-row ${activeView === 'tags' ? 'active' : ''}`} onClick={() => onSelectView('tags')}><Tag size={15}/><span>标签</span><span className="nav-badge muted">{repository.tags.length}</span></button></div>
     </> : <div className="sidebar-empty-state"><FolderOpen size={24}/><strong>尚未打开仓库</strong><span>打开本地 Git 仓库后，这里会显示分支、Worktree 和 Submodule。</span><button onClick={onOpenRepository} disabled={openingRepository}>{openingRepository ? '正在打开…' : '打开仓库'}</button></div>}</nav>
@@ -683,11 +685,13 @@ export default function App() {
   const [historyConflictPath, setHistoryConflictPath] = useState<string | null>(null)
   const [commitStats, setCommitStats] = useState<Record<string, RepositoryCommitStats>>({})
   const [commitFiles, setCommitFiles] = useState<Record<string, RepositoryFile[]>>({})
+  const [historyLoadLimit, setHistoryLoadLimit] = useState(DEFAULT_HISTORY_LOAD_LIMIT)
   const searchRef = useRef<HTMLInputElement>(null)
   const autoFetchRef = useRef<HTMLDivElement>(null)
   const expandedRepositoryPath = useRef<string | null>(null)
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
+  const historyLoadInProgress = useRef(false)
   const workingTreeCommit = useMemo(() => repository
     ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository), repository.operation)
     : null, [repository])
@@ -830,12 +834,28 @@ export default function App() {
     try {
       const branches = await previewBranchPrefix(repository.path, prefix)
       if (!branches.length) return setRepositoryNotice(`前缀 ${prefix} 下没有可删除的本地分支`)
-      const confirmed = await confirm({ title: '删除分支', message: `将永久删除以下 ${branches.length} 个本地分支：\n\n${branches.join('\n')}\n\n此操作不会删除远程分支，是否继续？`, confirmLabel: '删除', variant: 'danger' })
+      const worktreeBranches = new Set(repository.worktrees.flatMap((worktree) => worktree.branch ? [worktree.branch] : []))
+      const skippedBranches = branches.filter((branch) => worktreeBranches.has(branch))
+      const deletableBranches = branches.filter((branch) => !worktreeBranches.has(branch))
+      if (!deletableBranches.length) return setRepositoryNotice(`前缀 ${prefix} 下的分支均正在被 Worktree 使用，未删除任何分支`)
+      const skippedMessage = skippedBranches.length
+        ? `\n\n以下 ${skippedBranches.length} 个分支正在被 Worktree 使用，将自动跳过：\n${skippedBranches.map((branch) => `• ${branch}`).join('\n')}`
+        : ''
+      const confirmed = await confirm({ title: '删除分支', message: `将永久删除以下 ${deletableBranches.length} 个本地分支：\n\n${deletableBranches.join('\n')}${skippedMessage}\n\n此操作不会删除远程分支，是否继续？`, confirmLabel: '删除', variant: 'danger' })
       if (!confirmed) return
       const snapshot = await deleteBranchPrefix(repository.path, prefix, branches)
-      applySnapshot(snapshot, `已删除 ${branches.length} 个 ${prefix} 前缀分支`)
+      applySnapshot(snapshot, skippedBranches.length
+        ? `已删除 ${deletableBranches.length} 个 ${prefix} 前缀分支，已跳过 ${skippedBranches.length} 个 Worktree 分支`
+        : `已删除 ${deletableBranches.length} 个 ${prefix} 前缀分支`)
     } catch (error) {
-      setRepositoryNotice(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        const snapshot = await loadRepository(repository.path)
+        applySnapshot(snapshot)
+      } catch {
+        // 保留原始 Git 操作错误，仓库可通过下一次刷新重新同步。
+      }
+      setRepositoryNotice(message)
     }
   }
   const openCreateBranchDialog = (prefix?: string) => {
@@ -930,7 +950,11 @@ export default function App() {
   }
   const confirmCherryPick = async (mainline?: number) => {
     if (!repository || !cherryPickDialog) return
-    await executeRepositoryAction((path) => cherryPickRepositoryCommit(path, cherryPickDialog.commit.fullHash ?? cherryPickDialog.commit.id, mainline), `已 Cherry-pick 提交 ${cherryPickDialog.commit.id}`)
+    await executeRepositoryAction(
+      (path) => cherryPickRepositoryCommit(path, cherryPickDialog.commit.fullHash ?? cherryPickDialog.commit.id, mainline),
+      `已 Cherry-pick 提交 ${cherryPickDialog.commit.id}`,
+      { key: 'cherry-pick', label: `正在 Cherry-pick 提交 ${cherryPickDialog.commit.id}…`, detail: '正在应用提交并自动处理 Gitlink 冲突' },
+    )
   }
   const handleResetCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('回退提交需要先打开本地仓库')
@@ -1047,14 +1071,34 @@ export default function App() {
       setRepositoryNotice('复制失败，请检查系统剪贴板权限')
     }
   }
-  const handleJumpBranch = (branch: string) => {
-    const commit = activeCommits.find((item) => item.branches?.includes(branch))
+  const handleJumpBranch = async (branch: string) => {
+    let commit = activeCommits.find((item) => item.branches?.includes(branch))
+    if (!commit && repository && !historyLoadInProgress.current) {
+      const nextLimit = nextHistoryLoadLimit(historyLoadLimit)
+      if (nextLimit) {
+        historyLoadInProgress.current = true
+        setActiveOperation({ key: 'history', label: '正在扩大提交图谱…', detail: `正在读取 ${nextLimit.toLocaleString()} 条提交以定位 ${branch}` })
+        try {
+          const snapshot = await loadRepositoryHistory(repository.path, nextLimit)
+          setHistoryLoadLimit(nextLimit)
+          applySnapshot(snapshot)
+          commit = snapshot.commits.find((item) => item.branches?.includes(branch)) as Commit | undefined
+        } catch (error) {
+          setRepositoryNotice(error instanceof Error ? error.message : String(error))
+        } finally {
+          historyLoadInProgress.current = false
+          setActiveOperation((current) => current?.key === 'history' ? null : current)
+        }
+      }
+    }
     if (!commit) {
-      setRepositoryNotice(`未在当前提交范围找到分支 ${branch} 指向的提交`)
+      setRepositoryNotice(`未找到分支 ${branch} 指向的提交`)
       return
     }
     setWorkspaceView('history')
     setQuery('')
+    setBranchFilter('all')
+    setTimeFilter('all')
     setSelected(commit.id)
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1062,10 +1106,15 @@ export default function App() {
       })
     })
   }
+
+  useEffect(() => {
+    setHistoryLoadLimit(DEFAULT_HISTORY_LOAD_LIMIT)
+    historyLoadInProgress.current = false
+  }, [repository?.path])
   const handleJumpTag = (tag: string) => {
     const commit = activeCommits.find((item) => item.branches?.includes(tag))
     if (!commit) {
-      setRepositoryNotice(`标签 ${tag} 指向的提交不在当前 500 条图谱范围内`)
+      setRepositoryNotice(`未找到标签 ${tag} 指向的提交`)
       return
     }
     setWorkspaceView('history')

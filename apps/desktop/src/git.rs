@@ -482,7 +482,11 @@ fn assign_lanes(commits: &mut [RepositoryCommit]) {
     }
 }
 
-fn parse_commits(path: &Path) -> Vec<RepositoryCommit> {
+const COMMIT_GRAPH_LIMIT: usize = 2_000;
+const MAX_COMMIT_GRAPH_LIMIT: usize = 20_000;
+
+fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
+    let max_count = format!("--max-count={}", limit.clamp(COMMIT_GRAPH_LIMIT, MAX_COMMIT_GRAPH_LIMIT));
     let output = optional_git_output(
         path,
         &[
@@ -494,7 +498,7 @@ fn parse_commits(path: &Path) -> Vec<RepositoryCommit> {
             // commit-date order. Unlike --topo-order, this does not move an
             // older side-branch commit ahead of a newer independent merge.
             "--date-order",
-            "--max-count=500",
+            &max_count,
             "--date=iso-strict",
             "--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%aI%x1f%cI%x1f%D%x1f%B",
         ],
@@ -1664,6 +1668,13 @@ pub fn repository_state_token(selected_path: &str) -> Result<String, String> {
 }
 
 pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String> {
+    read_repository_with_commit_limit(selected_path, COMMIT_GRAPH_LIMIT)
+}
+
+pub fn read_repository_with_commit_limit(
+    selected_path: &str,
+    commit_limit: usize,
+) -> Result<RepositorySnapshot, String> {
     let root = repository_root(selected_path)?;
     let root_path = root.as_path();
     let root_text = root.to_string_lossy();
@@ -1711,7 +1722,7 @@ pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String
                 let superproject_path = superproject_working_tree(root_path);
                 (branch, remote, ahead, behind, superproject_path)
             });
-            let commits = scope.spawn(|| parse_commits(root_path));
+            let commits = scope.spawn(|| parse_commits(root_path, commit_limit));
             let files = scope.spawn(|| {
                 let incoming = incoming_changed_paths(root_path);
                 let mut files = parse_changed_files(root_path);
@@ -1920,7 +1931,17 @@ pub fn cherry_pick_repository_commit_with_mainline(
             )
             .map(|_| ())
         }
-        Err(error) => Err(error),
+        Err(error) => {
+            // A gitlink has no mergeable file content. Keep the current branch's
+            // checked-out pointer and stage it, while leaving regular conflicts
+            // unresolved for the operation panel.
+            match resolve_gitlink_conflicts_local(repository_path) {
+                Ok(_) => Err(error),
+                Err(gitlink_error) => Err(format!(
+                    "{error}\n自动处理 Gitlink 冲突失败：{gitlink_error}"
+                )),
+            }
+        }
     }
 }
 
@@ -3627,6 +3648,14 @@ pub fn delete_branch_prefix(
     if actual.iter().any(|branch| branch == &current) {
         return Err(format!("不能删除当前分支：{current}"));
     }
+    let checked_out: HashSet<String> = parse_worktrees(&root)
+        .into_iter()
+        .filter_map(|worktree| worktree.branch)
+        .collect();
+    actual.retain(|branch| !checked_out.contains(branch));
+    if actual.is_empty() {
+        return Ok(());
+    }
     let mut args = vec!["branch".into(), "-D".into(), "--".into()];
     args.extend(actual);
     git_output_owned(&root, &args).map(|_| ())
@@ -3669,6 +3698,11 @@ mod tests {
     }
 
     #[test]
+    fn commit_graph_retains_deeper_history_for_older_branches() {
+        assert!(COMMIT_GRAPH_LIMIT >= 2_000);
+    }
+
+    #[test]
     fn repository_state_token_changes_with_worktree_and_history() {
         let repository = test_repository();
         let clean = repository_state_token(&repository.0.to_string_lossy())
@@ -3686,6 +3720,22 @@ mod tests {
         let committed = repository_state_token(&repository.0.to_string_lossy())
             .expect("read committed repository token");
         assert_ne!(committed, modified);
+    }
+
+    #[test]
+    fn restores_an_insertion_only_worktree_patch() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "first\ninserted\n")
+            .expect("modify tracked file");
+        let patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,0 +2,1 @@\n+inserted\n";
+
+        restore_patch(&path, patch).expect("restore insertion-only patch");
+
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read restored file"),
+            "first\n"
+        );
     }
 
     #[test]
@@ -3921,6 +3971,41 @@ mod tests {
         assert!(preview_branch_prefix(&path, "feat")
             .expect("preview deleted prefix")
             .is_empty());
+    }
+
+    #[test]
+    fn deletes_available_prefix_branches_and_skips_worktree_branches() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let worktree_path = repository.0.with_file_name(format!(
+            "{}-linked",
+            repository
+                .0
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("repository name")
+        ));
+        git_output(&repository.0, &["branch", "feature/free"]).expect("create free branch");
+        git_output(&repository.0, &["branch", "feature/linked"]).expect("create linked branch");
+        git_output(
+            &repository.0,
+            &[
+                "worktree",
+                "add",
+                worktree_path.to_str().expect("worktree path"),
+                "feature/linked",
+            ],
+        )
+        .expect("add linked worktree");
+
+        let branches = preview_branch_prefix(&path, "feature").expect("preview prefix");
+        delete_branch_prefix(&path, "feature", &branches)
+            .expect("checked out worktree branch is skipped");
+        assert_eq!(
+            preview_branch_prefix(&path, "feature").expect("preview remaining prefix"),
+            vec!["feature/linked"]
+        );
+        let _ = fs::remove_dir_all(worktree_path);
     }
 
     #[test]
@@ -4400,6 +4485,83 @@ mod tests {
         assert_eq!(operation.kind, "cherry-pick");
         assert_eq!(operation.conflicts, vec!["README.md"]);
         abort_repository_operation(&path).expect("abort cherry-pick conflict");
+    }
+
+    #[test]
+    fn cherry_pick_automatically_keeps_current_gitlink_on_conflict() {
+        let repository = test_repository();
+        let submodule = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let base_branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read base branch")
+            .trim()
+            .to_string();
+        let initial = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read initial submodule commit")
+            .trim()
+            .to_string();
+        let submodule_path = submodule.0.to_string_lossy().to_string();
+        git_output(
+            &repository.0,
+            &["-c", "protocol.file.allow=always", "submodule", "add", &submodule_path, "apps/planning"],
+        )
+        .expect("add submodule");
+        let checkout = repository.0.join("apps/planning");
+        git_output(&checkout, &["checkout", &initial]).expect("checkout initial submodule commit");
+        git_output(&repository.0, &["add", ".gitmodules", "apps/planning"])
+            .expect("stage initial submodule");
+        git_output(&repository.0, &["commit", "-m", "add planning submodule"])
+            .expect("commit initial submodule");
+
+        git_output(&repository.0, &["switch", "-c", "feat/planning-pick"])
+            .expect("create cherry-pick source branch");
+        fs::write(submodule.0.join("feature.txt"), "feature\n")
+            .expect("write feature submodule change");
+        git_output(&submodule.0, &["add", "feature.txt"]).expect("stage feature submodule change");
+        git_output(&submodule.0, &["commit", "-m", "feature planning"])
+            .expect("commit feature submodule change");
+        let feature_pointer = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read feature submodule commit")
+            .trim()
+            .to_string();
+        git_output(&checkout, &["fetch", "origin"]).expect("fetch feature submodule commit");
+        git_output(&checkout, &["checkout", &feature_pointer]).expect("checkout feature pointer");
+        git_output(&repository.0, &["add", "apps/planning"])
+            .expect("stage feature pointer");
+        git_output(&repository.0, &["commit", "-m", "update feature planning"])
+            .expect("commit feature pointer");
+        let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("read cherry-pick commit")
+            .trim()
+            .to_string();
+
+        git_output(&repository.0, &["switch", &base_branch]).expect("switch current branch");
+        git_output(&submodule.0, &["switch", "-c", "current-planning", &initial])
+            .expect("create divergent current submodule branch");
+        fs::write(submodule.0.join("current.txt"), "current\n")
+            .expect("write current submodule change");
+        git_output(&submodule.0, &["add", "current.txt"]).expect("stage current submodule change");
+        git_output(&submodule.0, &["commit", "-m", "current planning"])
+            .expect("commit current submodule change");
+        let current_pointer = git_output(&submodule.0, &["rev-parse", "HEAD"])
+            .expect("read current submodule commit")
+            .trim()
+            .to_string();
+        git_output(&checkout, &["fetch", "origin"]).expect("fetch current submodule commit");
+        git_output(&checkout, &["checkout", &current_pointer]).expect("checkout current pointer");
+        git_output(&repository.0, &["add", "apps/planning"])
+            .expect("stage current pointer");
+        git_output(&repository.0, &["commit", "-m", "update current planning"])
+            .expect("commit current pointer");
+
+        cherry_pick_repository_commit(&path, &cherry_hash).expect_err("cherry-pick should conflict");
+
+        assert!(!unresolved_paths(&repository.0)
+            .iter()
+            .any(|conflict| conflict == "apps/planning"));
+        let stage = git_output(&repository.0, &["ls-files", "--stage", "--", "apps/planning"])
+            .expect("read staged current pointer");
+        assert_eq!(stage.trim(), format!("160000 {current_pointer} 0\tapps/planning"));
     }
 
     #[test]

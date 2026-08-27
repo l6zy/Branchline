@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GitCommitHorizontal, GitMerge, X } from 'lucide-react'
 import { Button } from '../../components/Button'
 
@@ -13,26 +13,38 @@ type CherryPickDialogProps = {
 export function CherryPickDialog({ open, commit, currentBranch, onClose, onConfirm }: CherryPickDialogProps) {
   const [mainline, setMainline] = useState(1)
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const isMerge = commit.parents.length > 1
 
   useEffect(() => {
     if (!open) return
     setMainline(1)
     setSubmitting(false)
+    submittingRef.current = false
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onClose()
+      if (event.key === 'Escape' && !submittingRef.current) onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose, submitting])
+  }, [open, onClose])
 
   if (!open) return null
 
   const submit = async () => {
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
-    await onConfirm(isMerge ? mainline : undefined)
-    setSubmitting(false)
-    onClose()
+    try {
+      await onConfirm(isMerge ? mainline : undefined)
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+      onClose()
+    }
   }
 
   return <div className="modal-backdrop" onPointerDown={() => { if (!submitting) onClose() }}>

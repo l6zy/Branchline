@@ -14,6 +14,7 @@ pub fn run() {
             commands::load_command_logs,
             commands::clear_command_logs,
             commands::load_repository,
+            commands::load_repository_history,
             commands::load_repository_state_token,
             commands::load_file_diff,
             commands::load_unstaged_file_diff,

@@ -47,4 +47,11 @@ describe('semantic style architecture', () => {
     expect(features).toContain('.branch-dialog.worktree-dialog { overflow: visible; }')
     expect(components).not.toContain('.worktree-dialog { overflow: visible; }')
   })
+
+  it('keeps sticky diff file headers opaque and search hits visually distinct', () => {
+    const fileHeaderRule = features.split('\n').find((line) => line.startsWith('.file-header {')) ?? ''
+    const searchMatchRule = features.match(/\.commit-row\.search-match \{[^}]+\}/)?.[0] ?? ''
+    expect(fileHeaderRule).toContain('background: var(--code-surface);')
+    expect(searchMatchRule).toContain('box-shadow: inset 3px 0')
+  })
 })

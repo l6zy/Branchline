@@ -19,8 +19,9 @@ export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fi
   const oldValues = selected.filter((row) => row.kind === 'del' || row.kind === 'same')
   const newValues = selected.filter((row) => row.kind === 'add' || row.kind === 'same')
   const first = selected[0]
-  const oldStart = first.old ?? first.next ?? 1
-  const newStart = first.next ?? Math.max(1, first.old ?? 1)
+  // A zero-length unified-diff range points at the line before the insertion/deletion.
+  const oldStart = first.old ?? Math.max(0, (first.next ?? 1) - 1)
+  const newStart = first.next ?? Math.max(0, (first.old ?? 1) - 1)
   const oldCount = oldValues.length
   const newCount = newValues.length
   const body = selected.map((row) => `${row.kind === 'add' ? '+' : '-'}${row.code}`).join('\n')

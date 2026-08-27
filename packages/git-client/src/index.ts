@@ -64,6 +64,10 @@ export async function loadRepository(path: string) {
   return invoke<RepositorySnapshot>('load_repository', { path })
 }
 
+export async function loadRepositoryHistory(path: string, commitLimit: number) {
+  return invoke<RepositorySnapshot>('load_repository_history', { path, commitLimit })
+}
+
 export async function loadRepositoryStateToken(repositoryPath: string) {
   return invoke<string>('load_repository_state_token', { repositoryPath })
 }

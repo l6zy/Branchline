@@ -136,9 +136,7 @@
 
 .branch-sync { min-width: 28px; margin-left: auto; color: var(--accent); font-size: 14px; font-weight: 600; text-align: right; }
 
-.branch-worktree { margin-left: auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); background: var(--panel-3); font-size: 10px; line-height: 14px; }
-
-.branch-worktree + .branch-sync { margin-left: 0; }
+.branch-worktree { flex: 0 0 auto; margin-left: 2px; color: var(--accent); }
 
 .row-action { margin-left: auto; opacity: 0; }
 

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { fitContextMenuPosition } from './contextMenuPosition'
 
 type ContextMenuProps = {
   x: number
@@ -10,6 +11,8 @@ type ContextMenuProps = {
 
 export function ContextMenu({ x, y, onClose, children }: ContextMenuProps) {
   const [closing, setClosing] = useState(false)
+  const [position, setPosition] = useState({ left: x, top: y, maxHeight: window.innerHeight - 16 })
+  const menuRef = useRef<HTMLDivElement>(null)
   const activating = useRef(false)
   const closeTimer = useRef<number | null>(null)
   const requestClose = () => {
@@ -36,8 +39,11 @@ export function ContextMenu({ x, y, onClose, children }: ContextMenuProps) {
     }
   }, [onClose])
 
-  const left = Math.max(8, Math.min(x, window.innerWidth - 228))
-  const top = Math.max(8, Math.min(y, window.innerHeight - 320))
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    setPosition(fitContextMenuPosition({ x, y, width: menu.offsetWidth, height: menu.offsetHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight }))
+  }, [x, y, children])
   const delayMenuAction = (event: MouseEvent<HTMLDivElement>) => {
     if (activating.current) return
     const button = (event.target as Element).closest('button') as HTMLButtonElement | null
@@ -73,6 +79,6 @@ export function ContextMenu({ x, y, onClose, children }: ContextMenuProps) {
   const portalTarget = document.querySelector('.app-shell') ?? document.body
 
   return createPortal(<div className={`context-menu-layer ${closing ? 'closing' : ''}`} onPointerDown={(event) => { if (event.button !== 2) requestClose() }} onContextMenu={reopenAtPointer}>
-    <div className="context-menu" style={{ left, top }} onPointerDown={(event) => event.stopPropagation()} onClickCapture={delayMenuAction}>{children}</div>
+    <div ref={menuRef} className="context-menu" style={{ left: position.left, top: position.top, maxHeight: position.maxHeight, overflowY: 'auto' }} onPointerDown={(event) => event.stopPropagation()} onClickCapture={delayMenuAction}>{children}</div>
   </div>, portalTarget)
 }

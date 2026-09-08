@@ -55,6 +55,7 @@ function readAutoFetchSettings(): AutoFetchSettings {
 
 export function useRepositoryWorkspace() {
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
+  const [structureRepository, setStructureRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
   const [openingRepository, setOpeningRepository] = useState(recentRepositories.length > 0)
   const [fetching, setFetching] = useState(false)
@@ -138,14 +139,28 @@ export function useRepositoryWorkspace() {
 
   const applySnapshot = useCallback((snapshot: RepositorySnapshot, notice?: string) => {
     setRepository(snapshot)
+    setStructureRepository((current) => {
+      if (!current || current.path.toLowerCase() === snapshot.path.toLowerCase() || !snapshot.superprojectPath) return snapshot
+      return current
+    })
     if (notice) setRepositoryNotice(notice)
   }, [setRepositoryNotice])
+
+  const applyStructureSnapshot = useCallback((snapshot: RepositorySnapshot) => {
+    setStructureRepository(snapshot)
+    setRepository((current) => current?.path.toLowerCase() === snapshot.path.toLowerCase() ? snapshot : current)
+  }, [])
+
+  const loadExplicitRepository = useCallback(async (path: string) => {
+    const loaded = await loadRepository(path)
+    try { return await fetchRepository(loaded.path) } catch { return loaded }
+  }, [])
 
   const openRepositoryPath = useCallback(async (path: string, preserveTrail = false) => {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await loadRepository(path)
+      const snapshot = await loadExplicitRepository(path)
       if (!preserveTrail) {
         const parent = repositoryParentFromSnapshot(snapshot)
         setRepositoryTrail(parent ? [parent] : [])
@@ -159,13 +174,13 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot, rememberRepository])
+  }, [applySnapshot, loadExplicitRepository, rememberRepository])
 
   const openSubmodulePath = useCallback(async (path: string) => {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await loadRepository(path)
+      const snapshot = await loadExplicitRepository(path)
       if (repository && repository.path.toLowerCase() !== snapshot.path.toLowerCase()) {
         setRepositoryTrail((current) => [...current, {
           name: repository.name,
@@ -181,7 +196,7 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot, repository])
+  }, [applySnapshot, loadExplicitRepository, repository])
 
   const returnToParentRepository = useCallback(async () => {
     const parent = repositoryTrail[repositoryTrail.length - 1]
@@ -189,7 +204,7 @@ export function useRepositoryWorkspace() {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await loadRepository(parent.path)
+      const snapshot = await loadExplicitRepository(parent.path)
       setRepositoryTrail((current) => {
         const remaining = current.slice(0, -1)
         if (remaining.length) return remaining
@@ -204,7 +219,7 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot, repositoryTrail])
+  }, [applySnapshot, loadExplicitRepository, repositoryTrail])
 
   const openRepository = useCallback(async () => {
     setOpeningRepository(true)
@@ -212,11 +227,13 @@ export function useRepositoryWorkspace() {
     try {
       const snapshot = await pickAndLoadRepository()
       if (!snapshot) return null
-      const parent = repositoryParentFromSnapshot(snapshot)
+      let refreshed = snapshot
+      try { refreshed = await fetchRepository(snapshot.path) } catch { /* keep loaded snapshot when fetch is unavailable */ }
+      const parent = repositoryParentFromSnapshot(refreshed)
       setRepositoryTrail(parent ? [parent] : [])
-      applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
-      rememberRepository(snapshot)
-      return snapshot
+      applySnapshot(refreshed, `已打开仓库：${refreshed.name}`)
+      rememberRepository(refreshed)
+      return refreshed
     } catch (error) {
       setRepositoryNotice(error instanceof Error ? error.message : String(error))
       return null
@@ -343,6 +360,7 @@ export function useRepositoryWorkspace() {
 
   return {
     repository,
+    structureRepository,
     recentRepositories,
     openingRepository,
     fetching,
@@ -353,6 +371,7 @@ export function useRepositoryWorkspace() {
     parentRepository: repositoryTrail[repositoryTrail.length - 1] ?? null,
     setRepositoryNotice,
     applySnapshot,
+    applyStructureSnapshot,
     openRepository,
     openRepositoryPath,
     openSubmodulePath,

@@ -68,4 +68,14 @@ describe('working tree history commit', () => {
 
     expect(commit?.parent).toBe('main-head')
   })
+
+  it('uses a detached worktree HEAD as the working-tree parent', () => {
+    const repository = {
+      path: 'E:\\repo\\module',
+      branch: 'Detached @ deadbee',
+      commits: [{ id: 'head', fullHash: 'deadbeef' }],
+      worktrees: [{ path: 'E:\\repo\\module', branch: undefined, head: 'deadbeef', bare: false }],
+    } as Pick<RepositorySnapshot, 'path' | 'branch' | 'commits' | 'worktrees'>
+    expect(workingTree.resolveWorkingTreeParent(repository)).toBe('deadbeef')
+  })
 })

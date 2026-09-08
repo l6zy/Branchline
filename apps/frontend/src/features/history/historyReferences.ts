@@ -11,7 +11,10 @@ export function trackedRemoteReference(
   branchTracking: BranchTrackingMap,
 ) {
   const upstream = branchTracking[reference]?.upstream
-  return upstream && remoteBranches.has(upstream) && references.includes(upstream) ? upstream : null
+  if (upstream && remoteBranches.has(upstream) && references.includes(upstream)) return upstream
+  return remoteBranches.has(`origin/${reference}`) && references.includes(`origin/${reference}`)
+    ? `origin/${reference}`
+    : null
 }
 
 export function visibleCommitReferences(
@@ -19,13 +22,12 @@ export function visibleCommitReferences(
   remoteBranches: Set<string>,
   branchTracking: BranchTrackingMap,
 ) {
-  const referencesOnCommit = new Set(references)
   const hiddenRemotes = new Set<string>()
 
-  Object.entries(branchTracking).forEach(([localBranch, tracking]) => {
-    const upstream = tracking.upstream
-    if (!upstream || !referencesOnCommit.has(localBranch) || !referencesOnCommit.has(upstream)) return
-    if (remoteBranches.has(upstream)) hiddenRemotes.add(upstream)
+  references.forEach((reference) => {
+    if (remoteBranches.has(reference)) return
+    const remote = trackedRemoteReference(reference, references, remoteBranches, branchTracking)
+    if (remote) hiddenRemotes.add(remote)
   })
 
   return references.filter((reference) => !hiddenRemotes.has(reference))

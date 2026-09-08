@@ -22,12 +22,18 @@ describe('commit reference labels', () => {
     )).toEqual(['main', 'origin/release', 'refs/stash', 'v1.0'])
   })
 
-  it('does not infer tracking from a similar branch name', () => {
+  it('combines a local branch with an identically named remote at the same commit', () => {
     expect(visibleCommitReferences(
       ['feature/demo', 'origin/feature/demo'],
       new Set(['origin/feature/demo']),
       {},
-    )).toEqual(['feature/demo', 'origin/feature/demo'])
+    )).toEqual(['feature/demo'])
+    expect(trackedRemoteReference(
+      'feature/demo',
+      ['feature/demo', 'origin/feature/demo'],
+      new Set(['origin/feature/demo']),
+      {},
+    )).toBe('origin/feature/demo')
   })
 
   it('identifies the tracked remote shown on the same commit badge', () => {

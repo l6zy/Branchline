@@ -426,21 +426,35 @@ fn initials(author: &str) -> String {
 }
 
 fn decorations(value: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    for item in value.split(',') {
+        let mut label = item.trim();
+        if let Some((_, branch)) = label.split_once(" -> ") {
+            label = branch.trim();
+        }
+        label = label.strip_prefix("tag: ").unwrap_or(label);
+        label = label
+            .strip_prefix("refs/heads/")
+            .or_else(|| label.strip_prefix("refs/remotes/"))
+            .or_else(|| label.strip_prefix("heads/"))
+            .unwrap_or(label);
+        if label.is_empty() || label == "HEAD" || label.contains("/HEAD") {
+            continue;
+        }
+        if !result.iter().any(|item| item == label) {
+            result.push(label.to_string());
+        }
+    }
+    result
+}
+
+fn normalize_branch_name(value: &str) -> String {
     value
-        .split(',')
-        .filter_map(|item| {
-            let mut label = item.trim();
-            if let Some((_, branch)) = label.split_once(" -> ") {
-                label = branch.trim();
-            }
-            label = label.strip_prefix("tag: ").unwrap_or(label);
-            if label.is_empty() || label.contains("/HEAD") {
-                None
-            } else {
-                Some(label.to_string())
-            }
-        })
-        .collect()
+        .trim()
+        .strip_prefix("refs/heads/")
+        .or_else(|| value.trim().strip_prefix("heads/"))
+        .unwrap_or(value.trim())
+        .to_string()
 }
 
 fn assign_lanes(commits: &mut [RepositoryCommit]) {
@@ -1699,7 +1713,23 @@ pub fn read_repository_with_commit_limit(
                     branch = if short_hash.is_empty() {
                         "无提交".into()
                     } else {
-                        format!("Detached @ {short_hash}")
+                        let exact_refs = optional_git_output(
+                            root_path,
+                            &[
+                                "for-each-ref",
+                                "--points-at",
+                                "HEAD",
+                                "--format=%(refname:short)",
+                                "refs/heads",
+                                "refs/remotes",
+                            ],
+                        );
+                        exact_refs
+                            .lines()
+                            .map(str::trim)
+                            .map(normalize_branch_name)
+                            .find(|name| !name.is_empty())
+                            .unwrap_or_else(|| format!("Detached @ {short_hash}"))
                     };
                 }
                 let remote = optional_git_output(root_path, &["remote", "get-url", "origin"])
@@ -1872,11 +1902,17 @@ pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Res
     );
     // Git treats submodule pointers as unmerged index entries. Resolve only
     // those entries automatically; regular file conflicts remain for review.
-    let gitlink_result = resolve_gitlink_conflicts_local(repository_path);
-    match (merge_result, gitlink_result) {
-        (Ok(_), Ok(_)) => Ok(()),
-        (Err(error), Ok(_)) => Err(error),
-        (Ok(_), Err(error)) | (Err(_), Err(error)) => Err(error),
+    match merge_result {
+        Ok(_) => Ok(()),
+        Err(merge_error) => match resolve_gitlink_conflicts_local(repository_path) {
+            Ok(resolved) if resolved > 0 && unresolved_paths(&root).is_empty() => {
+                continue_repository_operation(repository_path)
+            }
+            Ok(_) => Err(merge_error),
+            Err(gitlink_error) => Err(format!(
+                "{merge_error}\n自动处理 Gitlink 冲突失败：{gitlink_error}"
+            )),
+        },
     }
 }
 
@@ -3703,6 +3739,25 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_head_decorations_and_infers_only_an_exact_detached_branch() {
+        assert_eq!(
+            decorations("HEAD -> heads/feature/demo, refs/remotes/origin/feature/demo, tag: v1"),
+            vec!["feature/demo", "origin/feature/demo", "v1"]
+        );
+
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let branch = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("read current branch")
+            .trim()
+            .to_string();
+        git_output(&repository.0, &["checkout", "--detach"])
+            .expect("detach at local branch head");
+
+        assert_eq!(read_repository(&path).expect("read detached repository").branch, branch);
+    }
+
+    #[test]
     fn repository_state_token_changes_with_worktree_and_history() {
         let repository = test_repository();
         let clean = repository_state_token(&repository.0.to_string_lossy())
@@ -4665,7 +4720,14 @@ mod tests {
         git_output(&repository.0, &["commit", "-m", "更新 current Gitlink"])
             .expect("commit current gitlink");
 
-        merge_repository_reference(&path, "feat/gitlink").expect_err("merge should report conflict");
+        merge_repository_reference(&path, "feat/gitlink")
+            .expect("gitlink-only merge should complete automatically");
+
+        let snapshot = read_repository(&path).expect("read completed gitlink merge");
+        assert!(snapshot.operation.is_none(), "merge operation should be complete");
+        let parents = git_output(&repository.0, &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .expect("read merge parents");
+        assert_eq!(parents.split_whitespace().count(), 3, "HEAD must be a merge commit");
 
         assert!(
             unresolved_paths(&repository.0)

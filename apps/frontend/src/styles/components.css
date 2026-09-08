@@ -654,7 +654,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .context-menu-layer { position: fixed; inset: 0; z-index: 1000; }
 
-.context-menu { position: fixed; width: 220px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--panel); box-shadow: 0 12px 38px rgba(0,0,0,.34); animation: popIn .12s ease-out; }
+.context-menu { position: fixed; width: min(280px, calc(100vw - 16px)); max-width: calc(100vw - 16px); padding: 5px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--panel); box-shadow: 0 12px 38px rgba(0,0,0,.34); animation: popIn .12s ease-out; }
 
 .context-menu-layer.closing { pointer-events: none; }
 
@@ -666,9 +666,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .context-menu-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.context-menu button { width: 100%; min-height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 5px; color: var(--text); text-align: left; background: transparent; font-size: 12px; cursor: pointer; }
+.context-menu button { width: 100%; min-height: 32px; min-width: 0; padding: 0 8px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 5px; color: var(--text); text-align: left; background: transparent; font-size: 12px; cursor: pointer; }
 
 .context-menu button svg { flex: 0 0 auto; color: var(--muted); }
+.context-menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .context-menu button:hover:not(:disabled) { color: var(--accent); background: var(--accent-dim); }
 

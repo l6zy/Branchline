@@ -36,6 +36,11 @@ describe('repository switch targets', () => {
     expect(filterRepositoryTargets(targets, 'vendor ui').map(({ source }) => source)).toEqual(['submodule'])
   })
 
+  it('places submodules before worktrees in the current repository group', () => {
+    const targets = buildRepositorySwitchTargets(repository, [], [])
+    expect(targets.filter((target) => ['submodule', 'worktree'].includes(target.source)).map((target) => target.source)).toEqual(['submodule', 'worktree'])
+  })
+
   it('uses pinned repositories first and otherwise falls back to three recent entries', () => {
     const pinnedTargets = buildRepositorySwitchTargets(repository, recent, [
       { name: 'tools', path: 'E:\\code\\tools' },

@@ -70,10 +70,10 @@ export function buildRepositorySwitchTargets(
 
   if (repository) {
     add({ label: repository.name, path: repository.path, kind: `当前仓库 · ${repository.branch}`, source: 'current', navigation: 'current' })
+    repository.submodules.forEach((submodule) => add({ label: submodule.path, path: joinedRepositoryPath(repository.path, submodule.path), kind: `Submodule · ${submodule.status}`, source: 'submodule', navigation: 'submodule' }))
     repository.worktrees
       .filter((worktree) => normalizedRepositoryTargetPath(worktree.path) !== normalizedRepositoryTargetPath(repository.path))
       .forEach((worktree) => add({ label: pathLabel(worktree.path), path: worktree.path, kind: `Worktree · ${worktree.branch ?? 'Detached'}`, source: 'worktree', navigation: 'worktree' }))
-    repository.submodules.forEach((submodule) => add({ label: submodule.path, path: joinedRepositoryPath(repository.path, submodule.path), kind: `Submodule · ${submodule.status}`, source: 'submodule', navigation: 'submodule' }))
   }
 
   favorites.forEach((favorite) => add({ label: favorite.name, path: favorite.path, kind: '收藏仓库', source: 'pinned', navigation: 'repository' }))

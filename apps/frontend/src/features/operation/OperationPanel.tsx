@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalLink, GitBranch, GitMerge, GitPullRequest, RotateCcw, SkipForward, Square, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalLink, GitBranch, GitMerge, GitPullRequest, RefreshCw, RotateCcw, SkipForward, Square, Trash2, X } from 'lucide-react'
 import { ConflictCodeEditor, type ConflictCodeEditorHandle } from './ConflictCodeEditor'
 import { abortRepositoryOperation, continueRepositoryOperation, launchConflictMergetool, loadConflictFile, resolveConflictBlock, resolveConflictFile, skipRepositoryOperation, type ConflictFileContent, type RepositorySnapshot } from '../../repository'
 import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
+import { acquireOperationLock, releaseOperationLock } from './operationLock'
 
 type OperationPanelProps = {
   repository: RepositorySnapshot
@@ -73,6 +74,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
   const [resolvedRanges, setResolvedRanges] = useState<Array<{ from: number; to: number }>>([])
   const { confirm, confirmDialog } = useConfirmDialog()
   const editorRef = useRef<ConflictCodeEditorHandle>(null)
+  const operationLock = useRef(false)
 
   useEffect(() => {
     if (initialPath && conflicts.includes(initialPath)) setSelectedPath(initialPath)
@@ -109,6 +111,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
   }, [onNotice, reloadToken, repository.path, selectedPath])
 
   const runOperation = async (action: () => Promise<RepositorySnapshot>, success: string) => {
+    if (!acquireOperationLock(operationLock)) return false
     setLoading(true)
     try {
       const snapshot = await action()
@@ -120,6 +123,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
       onNotice(error instanceof Error ? error.message : String(error))
       return false
     } finally {
+      releaseOperationLock(operationLock)
       setLoading(false)
     }
   }
@@ -183,7 +187,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
 
   if (!operation) return <section className="workspace-empty"><Check size={36}/><strong>没有待处理的 Git 操作</strong><span>合并、变基或 Cherry-pick 产生冲突后，会在这里逐文件处理。</span></section>
 
-  return <section className="operation-page workspace-page">
+  return <section className={`operation-page workspace-page ${loading ? 'operation-busy' : ''}`} aria-busy={loading}>
     <div className="operation-heading operation-statusbar">
       <div className="operation-heading-title">
         <span className={`operation-kind operation-kind-${operation.kind}`}>{operation.kind === 'rebase' ? <GitPullRequest size={15}/> : operation.kind === 'merge' ? <GitMerge size={15}/> : <CircleAlert size={15}/>}</span>
@@ -191,10 +195,10 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
         <span className="operation-status-meta">{operation.kind === 'rebase' ? `${completedSteps} / ${operation.steps.length || totalSteps} 个提交` : `${conflicts.length} 个冲突文件`}</span>
       </div>
       <div className="operation-actions">
-        <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), '操作已继续')} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}><ChevronRight size={14}/>{operation.kind === 'rebase' ? '继续变基' : '继续操作'}</Button>
+        <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), '操作已继续')} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}>{loading ? <RefreshCw className="spin" size={14}/> : <ChevronRight size={14}/>} {loading ? '正在继续…' : operation.kind === 'rebase' ? '继续变基' : '继续操作'}</Button>
         {(operation.kind === 'rebase' || operation.kind === 'cherry-pick') && <Button variant="secondary" onClick={() => void runOperation(() => skipRepositoryOperation(repository.path), '已跳过当前提交')} disabled={loading}><SkipForward size={14}/>跳过提交</Button>}
         <Button variant="danger" onClick={() => void (async () => { if (await confirm({ title: '中止 Git 操作', message: '确定中止当前 Git 操作？未完成的合并或变基将被撤销。', confirmLabel: '中止', variant: 'danger' })) await runOperation(() => abortRepositoryOperation(repository.path), '已中止 Git 操作') })()} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>中止</Button>
-        {onClose && <Button variant="icon" onClick={onClose} title="返回提交图谱"><X size={15}/></Button>}
+        {onClose && <Button variant="icon" onClick={onClose} disabled={loading} title="返回提交图谱"><X size={15}/></Button>}
       </div>
     </div>
 

@@ -21,6 +21,7 @@ import {
 } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { useResizablePane } from '../../components/useResizablePane'
+import { initialCommitMessage, templateMessage } from './commitMessage'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
@@ -31,14 +32,6 @@ type StagingPageProps = {
   onOpenHistory: (path: string, tab: 'history' | 'blame') => void
   onOpenLineHistory: (path: string, line: number) => void
   onOpenConflict?: (path: string) => void
-}
-
-function templateMessageLines(content: string) {
-  return content.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('#'))
-}
-
-function templateMessage(content: string) {
-  return templateMessageLines(content).join('\n')
 }
 
 function fileName(path: string) {
@@ -121,12 +114,15 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
 
   useEffect(() => {
     const template = repository?.commitTemplate
-    const key = `${repository?.path ?? 'empty'}\u0000${template?.path ?? ''}\u0000${template?.content ?? ''}`
+    const mergeOperation = repository?.operation?.kind === 'merge' ? repository.operation : undefined
+    const key = mergeOperation
+      ? `${repository?.path ?? 'empty'}\u0000merge\u0000${mergeOperation.currentCommit ?? mergeOperation.message ?? ''}`
+      : `${repository?.path ?? 'empty'}\u0000template\u0000${template?.path ?? ''}\u0000${template?.content ?? ''}`
     if (appliedTemplateKey.current === key) return
     appliedTemplateKey.current = key
-    setFullMessage(templateMessage(template?.content ?? ''))
+    setFullMessage(initialCommitMessage(template?.content ?? '', mergeOperation))
     setTemplateDraft(template?.content ?? '')
-  }, [repository?.commitTemplate?.content, repository?.commitTemplate?.path, repository?.path])
+  }, [repository?.commitTemplate?.content, repository?.commitTemplate?.path, repository?.operation?.currentCommit, repository?.operation?.kind, repository?.operation?.message, repository?.path])
 
   useEffect(() => {
     if (undoCommitMessage !== null && undoCommitMessage !== undefined) setFullMessage(undoCommitMessage)

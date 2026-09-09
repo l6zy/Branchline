@@ -25,9 +25,10 @@ function DetailField({ label, children }: { label: string; children: React.React
   return <div><dt>{label}</dt><dd>{children}</dd></div>
 }
 
-export function RepositoryStructurePanel({ repository, view, selection, onOpenPath, onOpenTag, onSnapshot, onNotice }: {
+export function RepositoryStructurePanel({ repository, view, query = '', selection, onOpenPath, onOpenTag, onSnapshot, onNotice }: {
   repository: RepositorySnapshot | null
   view: StructureView
+  query?: string
   selection: RepositoryStructureSelection
   onOpenPath: (path: string, kind: 'worktree' | 'submodule') => void
   onOpenTag: (tag: string) => void
@@ -39,9 +40,12 @@ export function RepositoryStructurePanel({ repository, view, selection, onOpenPa
   const { confirm, confirmDialog } = useConfirmDialog()
   if (!repository) return <section className="workspace-empty"><FolderGit2 size={34}/><strong>仓库结构</strong><span>请先打开本地仓库。</span></section>
 
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleTags = repository.tags.filter((tag) => !normalizedQuery || tag.toLocaleLowerCase().includes(normalizedQuery))
+
   if (view === 'tags') return <section className="structure-panel workspace-page">
     <div className="workspace-page-heading"><div><span className="eyebrow">仓库结构</span><h2>标签</h2><p>按创建时间查看当前仓库中的标签。</p></div></div>
-    <div className="structure-list">{repository.tags.map((tag) => <button className="tag-row" key={tag} onClick={() => onOpenTag(tag)} title={`定位到标签 ${tag} 指向的提交`}><span className="structure-icon"><Tag size={15}/></span><span><strong>{tag}</strong></span><ChevronRight size={15}/></button>)}{repository.tags.length === 0 && <div className="workspace-hint"><Tag size={26}/><strong>没有标签</strong></div>}</div>
+    <div className="structure-list">{visibleTags.map((tag) => <button className="tag-row" key={tag} onClick={() => onOpenTag(tag)} title={`定位到标签 ${tag} 指向的提交`}><span className="structure-icon"><Tag size={15}/></span><span><strong>{tag}</strong></span><ChevronRight size={15}/></button>)}{repository.tags.length === 0 && <div className="workspace-hint"><Tag size={26}/><strong>没有标签</strong></div>}{repository.tags.length > 0 && visibleTags.length === 0 && <div className="workspace-hint"><Tag size={26}/><strong>没有匹配的标签</strong><span>试试其他标签名称。</span></div>}</div>
   </section>
 
   const run = async (key: string, action: () => Promise<RepositorySnapshot>, notice: string) => {

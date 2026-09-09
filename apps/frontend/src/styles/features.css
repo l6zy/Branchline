@@ -14,6 +14,13 @@
 
 .repository-tree-row[style] { transition: padding-left .12s ease, background .15s, color .15s; }
 
+.repository-tree-row { padding-top: 0; padding-bottom: 0; }
+.repository-tree-row .tree-expander { width: 18px; height: 26px; flex: 0 0 18px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; color: currentColor; background: transparent; cursor: pointer; }
+.repository-tree-row .tree-expander:hover { color: var(--text); background: var(--panel-3); }
+.repository-tree-row .tree-node-content { min-width: 0; flex: 1 1 auto; height: 30px; padding: 0; display: flex; align-items: center; gap: 7px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.repository-tree-row .tree-node-content > span:not(.count) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-tree-row .tree-node-content .count { margin-left: auto; color: var(--faint); font-size: 10px; }
+
 .structure-tags-section { padding-top: 6px; }
 
 .commit-table { min-width: 0; height: 100%; display: grid; grid-template-rows: 35px 1fr; }
@@ -1067,6 +1074,11 @@
 .git-config-template-field textarea { min-height: 148px; margin-top: 10px; padding: 9px; }
 
 .stage-section-header { min-height: 43px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line-soft); background: var(--panel-2); }
+.stage-section-toggle { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+.stage-section-toggle:hover { color: var(--text); background: var(--panel-3); }
+.stage-section-toggle svg { transition: transform .18s ease; }
+.stage-section.collapsed .stage-section-toggle svg { transform: rotate(-90deg); }
+.stage-section.collapsed .stage-section-header { border-bottom-color: transparent; }
 
 .stage-section-name { min-width: 0; display: flex; align-items: center; gap: 8px; }
 

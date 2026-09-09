@@ -26,7 +26,7 @@ button, .commit-row { -webkit-tap-highlight-color: transparent; }
 
 @keyframes operationIn { from { opacity: 0; transform: translate(-50%, -7px) scale(.98); } }
 
-@keyframes operationProgress { 0% { transform: translateX(-65%); } 100% { transform: translateX(65%); } }
+@keyframes operationProgress { 0% { transform: translateX(-90%); } 100% { transform: translateX(90%); } }
 
 body, button, input, textarea { font-size: 12px; }
 

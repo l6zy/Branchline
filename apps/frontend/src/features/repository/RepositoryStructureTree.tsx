@@ -30,18 +30,19 @@ export function RepositoryStructureTree({ repository, selection, onSelect, onOpe
       const target: RepositoryStructureSelection = { kind: 'submodule-folder', path: node.path }
       const expanded = open[`folder:${node.path}`] !== false
       return <div key={node.path}>
-        <button className={rowClass(target, 'group')} style={{ paddingLeft: 16 + depth * 12 }} onClick={() => onSelect(target)} onDoubleClick={() => toggle(`folder:${node.path}`)} title="单击查看详情，双击展开或收起">
-          {expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<FolderTree size={13}/><span>{node.name}</span><span className="count">{node.children.length}</span>
-        </button>
+        <div className={rowClass(target, 'group')} style={{ paddingLeft: 16 + depth * 12 }}>
+        <button type="button" className="tree-expander" onClick={() => toggle(`folder:${node.path}`)} aria-label={expanded ? `收起 ${node.name}` : `展开 ${node.name}`} title={expanded ? '收起' : '展开'}>{expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button>
+        <button type="button" className="tree-node-content" onClick={() => onSelect(target)} title="查看详情"><FolderTree size={13}/><span>{node.name}</span><span className="count">{node.children.length}</span></button>
+        </div>
         {expanded && <div>{node.children.map((child) => renderSubmoduleNode(child, depth + 1))}</div>}
       </div>
     }
     const submodule = node.submodule!
     const target: RepositoryStructureSelection = { kind: 'submodule', path: submodule.path }
     const available = submodule.status !== 'uninitialized' && submodule.status !== 'missing'
-    return <button key={node.path} className={rowClass(target)} style={{ paddingLeft: 29 + depth * 12 }} onClick={() => onSelect(target)} onDoubleClick={() => { if (available) onOpenPath(submoduleAbsolutePath(repository.path, submodule.path), 'submodule') }} title={available ? '单击查看详情，双击进入 Submodule' : '单击查看详情并初始化'}>
-      <span className="tree-spacer"/><Box size={12}/><span>{node.name}</span>{submodule.status === 'ok' ? <Check className="repository-tree-status ok" size={12}/> : <TriangleAlert className="repository-tree-status warn" size={12}/>} 
-    </button>
+    return <div key={node.path} className={rowClass(target)} style={{ paddingLeft: 29 + depth * 12 }}>
+      <span className="tree-spacer"/><button type="button" className="tree-node-content" onClick={() => onSelect(target)} onDoubleClick={() => { if (available) onOpenPath(submoduleAbsolutePath(repository.path, submodule.path), 'submodule') }} title={available ? '查看详情，双击进入 Submodule' : '查看详情并初始化'}><Box size={12}/><span>{node.name}</span>{submodule.status === 'ok' ? <Check className="repository-tree-status ok" size={12}/> : <TriangleAlert className="repository-tree-status warn" size={12}/>}</button>
+    </div>
   }
 
   return <div className="nav-section repository-tree-section">
@@ -49,19 +50,15 @@ export function RepositoryStructureTree({ repository, selection, onSelect, onOpe
     <button className={rowClass({ kind: 'root' }, 'repository-root-row')} onClick={() => onSelect({ kind: 'root' })}>
       <span className="tree-spacer"/><FolderGit2 size={14}/><span>{repository.name}</span>
     </button>
-    <button className={rowClass({ kind: 'worktrees' }, 'group')} onClick={() => onSelect({ kind: 'worktrees' })} onDoubleClick={() => toggle('worktrees')} title="单击查看详情，双击展开或收起">
-      {open.worktrees !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<GitFork size={13}/><span>Worktrees</span><span className="count">{repository.worktrees.length}</span>
-    </button>
+    <div className={rowClass({ kind: 'worktrees' }, 'group')}>
+      <button type="button" className="tree-expander" onClick={() => toggle('worktrees')} aria-label={open.worktrees !== false ? '收起 Worktrees' : '展开 Worktrees'} title={open.worktrees !== false ? '收起' : '展开'}>{open.worktrees !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button><button type="button" className="tree-node-content" onClick={() => onSelect({ kind: 'worktrees' })} title="查看详情"><GitFork size={13}/><span>Worktrees</span><span className="count">{repository.worktrees.length}</span></button>
+    </div>
     {open.worktrees !== false && <div>{repository.worktrees.map((worktree) => {
       const target: RepositoryStructureSelection = { kind: 'worktree', path: worktree.path }
       const current = worktree.path.replace(/\\/g, '/').toLowerCase() === repository.path.replace(/\\/g, '/').toLowerCase()
-      return <button key={worktree.path} className={rowClass(target)} style={{ paddingLeft: 29 }} onClick={() => onSelect(target)} onDoubleClick={() => { if (!current) onOpenPath(worktree.path, 'worktree') }} title={current ? '当前 Worktree' : '单击查看详情，双击切换 Worktree'}>
-        <span className="tree-spacer"/><GitFork size={12}/><span>{worktree.path.split(/[\\/]/).pop() || worktree.path}</span>{worktree.locked ? <Lock className="repository-tree-status" size={11}/> : current ? <Check className="repository-tree-status ok" size={12}/> : null}
-      </button>
+      return <div key={worktree.path} className={rowClass(target)} style={{ paddingLeft: 29 }}><span className="tree-spacer"/><button type="button" className="tree-node-content" onClick={() => onSelect(target)} onDoubleClick={() => { if (!current) onOpenPath(worktree.path, 'worktree') }} title={current ? '当前 Worktree' : '查看详情，双击切换 Worktree'}><GitFork size={12}/><span>{worktree.path.split(/[\\/]/).pop() || worktree.path}</span>{worktree.locked ? <Lock className="repository-tree-status" size={11}/> : current ? <Check className="repository-tree-status ok" size={12}/> : null}</button></div>
     })}</div>}
-    <button className={rowClass({ kind: 'submodules' }, 'group')} onClick={() => onSelect({ kind: 'submodules' })} onDoubleClick={() => toggle('submodules')} title="单击查看详情，双击展开或收起">
-      {open.submodules !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<Box size={13}/><span>Submodules</span><span className="count">{repository.submodules.length}</span>
-    </button>
+    <div className={rowClass({ kind: 'submodules' }, 'group')}><button type="button" className="tree-expander" onClick={() => toggle('submodules')} aria-label={open.submodules !== false ? '收起 Submodules' : '展开 Submodules'} title={open.submodules !== false ? '收起' : '展开'}>{open.submodules !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button><button type="button" className="tree-node-content" onClick={() => onSelect({ kind: 'submodules' })} title="查看详情"><Box size={13}/><span>Submodules</span><span className="count">{repository.submodules.length}</span></button></div>
     {open.submodules !== false && <div>{submoduleTree.map((node) => renderSubmoduleNode(node, 0))}</div>}
   </div>
 }

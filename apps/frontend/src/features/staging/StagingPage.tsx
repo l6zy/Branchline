@@ -8,8 +8,8 @@ import {
   createScopedRepositoryStash,
   discardRepositoryFiles,
   loadRepository,
-  loadRepositoryFileDiff,
   loadRepositoryUnstagedFileDiff,
+  loadRepositoryStagedFileDiff,
   restoreRepositoryPatch,
   clearRepositoryCommitTemplate,
   stageRepositoryFiles,
@@ -23,6 +23,7 @@ import { DiffPanel } from '../diff/DiffPanel'
 import { useResizablePane } from '../../components/useResizablePane'
 import { initialCommitMessage, templateMessage } from './commitMessage'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
+import { stageSelectionKey, type StageSelection } from './stagingSelection'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
@@ -74,7 +75,8 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const [amend, setAmend] = useState(false)
   const [sign, setSign] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [selectedFile, setSelectedFile] = useState<StageSelection | null>(null)
+  const [diffRevision, setDiffRevision] = useState(0)
   const [sectionOpen, setSectionOpen] = usePersistentState('branchline.stagingSectionsOpen.v1', { staged: true, unstaged: true }, isBooleanRecord)
   const [contextFile, setContextFile] = useState<{ file: RepositoryFile; scope: 'staged' | 'unstaged'; x: number; y: number } | null>(null)
   const { confirm, confirmDialog } = useConfirmDialog()
@@ -94,20 +96,18 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const conflictFiles = useMemo(() => files.filter((file) => conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const stagedFiles = useMemo(() => files.filter((file) => file.staged && !conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const unstagedFiles = useMemo(() => files.filter((file) => !conflictFilePaths.has(file.path) && (file.unstaged || (!file.staged && !file.unstaged))), [conflictFilePaths, files])
-  const selectedIndex = Math.max(0, files.findIndex((file) => file.path === selectedPath))
-  const loadStagingRows = useCallback((path: string) => {
-    const file = files.find((item) => item.path === path)
-    return file?.unstaged
-      ? loadRepositoryUnstagedFileDiff(repository?.path ?? '', path)
-      : loadRepositoryFileDiff(repository?.path ?? '', path)
-  }, [files, repository?.path])
-  const handleActiveDiffFileChange = useCallback((index: number) => {
-    setSelectedPath(files[index]?.path ?? null)
-  }, [files])
+  const diffFileEntries = useMemo(() => [
+    ...stagedFiles.map((file) => ({ file, scope: 'staged' as const })),
+    ...unstagedFiles.map((file) => ({ file, scope: 'unstaged' as const })),
+  ], [stagedFiles, unstagedFiles])
+  const selectedDiffEntry = useMemo(() => diffFileEntries.find((entry) => stageSelectionKey({ path: entry.file.path, scope: entry.scope }) === stageSelectionKey(selectedFile)) ?? null, [diffFileEntries, selectedFile])
+  const loadStagingRows = useCallback((path: string) => selectedFile?.scope === 'unstaged'
+    ? loadRepositoryUnstagedFileDiff(repository?.path ?? '', path)
+    : loadRepositoryStagedFileDiff(repository?.path ?? '', path), [repository?.path, selectedFile?.scope])
 
   useEffect(() => {
-    if (!selectedPath || !files.some((file) => file.path === selectedPath)) setSelectedPath(files[0]?.path ?? null)
-  }, [files, selectedPath])
+    if (!selectedDiffEntry) setSelectedFile(diffFileEntries[0] ? { path: diffFileEntries[0].file.path, scope: diffFileEntries[0].scope } : null)
+  }, [diffFileEntries, selectedDiffEntry])
 
   const applyConfiguredTemplate = () => {
     const content = repository?.commitTemplate?.content ?? ''
@@ -175,6 +175,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
         }
       } else {
         onSnapshot({ ...repository, files: updatedFiles })
+        setDiffRevision((value) => value + 1)
         onNotice(mode === 'stage' ? `已暂存 ${paths.length} 个文件` : `已取消暂存 ${paths.length} 个文件`)
       }
     } catch (error) {
@@ -192,6 +193,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     try {
       const updatedFiles = await stageRepositoryPatch(repository.path, patch)
       onSnapshot({ ...repository, files: updatedFiles })
+      setDiffRevision((value) => value + 1)
       onNotice(`已暂存${description}`)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
@@ -205,6 +207,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     try {
       const updatedFiles = await restoreRepositoryPatch(repository.path, patch)
       onSnapshot({ ...repository, files: updatedFiles })
+      setDiffRevision((value) => value + 1)
       onNotice(`已还原${description}`)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
@@ -221,6 +224,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     try {
       const updatedFiles = await discardRepositoryFiles(repository.path, paths)
       onSnapshot({ ...repository, files: updatedFiles })
+      setDiffRevision((value) => value + 1)
       onNotice(`已丢弃 ${paths.length} 个文件的未暂存改动`)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
@@ -269,8 +273,9 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     const Icon = icon === 'add' ? Plus : Minus
     const FileIcon = file.path.includes('.') ? FileCode2 : FileText
     const status = getFileStatus(file.type)
-    return <div className={`stage-file ${selectedPath === file.path ? 'active' : ''}`} key={`${icon}-${file.path}`} onContextMenu={(event) => { event.preventDefault(); setSelectedPath(file.path); setContextFile({ file, scope, x: event.clientX, y: event.clientY }) }}>
-      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedPath(file.path); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><StageFilePath path={file.path}/>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
+    const selection = { path: file.path, scope }
+    return <div className={`stage-file ${stageSelectionKey(selectedFile) === stageSelectionKey(selection) ? 'active' : ''}`} key={`${scope}-${file.path}`} onContextMenu={(event) => { event.preventDefault(); setSelectedFile(selection); setContextFile({ file, scope, x: event.clientX, y: event.clientY }) }}>
+      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedFile(selection); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><StageFilePath path={file.path}/>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
       <div className="stage-file-actions">
         {scope === 'unstaged' && <Button variant="danger" className="stage-file-action" onClick={() => void discard([file.path])} disabled={busy} title="丢弃未暂存改动"><Trash2 size={13}/></Button>}
         <button className="stage-file-action" onClick={action} disabled={busy} title={icon === 'add' ? '暂存文件' : '取消暂存'}><Icon size={13}/></button>
@@ -311,7 +316,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
         <div className="commit-compose"><div className="template-row"><span title={repository?.commitTemplate?.path}><FileText size={14}/> {repository?.commitTemplate ? `模板：${fileName(repository.commitTemplate.path)}` : '未配置 commit.template'}</span><div className="template-row-actions"><button type="button" className="template-icon-button" onClick={applyConfiguredTemplate} disabled={!repository?.commitTemplate} title="重新应用模板" aria-label="重新应用模板"><RefreshCw size={14}/></button><button type="button" className="template-icon-button" onClick={() => { setTemplateDraft(repository?.commitTemplate?.content ?? ''); setTemplateEditorOpen(true) }} title="编辑模板" aria-label="编辑模板"><Pencil size={14}/></button></div></div><textarea className="commit-full-message" value={fullMessage} onChange={(event) => setFullMessage(event.target.value)} aria-label="完整提交信息" placeholder="输入完整提交信息" spellCheck={false}/><div className="commit-options"><label><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)}/> Amend</label><label><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)}/> 签名</label></div><Button variant="primary" onClick={commit} disabled={!stagedFiles.length || busy}><GitCommitHorizontal size={16}/> {busy ? '处理中…' : `提交 ${stagedFiles.length} 个文件`} <span>⌘↵</span></Button></div>
       </div>
       <span className={`workspace-resizer workspace-resizer-column ${stagingWidth.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件面板和 Diff 宽度" onPointerDown={stagingWidth.beginResize}/>
-      <div className="staging-preview-pane">{selectedPath && files.length ? <DiffPanel files={files} repositoryPath={repository?.path} loadRows={loadStagingRows} wide={widePreview} onWideChange={setWidePreview} initialFile={selectedIndex} onActiveFileChange={handleActiveDiffFileChange} hideFileList allowStage={Boolean(files[selectedIndex]?.unstaged)} onStagePatch={(path, patch, description) => void stagePatch(path, patch, description)} onRestorePatch={(path, patch, description) => void restorePatch(path, patch, description)} onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice('未提交的新增或修改行尚无提交历史，请查询对应旧版本行或提交后再查看'); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>选择文件查看变更</strong><span>点击左侧文件即可查看完整内容、统一 Diff 或并排 Diff。</span></div>}</div>
+      <div className="staging-preview-pane">{selectedDiffEntry ? <DiffPanel files={[selectedDiffEntry.file]} repositoryPath={repository?.path} loadRows={loadStagingRows} viewKey={stageSelectionKey(selectedFile)} reloadKey={String(diffRevision)} wide={widePreview} onWideChange={setWidePreview} hideFileList allowStage={selectedDiffEntry.scope === 'unstaged'} onStagePatch={(path, patch, description) => void stagePatch(path, patch, description)} onRestorePatch={(path, patch, description) => void restorePatch(path, patch, description)} onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice('未提交的新增或修改行尚无提交历史，请查询对应旧版本行或提交后再查看'); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>选择文件查看变更</strong><span>点击左侧文件即可查看完整内容、统一 Diff 或并排 Diff。</span></div>}</div>
     </div>
     {templateEditorOpen && <div className="template-editor-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) setTemplateEditorOpen(false) }}><section className="template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="template-editor-title"><header className="template-editor-heading"><div><h2 id="template-editor-title">编辑提交模板</h2><span title={repository?.commitTemplate?.path}>{repository?.commitTemplate?.path ?? '当前仓库 commit.template'}</span></div><button type="button" className="template-editor-close" onClick={() => setTemplateEditorOpen(false)} disabled={busy} aria-label="关闭模板编辑器">×</button></header><div className="template-editor-body"><textarea value={templateDraft} onChange={(event) => setTemplateDraft(event.target.value)} aria-label="当前仓库完整提交模板" placeholder="输入当前仓库的完整提交模板" spellCheck={false} autoFocus /></div><footer className="template-editor-actions"><Button variant="secondary" onClick={() => setTemplateEditorOpen(false)} disabled={busy}>取消</Button><Button variant="secondary" onClick={() => void restoreGlobalTemplate()} disabled={busy}>恢复全局模板</Button><Button variant="primary" onClick={() => void saveRepositoryTemplate()} disabled={busy}>保存当前仓库模板</Button></footer></section></div>}
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>查看文件历史</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>查看逐行归属（Blame）</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>复制文件路径</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>丢弃未暂存改动…</span></Button></>}</ContextMenu>}

@@ -16,15 +16,17 @@ type PendingDiffJump = { edge: 'first' | 'last'; direction: -1 | 1; remaining: n
 export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string) {
   const selected = rows.filter((row) => row.kind !== 'same')
   if (!selected.length) return ''
-  const oldValues = selected.filter((row) => row.kind === 'del' || row.kind === 'same')
-  const newValues = selected.filter((row) => row.kind === 'add' || row.kind === 'same')
-  const first = selected[0]
+  const oldValues = rows.filter((row) => row.kind === 'del' || row.kind === 'same')
+  const newValues = rows.filter((row) => row.kind === 'add' || row.kind === 'same')
+  const first = rows[0] ?? selected[0]
   // A zero-length unified-diff range points at the line before the insertion/deletion.
-  const oldStart = first.old ?? Math.max(0, (first.next ?? 1) - 1)
-  const newStart = first.next ?? Math.max(0, (first.old ?? 1) - 1)
   const oldCount = oldValues.length
   const newCount = newValues.length
-  const body = selected.map((row) => `${row.kind === 'add' ? '+' : '-'}${row.code}`).join('\n')
+  const firstOldLine = rows.find((row) => row.old != null)?.old
+  const firstNewLine = rows.find((row) => row.next != null)?.next
+  const oldStart = oldCount ? (firstOldLine ?? 1) : Math.max(0, (first.next ?? 1) - 1)
+  const newStart = newCount ? (firstNewLine ?? 1) : Math.max(0, (first.old ?? 1) - 1)
+  const body = rows.map((row) => `${row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}${row.code}`).join('\n')
   const isNewFile = fileType === 'A' && selected.every((row) => row.kind === 'add')
   const isDeletedFile = fileType === 'D' && selected.every((row) => row.kind === 'del')
   const header = isNewFile
@@ -35,13 +37,20 @@ export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fi
   return `diff --git a/${filePath} b/${filePath}\n${header}\n@@ -${oldStart},${oldCount} +${newStart},${newCount} @@\n${body}\n`
 }
 
-function changeBlock(rows: RepositoryDiffLine[], index: number) {
+export function changeBlock(rows: RepositoryDiffLine[], index: number) {
   if (rows[index]?.kind === 'same') return []
   let start = index
   let end = index
   while (start > 0 && rows[start - 1].kind !== 'same') start -= 1
   while (end + 1 < rows.length && rows[end + 1].kind !== 'same') end += 1
-  return rows.slice(start, end + 1)
+  // Keep a small amount of surrounding context so Git can anchor the patch
+  // at the exact hunk instead of applying a context-free change elsewhere.
+  const context = 3
+  let contextStart = start
+  let contextEnd = end
+  while (contextStart > 0 && start - contextStart < context && rows[contextStart - 1].kind === 'same') contextStart -= 1
+  while (contextEnd + 1 < rows.length && contextEnd - end < context && rows[contextEnd + 1].kind === 'same') contextEnd += 1
+  return rows.slice(contextStart, contextEnd + 1)
 }
 
 const DIFF_FONT_SIZE_KEY = 'branchline.diffFontSize.v1'
@@ -52,6 +61,10 @@ const DIFF_VIRTUALIZATION_THRESHOLD = 300
 const DIFF_VIRTUAL_OVERSCAN = 24
 const EMPTY_FALLBACK_ROWS: Record<string, RepositoryDiffLine[]> = {}
 const EMPTY_DIFF_ROWS: RepositoryDiffLine[] = []
+
+export function shouldRenderLoadedRows(usesLoader: boolean, loadedIdentity: string | null, activeIdentity: string | null) {
+  return !usesLoader || Boolean(activeIdentity && loadedIdentity === activeIdentity)
+}
 
 const isFileMode = (value: unknown): value is 'list' | 'tree' => value === 'list' || value === 'tree'
 const isDiffView = (value: unknown): value is 'unified' | 'split' => value === 'unified' || value === 'split'
@@ -128,7 +141,9 @@ type DiffPanelProps = {
   onActiveFileChange?: (index: number) => void
   onClose?: () => void
   hideFileList?: boolean
-  loadRows?: (filePath: string) => Promise<RepositoryDiffLine[]>
+  loadRows?: (filePath: string, fileIndex?: number) => Promise<RepositoryDiffLine[]>
+  viewKey?: string
+  reloadKey?: string
   fallbackRows?: Record<string, RepositoryDiffLine[]>
   fallbackChangeRows?: RepositoryDiffLine[]
   onOpenLineHistory?: (filePath: string, line: number, side: DiffLineSide, row: RepositoryDiffLine) => void
@@ -139,7 +154,7 @@ type DiffPanelProps = {
   fontSizeStorageKey?: string
 }
 
-export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onActiveFileChange, onClose, hideFileList = false, loadRows, fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, onStagePatch, onRestorePatch, allowStage = false, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
+export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onActiveFileChange, onClose, hideFileList = false, loadRows, viewKey = '', reloadKey = '', fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, onStagePatch, onRestorePatch, allowStage = false, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
   const [activeFile, setActiveFile] = useState(initialFile)
   const [view, setView] = usePersistentState('branchline.diffView.v1', 'unified', isDiffView)
   const [scope, setScope] = usePersistentState('branchline.diffScope.v1', 'changes', isDiffScope)
@@ -147,6 +162,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [collapsedFolders, setCollapsedFolders] = usePersistentState('branchline.diffCollapsedFolders.v1', {}, isBooleanRecord)
   const [repositoryRows, setRepositoryRows] = useState<RepositoryDiffLine[]>([])
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
+  const [loadedFileIdentity, setLoadedFileIdentity] = useState<string | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
   const [diffFontSize, setDiffFontSize] = useState(() => initialDiffFontSize(fontSizeStorageKey, defaultFontSize))
@@ -171,21 +187,25 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }, [initialFile])
   useEffect(() => {
     rowsCache.current.clear()
-  }, [files, loadRows, repositoryPath])
+  }, [loadRows, repositoryPath])
   useEffect(() => {
     const file = files[activeFile]
     const loader = loadRows ?? (repositoryPath ? (path: string) => loadRepositoryFileDiff(repositoryPath, path) : null)
     if (!file || !loader) {
       setRepositoryRows([])
       setLoadedFilePath(null)
+      setLoadedFileIdentity(null)
       setDiffError(null)
       setDiffLoading(false)
       return
     }
-    const cachedRows = rowsCache.current.get(file.path)
+    const fileIdentity = `${viewKey}\0${activeFile}\0${file.path}`
+    const cacheKey = `${fileIdentity}\0${reloadKey}`
+    const cachedRows = rowsCache.current.get(cacheKey)
     if (cachedRows) {
       setRepositoryRows(cachedRows)
       setLoadedFilePath(file.path)
+      setLoadedFileIdentity(fileIdentity)
       setDiffError(null)
       setDiffLoading(false)
       return
@@ -193,14 +213,12 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     let cancelled = false
     setDiffLoading(true)
     setDiffError(null)
-    setRepositoryRows([])
-    setLoadedFilePath(null)
-    loader(file.path)
-      .then((rows) => { if (!cancelled) { rowsCache.current.set(file.path, rows); setRepositoryRows(rows); setLoadedFilePath(file.path) } })
+    loader(file.path, activeFile)
+      .then((rows) => { if (!cancelled) { rowsCache.current.set(cacheKey, rows); setRepositoryRows(rows); setLoadedFilePath(file.path); setLoadedFileIdentity(fileIdentity) } })
       .catch((error) => { if (!cancelled) { setDiffError(error instanceof Error ? error.message : String(error)); setLoadedFilePath(file.path) } })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
-  }, [activeFile, files, loadRows, repositoryPath])
+  }, [activeFile, files, loadRows, reloadKey, repositoryPath, viewKey])
   useEffect(() => {
     window.localStorage.setItem(fontSizeStorageKey, String(diffFontSize))
   }, [diffFontSize, fontSizeStorageKey])
@@ -223,6 +241,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [defaultFontSize])
   const activeFileInfo = files[activeFile]
+  const activeFileIdentity = activeFileInfo ? `${viewKey}\0${activeFile}\0${activeFileInfo.path}` : null
   const usesLoader = Boolean(loadRows || repositoryPath)
   const sourceRows = usesLoader ? repositoryRows : (activeFileInfo ? (fallbackRows[activeFileInfo.path] ?? fallbackChangeRows) : EMPTY_DIFF_ROWS)
   const stageActionsEnabled = allowStage && Boolean(onStagePatch || onRestorePatch)
@@ -258,6 +277,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     ? Math.max(24, Math.ceil(diffFontSize * 1.5 + 6))
     : Math.max(22, Math.ceil(diffFontSize * 1.5 + 6))
   const virtualHeaderHeight = view === 'unified' ? 34 + (scope === 'changes' && !usesLoader ? 24 : 0) : 0
+  const canRenderLoadedRows = shouldRenderLoadedRows(usesLoader, loadedFileIdentity, activeFileIdentity)
   const virtualStart = virtualized ? Math.max(0, Math.floor(Math.max(0, virtualScrollTop - virtualHeaderHeight) / virtualRowHeight) - DIFF_VIRTUAL_OVERSCAN) : 0
   const virtualEnd = virtualized ? Math.min(visibleEntryCount, virtualStart + DIFF_VIRTUAL_OVERSCAN * 2 + 80) : visibleEntryCount
   const virtualTopHeight = virtualStart * virtualRowHeight
@@ -440,11 +460,11 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       <div ref={codeDiffRef} className={`code-diff ${view}`} onScroll={view === 'unified' ? handleCodeDiffScroll : undefined}>
         <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><ChevronDown size={14}/><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
         {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
-        {diffLoading && <div className="diff-message">正在读取 Diff…</div>}
+        {diffLoading && !canRenderLoadedRows && <div className="diff-message">正在读取 Diff…</div>}
         {diffError && <div className="diff-message error">{diffError}</div>}
         {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">该文件没有可展示的文本差异</div>}
-        {!diffLoading && !diffError && view === 'unified' && <div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div>}
-        {!diffLoading && !diffError && view === 'split' && <div className="split-diff-panes">
+        {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div>}
+        {canRenderLoadedRows && !diffError && view === 'split' && <div className="split-diff-panes">
           <div ref={splitLeftRef} className="split-diff-pane split-left" aria-label="旧版本代码" onScroll={() => syncSplitScroll('left')}><div className="split-diff-content">{virtualized && <div style={{ height: virtualTopHeight }}/>} {splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))} {virtualized && <div style={{ height: virtualBottomHeight }}/>}</div></div>
           <div ref={splitRightRef} className="split-diff-pane split-right" aria-label="新版本代码" onScroll={() => syncSplitScroll('right')}><div className="split-diff-content">{virtualized && <div style={{ height: virtualTopHeight }}/>} {splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'new'))} {virtualized && <div style={{ height: virtualBottomHeight }}/>}</div></div>
         </div>}

@@ -263,7 +263,7 @@
 
 .file-header-stats { flex: 0 0 auto; white-space: nowrap; }
 
-.diff-message { min-height: 120px; padding: 28px 18px; display: grid; place-items: center; color: var(--muted); font: 9px "Segoe UI Variable", "Segoe UI", sans-serif; }
+.diff-message { min-height: 120px; padding: 28px 18px; display: grid; place-items: center; color: var(--muted); font: 12px "Segoe UI Variable", "Segoe UI", sans-serif; }
 
 .diff-message.error { color: var(--danger); }
 

@@ -90,6 +90,10 @@ export async function loadRepositoryUnstagedFileDiff(repositoryPath: string, fil
   return invoke<RepositoryDiffLine[]>('load_unstaged_file_diff', { repositoryPath, filePath })
 }
 
+export async function loadRepositoryStagedFileDiff(repositoryPath: string, filePath: string) {
+  return invoke<RepositoryDiffLine[]>('load_staged_file_diff', { repositoryPath, filePath })
+}
+
 export async function fetchRepository(repositoryPath: string) {
   return invoke<RepositorySnapshot>('fetch_repository', { repositoryPath })
 }

@@ -142,6 +142,18 @@ pub async fn load_unstaged_file_diff(
 }
 
 #[tauri::command]
+pub async fn load_staged_file_diff(
+    repository_path: String,
+    file_path: String,
+) -> Result<Vec<DiffLine>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::parse_staged_diff(Path::new(&repository_path), &file_path)
+    })
+    .await
+    .map_err(|error| task_error("读取已暂存 Diff", error))?
+}
+
+#[tauri::command]
 pub async fn fetch_repository(repository_path: String) -> Result<RepositorySnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         git::fetch_repository(&repository_path)?;

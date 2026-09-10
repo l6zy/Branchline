@@ -988,6 +988,24 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>
     Ok(rows)
 }
 
+pub fn parse_staged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String> {
+    let file_path = validated_file_path(file_path)?;
+    let diff = optional_git_output(
+        path,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached",
+            "--no-color",
+            "--unified=100000",
+            "--",
+            &file_path,
+        ],
+    );
+    Ok(parse_diff_text(&diff))
+}
+
 fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
     let object = git_output_owned(
         path,
@@ -4026,6 +4044,43 @@ mod tests {
         assert!(preview_branch_prefix(&path, "feat")
             .expect("preview deleted prefix")
             .is_empty());
+    }
+
+    #[test]
+    fn separates_staged_and_unstaged_diff_for_the_same_file() {
+        let repository = test_repository();
+        fs::write(repository.0.join("README.md"), "first\nstaged\n")
+            .expect("write staged change");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage change");
+        fs::write(repository.0.join("README.md"), "first\nstaged\nunstaged\n")
+            .expect("write unstaged change");
+
+        let staged = parse_staged_diff(&repository.0, "README.md").expect("read staged diff");
+        let unstaged = parse_unstaged_diff(&repository.0, "README.md").expect("read unstaged diff");
+
+        assert!(staged.iter().any(|line| line.code == "staged" && line.kind == "add"));
+        assert!(!staged.iter().any(|line| line.code == "unstaged" && line.kind == "add"));
+        assert!(unstaged.iter().any(|line| line.code == "unstaged" && line.kind == "add"));
+        assert!(!unstaged.iter().any(|line| line.code == "staged" && line.kind == "add"));
+    }
+
+    #[test]
+    fn stages_a_context_anchored_deletion_patch_at_the_original_location() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "top\nremove\nbottom\n")
+            .expect("write baseline");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
+        git_output(&repository.0, &["commit", "-m", "baseline"]).expect("commit baseline");
+        fs::write(repository.0.join("README.md"), "top\nbottom\n").expect("remove line");
+        let patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,2 @@\n top\n-remove\n bottom\n";
+
+        stage_patch(&path, patch).expect("stage deletion patch");
+
+        let cached = git_output(&repository.0, &["diff", "--cached", "--", "README.md"])
+            .expect("read cached diff");
+        assert!(cached.contains("-remove"));
+        assert!(!cached.contains("+remove"));
     }
 
     #[test]

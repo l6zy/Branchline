@@ -888,18 +888,21 @@ export default function App() {
     try {
       const branches = await previewBranchPrefix(repository.path, prefix)
       if (!branches.length) return setRepositoryNotice(`前缀 ${prefix} 下没有可删除的本地分支`)
-      const worktreeBranches = new Set(repository.worktrees.flatMap((worktree) => worktree.branch ? [worktree.branch] : []))
-      const skippedBranches = branches.filter((branch) => worktreeBranches.has(branch))
-      const deletableBranches = branches.filter((branch) => !worktreeBranches.has(branch))
-      if (!deletableBranches.length) return setRepositoryNotice(`前缀 ${prefix} 下的分支均正在被 Worktree 使用，未删除任何分支`)
+      // The current branch is checked out somewhere by definition, so it is skipped like any other
+      // branch that a worktree holds rather than aborting the whole deletion.
+      const checkedOutBranches = new Set(repository.worktrees.flatMap((worktree) => worktree.branch ? [worktree.branch] : []))
+      if (repository.branch) checkedOutBranches.add(repository.branch)
+      const skippedBranches = branches.filter((branch) => checkedOutBranches.has(branch))
+      const deletableBranches = branches.filter((branch) => !checkedOutBranches.has(branch))
+      if (!deletableBranches.length) return setRepositoryNotice(`前缀 ${prefix} 下的分支均正在被 Worktree 或当前分支占用，未删除任何分支`)
       const skippedMessage = skippedBranches.length
-        ? `\n\n以下 ${skippedBranches.length} 个分支正在被 Worktree 使用，将自动跳过：\n${skippedBranches.map((branch) => `• ${branch}`).join('\n')}`
+        ? `\n\n以下 ${skippedBranches.length} 个分支正在被 Worktree 或当前分支占用，将自动跳过：\n${skippedBranches.map((branch) => `• ${branch}`).join('\n')}`
         : ''
       const confirmed = await confirm({ title: '删除分支', message: `将永久删除以下 ${deletableBranches.length} 个本地分支：\n\n${deletableBranches.join('\n')}${skippedMessage}\n\n此操作不会删除远程分支，是否继续？`, confirmLabel: '删除', variant: 'danger' })
       if (!confirmed) return
       const snapshot = await deleteBranchPrefix(repository.path, prefix, branches)
       applySnapshot(snapshot, skippedBranches.length
-        ? `已删除 ${deletableBranches.length} 个 ${prefix} 前缀分支，已跳过 ${skippedBranches.length} 个 Worktree 分支`
+        ? `已删除 ${deletableBranches.length} 个 ${prefix} 前缀分支，已跳过 ${skippedBranches.length} 个占用中的分支`
         : `已删除 ${deletableBranches.length} 个 ${prefix} 前缀分支`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

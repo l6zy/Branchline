@@ -1433,6 +1433,17 @@ fn parse_commit_template(path: &Path) -> Option<RepositoryCommitTemplate> {
     })
 }
 
+// `canonicalize` answers with the extended-length form on Windows (`\\?\E:\repo`), which is not what
+// the user typed and not what the rest of the app compares against. `\\?\UNC\server\share` maps back
+// to the ordinary `\\server\share` spelling.
+fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+}
+
 fn superproject_working_tree(path: &Path) -> Option<String> {
     let value = optional_git_output(path, &["rev-parse", "--show-superproject-working-tree"])
         .trim()
@@ -1441,7 +1452,7 @@ fn superproject_working_tree(path: &Path) -> Option<String> {
         return None;
     }
     let resolved = std::fs::canonicalize(&value).unwrap_or_else(|_| PathBuf::from(value));
-    Some(resolved.to_string_lossy().to_string())
+    Some(display_path(&resolved))
 }
 
 pub fn repository_root(selected_path: &str) -> Result<PathBuf, String> {
@@ -3696,17 +3707,21 @@ pub fn delete_branch_prefix(
     if actual != expected {
         return Err("分支列表已变化，请重新确认删除范围".into());
     }
-    let current = optional_git_output(&root, &["branch", "--show-current"])
-        .trim()
-        .to_string();
-    if actual.iter().any(|branch| branch == &current) {
-        return Err(format!("不能删除当前分支：{current}"));
-    }
-    let checked_out: HashSet<String> = parse_worktrees(&root)
+    // Checked-out branches are skipped rather than rejected, so a group that happens to contain the
+    // current branch still deletes everything else the confirmation dialog listed.
+    let mut checked_out: HashSet<String> = parse_worktrees(&root)
         .into_iter()
         .filter_map(|worktree| worktree.branch)
         .collect();
+    let current = optional_git_output(&root, &["branch", "--show-current"])
+        .trim()
+        .to_string();
+    if !current.is_empty() {
+        checked_out.insert(current);
+    }
     actual.retain(|branch| !checked_out.contains(branch));
+    // Every remaining branch was confirmed by the caller, and the checked-out ones are skipped, so an
+    // empty list here just means the dialog already reported that nothing could be deleted.
     if actual.is_empty() {
         return Ok(());
     }
@@ -4119,6 +4134,22 @@ mod tests {
     }
 
     #[test]
+    fn skips_the_current_branch_instead_of_rejecting_the_prefix() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        git_output(&repository.0, &["branch", "feature/other"]).expect("create other branch");
+        git_output(&repository.0, &["checkout", "-b", "feature/current"])
+            .expect("checkout current branch");
+
+        let branches = preview_branch_prefix(&path, "feature").expect("preview prefix");
+        delete_branch_prefix(&path, "feature", &branches).expect("current branch is skipped");
+        assert_eq!(
+            preview_branch_prefix(&path, "feature").expect("preview remaining prefix"),
+            vec!["feature/current"]
+        );
+    }
+
+    #[test]
     fn reports_the_immediate_superproject_for_a_submodule() {
         let repository = test_repository();
         let submodule_source = test_repository();
@@ -4138,18 +4169,38 @@ mod tests {
 
         let submodule_path = repository.0.join("vendor/module");
         let snapshot = read_repository(&submodule_path.to_string_lossy()).expect("read submodule");
-        let expected_parent = repository
-            .0
-            .canonicalize()
-            .expect("canonical parent")
-            .to_string_lossy()
-            .replace('\\', "/");
+        let expected_parent = display_path(
+            &repository
+                .0
+                .canonicalize()
+                .expect("canonical parent"),
+        )
+        .replace('\\', "/");
         let actual_parent = snapshot
             .superproject_path
-            .expect("submodule should expose its superproject")
-            .replace('\\', "/");
+            .expect("submodule should expose its superproject");
+        assert!(
+            !actual_parent.contains(r"\\?\"),
+            "superproject path should be displayable: {actual_parent}"
+        );
 
-        assert_eq!(actual_parent, expected_parent);
+        assert_eq!(actual_parent.replace('\\', "/"), expected_parent);
+    }
+
+    #[test]
+    fn strips_the_windows_extended_length_prefix() {
+        assert_eq!(
+            display_path(Path::new(r"\\?\E:\code\Branchline")),
+            r"E:\code\Branchline"
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\repo")),
+            r"\\server\share\repo"
+        );
+        assert_eq!(
+            display_path(Path::new(r"E:\code\Branchline")),
+            r"E:\code\Branchline"
+        );
     }
 
     #[test]

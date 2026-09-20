@@ -10,6 +10,14 @@ describe('repositoryParentFromSnapshot', () => {
     })
   })
 
+  it('shows an extended-length superproject path in its ordinary spelling', () => {
+    expect(repositoryParentFromSnapshot({ superprojectPath: '\\\\?\\E:\\FONE\\mono-web' })).toEqual({
+      name: 'mono-web',
+      path: 'E:\\FONE\\mono-web',
+      branch: '',
+    })
+  })
+
   it('returns no target for a top-level repository', () => {
     expect(repositoryParentFromSnapshot({})).toBeNull()
   })

@@ -180,6 +180,13 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const rowsCache = useRef(new Map<string, RepositoryDiffLine[]>())
   const splitLeftRef = useRef<HTMLDivElement>(null)
   const splitRightRef = useRef<HTMLDivElement>(null)
+  // Mirroring one split pane onto the other makes the browser fire that pane's own scroll event. What
+  // that event reports is the offset the browser actually stored, which can differ from what was
+  // written, so an equality check against the other pane cannot tell the echo apart from a real user
+  // scroll. The requested offset is remembered per pane instead and the echo is recognised by it.
+  const splitScrollEcho = useRef<{ side: 'left' | 'right'; top: number } | null>(null)
+  const virtualScrollFrame = useRef(0)
+  const pendingVirtualScrollTop = useRef(0)
   useEffect(() => {
     setActiveFile(initialFile)
     setActiveChange(null)
@@ -299,28 +306,32 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     setActiveChange(null)
     setPendingJump(null)
     setVirtualScrollTop(0)
+    splitScrollEcho.current = null
     requestAnimationFrame(() => {
       if (codeDiffRef.current) codeDiffRef.current.scrollTop = 0
-      if (splitLeftRef.current) splitLeftRef.current.scrollTop = 0
-      if (splitRightRef.current) splitRightRef.current.scrollTop = 0
+      writeSplitScrollTop('left', 0)
+      writeSplitScrollTop('right', 0)
     })
   }, [scope, view])
   useEffect(() => {
     setVirtualScrollTop(0)
+    splitScrollEcho.current = null
     requestAnimationFrame(() => {
       if (codeDiffRef.current) codeDiffRef.current.scrollTop = 0
-      if (splitLeftRef.current) splitLeftRef.current.scrollTop = 0
-      if (splitRightRef.current) splitRightRef.current.scrollTop = 0
+      writeSplitScrollTop('left', 0)
+      writeSplitScrollTop('right', 0)
     })
   }, [activeFile])
   useEffect(() => {
     if (view !== 'split') return
     requestAnimationFrame(() => {
       const left = splitLeftRef.current
-      const right = splitRightRef.current
-      if (left && right) right.scrollTop = left.scrollTop
+      if (left) writeSplitScrollTop('right', left.scrollTop)
     })
   }, [activeFile, diffLoading, splitEntries.length, view])
+  useEffect(() => () => {
+    if (virtualScrollFrame.current) cancelAnimationFrame(virtualScrollFrame.current)
+  }, [])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'f') return
@@ -349,8 +360,25 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     event.preventDefault()
     setLineMenu({ rowIndex, side, line, code: row.code, x: event.clientX, y: event.clientY })
   }
+  // A wheel or drag produces several scroll events per frame, and each one re-rendered both panes'
+  // whole virtual window. Collapsing them to a single update per frame keeps the rows in step with
+  // what the compositor is painting instead of re-rendering ahead of it.
+  const queueVirtualScrollTop = (top: number) => {
+    pendingVirtualScrollTop.current = top
+    if (virtualScrollFrame.current) return
+    virtualScrollFrame.current = requestAnimationFrame(() => {
+      virtualScrollFrame.current = 0
+      setVirtualScrollTop(pendingVirtualScrollTop.current)
+    })
+  }
+  const writeSplitScrollTop = (side: 'left' | 'right', top: number) => {
+    const pane = side === 'left' ? splitLeftRef.current : splitRightRef.current
+    if (!pane || pane.scrollTop === top) return
+    pane.scrollTop = top
+    splitScrollEcho.current = { side, top }
+  }
   const handleCodeDiffScroll = (event: UIEvent<HTMLDivElement>) => {
-    setVirtualScrollTop(event.currentTarget.scrollTop)
+    queueVirtualScrollTop(event.currentTarget.scrollTop)
   }
   const scrollToVirtualEntry = (rowIndex: number) => {
     const offset = rowIndex * virtualRowHeight + (view === 'unified' ? virtualHeaderHeight : 0)
@@ -358,8 +386,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       const left = splitLeftRef.current
       const right = splitRightRef.current
       const top = Math.max(0, offset - (left?.clientHeight ?? right?.clientHeight ?? 400) / 2)
-      if (left) left.scrollTop = top
-      if (right) right.scrollTop = top
+      writeSplitScrollTop('left', top)
+      writeSplitScrollTop('right', top)
       setVirtualScrollTop(top)
       return
     }
@@ -388,10 +416,17 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const syncSplitScroll = (side: 'left' | 'right') => {
     if (view !== 'split') return
     const source = side === 'left' ? splitLeftRef.current : splitRightRef.current
-    const target = side === 'left' ? splitRightRef.current : splitLeftRef.current
-    if (!source || !target || target.scrollTop === source.scrollTop) return
-    target.scrollTop = source.scrollTop
-    setVirtualScrollTop(source.scrollTop)
+    if (!source) return
+    const top = source.scrollTop
+    if (splitScrollEcho.current?.side === side) {
+      // Our own mirrored write coming back: the panes already agree, so neither re-mirroring nor a
+      // re-render is needed.
+      splitScrollEcho.current = null
+      return
+    }
+    splitScrollEcho.current = null
+    writeSplitScrollTop(side === 'left' ? 'right' : 'left', top)
+    queueVirtualScrollTop(top)
   }
   const jumpSearch = (direction: -1 | 1) => {
     if (!searchMatches.length) return
@@ -465,8 +500,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
         {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">该文件没有可展示的文本差异</div>}
         {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div>}
         {canRenderLoadedRows && !diffError && view === 'split' && <div className="split-diff-panes">
-          <div ref={splitLeftRef} className="split-diff-pane split-left" aria-label="旧版本代码" onScroll={() => syncSplitScroll('left')}><div className="split-diff-content">{virtualized && <div style={{ height: virtualTopHeight }}/>} {splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))} {virtualized && <div style={{ height: virtualBottomHeight }}/>}</div></div>
-          <div ref={splitRightRef} className="split-diff-pane split-right" aria-label="新版本代码" onScroll={() => syncSplitScroll('right')}><div className="split-diff-content">{virtualized && <div style={{ height: virtualTopHeight }}/>} {splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'new'))} {virtualized && <div style={{ height: virtualBottomHeight }}/>}</div></div>
+          <div ref={splitLeftRef} className="split-diff-pane split-left" aria-label="旧版本代码" onScroll={() => syncSplitScroll('left')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))}</div></div>
+          <div ref={splitRightRef} className="split-diff-pane split-right" aria-label="新版本代码" onScroll={() => syncSplitScroll('right')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'new'))}</div></div>
         </div>}
       </div>
     </div>

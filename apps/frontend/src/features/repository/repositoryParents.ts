@@ -1,4 +1,5 @@
 import type { RepositorySnapshot } from '../../repository'
+import { displayRepositoryPath } from './repositoryPaths'
 
 export type RepositoryParent = {
   name: string
@@ -7,7 +8,7 @@ export type RepositoryParent = {
 }
 
 export function repositoryParentFromSnapshot(snapshot: Pick<RepositorySnapshot, 'superprojectPath'>): RepositoryParent | null {
-  const path = snapshot.superprojectPath?.trim()
+  const path = displayRepositoryPath(snapshot.superprojectPath ?? '')
   if (!path) return null
   return {
     name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,

@@ -418,6 +418,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
 
+/* The virtual rows are offset with padding, and the global border-box reset would fold that padding
+   into `min-height` — leaving the pane with no scrollable overflow at all. */
+.split-diff-content.virtual-diff-list, .unified-diff-content.virtual-diff-list { box-sizing: content-box; }
+
 .split-code-side { position: relative; width: max-content; min-width: 100%; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
 .diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: 10ch 2ch minmax(max-content, 1fr); }

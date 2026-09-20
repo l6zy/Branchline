@@ -45,7 +45,7 @@ type RepositoryQuickSwitcherProps = {
   openingRepository: boolean
   openSignal: number
   onOpenRepository: () => void
-  onOpenRepositoryPath: (path: string, preserveTrail?: boolean) => void
+  onOpenRepositoryPath: (path: string) => void
   onOpenSubmodulePath: (path: string) => void
   onReturnToParentRepository: () => void
 }
@@ -117,7 +117,7 @@ export function RepositoryQuickSwitcher({ repository, parentRepository, recentRe
     closeSwitcher()
     if (target.source === 'current') return
     if (target.navigation === 'submodule') onOpenSubmodulePath(target.path)
-    else onOpenRepositoryPath(target.path, target.navigation === 'worktree')
+    else onOpenRepositoryPath(target.path)
   }
 
   const toggleFavorite = (target: RepositorySwitchTarget) => {

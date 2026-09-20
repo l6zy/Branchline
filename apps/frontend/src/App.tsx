@@ -18,6 +18,7 @@ import { RepositoryStructurePanel, type StructureView } from './features/reposit
 import { RepositoryStructureTree } from './features/repository/RepositoryStructureTree'
 import { RepositoryQuickSwitcher } from './features/repository/RepositoryQuickSwitcher'
 import { resolveRepositoryStructureSelection, type RepositoryStructureSelection } from './features/repository/repositoryTree'
+import { isRepositoryDescendant, sameRepositoryPath } from './features/repository/repositoryPaths'
 import { StashPage } from './features/stash/StashPage'
 import { RebaseDialog } from './features/operation/RebaseDialog'
 import { CherryPickDialog } from './features/operation/CherryPickDialog'
@@ -256,7 +257,7 @@ type SidebarProps = {
   structureSelection: RepositoryStructureSelection
   repositorySwitcherSignal: number
   onOpenRepository: () => void
-  onOpenRepositoryPath: (path: string, preserveTrail?: boolean) => void
+  onOpenRepositoryPath: (path: string) => void
   onOpenSubmodulePath: (path: string) => void
   onReturnToParentRepository: () => void
   onCreateBranch: (prefix?: string) => void
@@ -283,7 +284,7 @@ function Sidebar({ repository, structureRepository, parentRepository, recentRepo
     <nav>{repository ? <>
       <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>提交图谱</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>暂存与提交</span><span className="nav-badge">{repository.files.length}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>Stash 管理</span></button></div>
       <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} worktreeBranches={Object.fromEntries(repository.worktrees.filter((worktree) => worktree.branch && worktree.path.replace(/[\\/]+$/, '').toLocaleLowerCase() !== repository.path.replace(/[\\/]+$/, '').toLocaleLowerCase()).map((worktree) => [worktree.branch as string, worktree.path]))} currentBranch={repository.branch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
-      <RepositoryStructureTree repository={structureRepository ?? repository} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path, true) }}/>
+      <RepositoryStructureTree repository={structureRepository ?? repository} activePath={repository.path} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path) }}/>
       <div className="nav-section structure-tags-section"><button className={`nav-row ${activeView === 'tags' ? 'active' : ''}`} onClick={() => onSelectView('tags')}><Tag size={15}/><span>标签</span><span className="nav-badge muted">{repository.tags.length}</span></button></div>
     </> : <div className="sidebar-empty-state"><FolderOpen size={24}/><strong>尚未打开仓库</strong><span>打开本地 Git 仓库后，这里会显示分支、Worktree 和 Submodule。</span><button onClick={onOpenRepository} disabled={openingRepository}>{openingRepository ? '正在打开…' : '打开仓库'}</button></div>}</nav>
     <div className="sidebar-footer"><button className="profile" onClick={onOpenGitConfig} title="打开本地 Git 配置"><AppMark className="app-brand-mark"/><div><strong>Branchline</strong><span>本地 Git 配置</span></div><Settings2 size={15}/></button><button className="sidebar-command-log" onClick={onOpenCommandLog} title="查看执行命令日志"><TerminalSquare size={14}/><span>执行命令日志</span></button></div>
@@ -833,7 +834,13 @@ export default function App() {
     setWorkspaceView('history')
   }
   const handleOpenRepository = async () => handleOpenSnapshot(await openRepository())
-  const handleOpenRepositoryPath = async (path: string, preserveTrail = false) => handleOpenSnapshot(await openRepositoryPath(path, preserveTrail))
+  const handleOpenRepositoryPath = async (path: string) => {
+    // Reopening the repository the sidebar already describes must not reset its structure selection.
+    const keepsStructure = sameRepositoryPath(path, structureRepository?.path ?? null)
+    const snapshot = await openRepositoryPath(path)
+    if (snapshot && !keepsStructure) setStructureSelection({ kind: 'root' })
+    handleOpenSnapshot(snapshot)
+  }
   const handleOpenSubmodulePath = async (path: string) => {
     if (structureRepository) {
       const root = structureRepository.path.replace(/[\\/]+$/, '')
@@ -847,6 +854,20 @@ export default function App() {
   }
   const handleReturnToParentRepository = async () => {
     const snapshot = await returnToParentRepository()
+    if (snapshot) setStructureSelection({ kind: 'root' })
+    handleOpenSnapshot(snapshot)
+  }
+  // The sidebar keeps describing the superproject while a submodule is open, so its root is one
+  // click away even from a submodule nested several levels deep.
+  const rootRepository = repository && structureRepository
+    && !sameRepositoryPath(structureRepository.path, repository.path)
+    && !sameRepositoryPath(structureRepository.path, parentRepository?.path)
+    && isRepositoryDescendant(repository.path, structureRepository.path)
+    ? structureRepository
+    : null
+  const handleReturnToRootRepository = async () => {
+    if (!rootRepository) return
+    const snapshot = await openRepositoryPath(rootRepository.path)
     if (snapshot) setStructureSelection({ kind: 'root' })
     handleOpenSnapshot(snapshot)
   }
@@ -1232,7 +1253,7 @@ export default function App() {
     <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" aria-label="拖动调整左侧面板宽度" onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
     <div className={`workspace ${repository ? '' : 'empty-repository'}`}>
       {repository && <header className="topbar">
-        <div className="branch-context">{sidebarCollapsed && <Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed(false)} title="展开左侧面板"><PanelLeftOpen size={17}/></Button>}{parentRepository && <button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} title={`返回父仓库：${parentRepository.path}`}><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button>}{repository ? <GitBranch size={16}/> : <FolderOpen size={16}/>}<strong>{repository?.branch ?? '未打开仓库'}</strong></div>
+        <div className="branch-context">{sidebarCollapsed && <Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed(false)} title="展开左侧面板"><PanelLeftOpen size={17}/></Button>}{parentRepository && <button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} title={`返回父仓库：${parentRepository.path}`}><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button>}{rootRepository && <button className="parent-repository-chip root-repository-chip" onClick={() => void handleReturnToRootRepository()} title={`返回主仓库：${rootRepository.path}`}><FolderGit2 size={13}/><span>主仓库 · {rootRepository.name}</span></button>}{repository ? <GitBranch size={16}/> : <FolderOpen size={16}/>}<strong>{repository?.branch ?? '未打开仓库'}</strong></div>
           <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && workspaceView === 'history') { event.preventDefault(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={workspaceView === 'tags' ? '搜索标签名称…' : repository ? '搜索提交信息、Hash 或提交人…' : '打开仓库后可搜索提交'} disabled={!repository}/>{query ? <><span className="search-result-count">{workspaceView === 'tags' ? `${tagSearchCount} 个标签` : searchSummary.total ? `${searchSummary.current || 1}/${searchSummary.total}` : '0/0'}</span>{workspaceView === 'history' && <><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 }))} disabled={!searchSummary.total} title="上一个匹配"><ChevronUp size={13}/></button><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 }))} disabled={!searchSummary.total} title="下一个匹配"><ChevronDown size={13}/></button><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} title={searchMode === 'locate' ? '切换为仅显示匹配提交' : '保留完整图谱并定位匹配提交'}><ListFilter size={13}/></button></>}<button type="button" onClick={() => setQuery('')} title="清除搜索"><X size={13}/></button></> : <kbd>⌘ F</kbd>}</div>
           <div className="top-actions">
             <Button variant="icon" onClick={() => setShortcutOpen(true)} title="查看快捷键"><Command size={17}/></Button>
@@ -1287,9 +1308,10 @@ export default function App() {
         {(workspaceView === 'structure' || workspaceView === 'tags') && (
           <RepositoryStructurePanel
             repository={structureRepository ?? repository}
+            activePath={repository.path}
             view={workspaceView}
             selection={structureSelection}
-            onOpenPath={(path, kind) => void (kind === 'submodule' ? handleOpenSubmodulePath(path) : handleOpenRepositoryPath(path, true))}
+            onOpenPath={(path, kind) => void (kind === 'submodule' ? handleOpenSubmodulePath(path) : handleOpenRepositoryPath(path))}
             onOpenTag={handleJumpTag}
             query={query}
             onSnapshot={applyStructureSnapshot}

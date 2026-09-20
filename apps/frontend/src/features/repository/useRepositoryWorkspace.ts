@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchRepository,
   loadRepository,
@@ -15,11 +15,14 @@ import {
   normalizeRepositoryRefreshSettings,
   type RepositoryRefreshSettings,
 } from './repositoryRefreshSettings'
+import { repositoryCacheKey } from './repositoryPaths'
 
 const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
 const STARTUP_REPOSITORY_KEY = 'branchline.startupRepository.v1'
 const AUTO_FETCH_SETTINGS_KEY = 'branchline.autoFetchSettings.v1'
 const NOTICE_DURATION = 5 * 1000
+const SNAPSHOT_CACHE_LIMIT = 12
+const NAVIGATION_FETCH_INTERVAL = 60 * 1000
 
 export type AutoFetchSettings = RepositoryRefreshSettings
 
@@ -63,10 +66,14 @@ export function useRepositoryWorkspace() {
   const [noticeVersion, setNoticeVersion] = useState(0)
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null)
   const [autoFetchSettings, setAutoFetchSettings] = useState<AutoFetchSettings>(readAutoFetchSettings)
-  const [repositoryTrail, setRepositoryTrail] = useState<RepositoryParent[]>([])
   const fetchInProgress = useRef(false)
   const stateRefreshInProgress = useRef(false)
-  const repositoryStateToken = useRef<{ path: string; token: string } | null>(null)
+  // The snapshot last shown for a repository, so revisiting it repaints without waiting for Git.
+  const snapshotCache = useRef(new Map<string, RepositorySnapshot>())
+  // The state token that matches the cached snapshot, used to detect drift after coming back.
+  const repositoryTokens = useRef(new Map<string, string>())
+  const navigationFetchedAt = useRef(new Map<string, number>())
+  const navigationSequence = useRef(0)
   const initialRestoreStarted = useRef(false)
   const noticeTimer = useRef<number | null>(null)
   const noticeStartedAt = useRef(0)
@@ -137,36 +144,94 @@ export function useRepositoryWorkspace() {
     })
   }, [])
 
+  const cacheSnapshot = useCallback((snapshot: RepositorySnapshot) => {
+    const key = repositoryCacheKey(snapshot.path)
+    // Reapplying the exact cached snapshot keeps its state token, so drift is still detected.
+    if (snapshotCache.current.get(key) !== snapshot) repositoryTokens.current.delete(key)
+    snapshotCache.current.delete(key)
+    snapshotCache.current.set(key, snapshot)
+    while (snapshotCache.current.size > SNAPSHOT_CACHE_LIMIT) {
+      const oldest = snapshotCache.current.keys().next().value
+      if (oldest === undefined) break
+      snapshotCache.current.delete(oldest)
+      repositoryTokens.current.delete(oldest)
+    }
+  }, [])
+
   const applySnapshot = useCallback((snapshot: RepositorySnapshot, notice?: string) => {
+    cacheSnapshot(snapshot)
     setRepository(snapshot)
     setStructureRepository((current) => {
       if (!current || current.path.toLowerCase() === snapshot.path.toLowerCase() || !snapshot.superprojectPath) return snapshot
       return current
     })
     if (notice) setRepositoryNotice(notice)
-  }, [setRepositoryNotice])
+  }, [cacheSnapshot, setRepositoryNotice])
 
   const applyStructureSnapshot = useCallback((snapshot: RepositorySnapshot) => {
+    cacheSnapshot(snapshot)
     setStructureRepository(snapshot)
     setRepository((current) => current?.path.toLowerCase() === snapshot.path.toLowerCase() ? snapshot : current)
-  }, [])
+  }, [cacheSnapshot])
 
-  const loadExplicitRepository = useCallback(async (path: string) => {
-    const loaded = await loadRepository(path)
-    try { return await fetchRepository(loaded.path) } catch { return loaded }
-  }, [])
+  // Refreshes whichever panes already show this repository without touching navigation state.
+  const applyRefreshedSnapshot = useCallback((snapshot: RepositorySnapshot) => {
+    const key = repositoryCacheKey(snapshot.path)
+    cacheSnapshot(snapshot)
+    setRepository((current) => current && repositoryCacheKey(current.path) === key ? snapshot : current)
+    setStructureRepository((current) => current && repositoryCacheKey(current.path) === key ? snapshot : current)
+  }, [cacheSnapshot])
 
-  const openRepositoryPath = useCallback(async (path: string, preserveTrail = false) => {
+  // Remote refs are refreshed after the snapshot is painted, so navigation never waits for the network.
+  const startBackgroundFetch = useCallback((path: string) => {
+    if (fetchInProgress.current) return false
+    const key = repositoryCacheKey(path)
+    const now = Date.now()
+    if ((navigationFetchedAt.current.get(key) ?? 0) + NAVIGATION_FETCH_INTERVAL > now) return false
+    const sequence = navigationSequence.current
+    navigationFetchedAt.current.set(key, now)
+    fetchInProgress.current = true
+    setFetching(true)
+    void fetchRepository(path)
+      .then((snapshot) => {
+        if (sequence !== navigationSequence.current) return
+        setLastFetchAt(Date.now())
+        applyRefreshedSnapshot(snapshot)
+      })
+      .catch(() => {
+        navigationFetchedAt.current.delete(key)
+      })
+      .finally(() => {
+        fetchInProgress.current = false
+        setFetching(false)
+      })
+    return true
+  }, [applyRefreshedSnapshot])
+
+  const navigateToRepository = useCallback(async (path: string, notice: (snapshot: RepositorySnapshot) => string) => {
+    const sequence = ++navigationSequence.current
+    const key = repositoryCacheKey(path)
+    const cached = snapshotCache.current.get(key)
+    if (cached) {
+      applySnapshot(cached, notice(cached))
+      const fetching = startBackgroundFetch(cached.path)
+      // Without a state token the polling loop cannot tell whether the cached snapshot drifted.
+      if (!fetching && !repositoryTokens.current.has(key)) {
+        void loadRepository(cached.path)
+          .then((snapshot) => {
+            if (sequence === navigationSequence.current) applyRefreshedSnapshot(snapshot)
+          })
+          .catch(() => undefined)
+      }
+      return cached
+    }
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await loadExplicitRepository(path)
-      if (!preserveTrail) {
-        const parent = repositoryParentFromSnapshot(snapshot)
-        setRepositoryTrail(parent ? [parent] : [])
-      }
-      applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
-      rememberRepository(snapshot)
+      const snapshot = await loadRepository(path)
+      if (sequence !== navigationSequence.current) return null
+      applySnapshot(snapshot, notice(snapshot))
+      startBackgroundFetch(snapshot.path)
       return snapshot
     } catch (error) {
       setRepositoryNotice(error instanceof Error ? error.message : String(error))
@@ -174,52 +239,27 @@ export function useRepositoryWorkspace() {
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot, loadExplicitRepository, rememberRepository])
+  }, [applyRefreshedSnapshot, applySnapshot, setRepositoryNotice, startBackgroundFetch])
 
-  const openSubmodulePath = useCallback(async (path: string) => {
-    setOpeningRepository(true)
-    setRepositoryNotice(null)
-    try {
-      const snapshot = await loadExplicitRepository(path)
-      if (repository && repository.path.toLowerCase() !== snapshot.path.toLowerCase()) {
-        setRepositoryTrail((current) => [...current, {
-          name: repository.name,
-          path: repository.path,
-          branch: repository.branch,
-        }])
-      }
-      applySnapshot(snapshot, `已进入 Submodule：${snapshot.name}`)
-      return snapshot
-    } catch (error) {
-      setRepositoryNotice(error instanceof Error ? error.message : String(error))
-      return null
-    } finally {
-      setOpeningRepository(false)
-    }
-  }, [applySnapshot, loadExplicitRepository, repository])
+  const openRepositoryPath = useCallback(async (path: string) => {
+    const snapshot = await navigateToRepository(path, (loaded) => `已打开仓库：${loaded.name}`)
+    if (snapshot) rememberRepository(snapshot)
+    return snapshot
+  }, [navigateToRepository, rememberRepository])
+
+  const openSubmodulePath = useCallback(
+    (path: string) => navigateToRepository(path, (snapshot) => `已进入 Submodule：${snapshot.name}`),
+    [navigateToRepository],
+  )
+
+  // The parent is read from the working tree's superproject, so hopping between sibling submodules
+  // always resolves to the repository that actually contains the current one.
+  const parentRepository = useMemo(() => repository ? repositoryParentFromSnapshot(repository) : null, [repository])
 
   const returnToParentRepository = useCallback(async () => {
-    const parent = repositoryTrail[repositoryTrail.length - 1]
-    if (!parent) return null
-    setOpeningRepository(true)
-    setRepositoryNotice(null)
-    try {
-      const snapshot = await loadExplicitRepository(parent.path)
-      setRepositoryTrail((current) => {
-        const remaining = current.slice(0, -1)
-        if (remaining.length) return remaining
-        const detectedParent = repositoryParentFromSnapshot(snapshot)
-        return detectedParent ? [detectedParent] : []
-      })
-      applySnapshot(snapshot, `已返回父仓库：${snapshot.name}`)
-      return snapshot
-    } catch (error) {
-      setRepositoryNotice(error instanceof Error ? error.message : String(error))
-      return null
-    } finally {
-      setOpeningRepository(false)
-    }
-  }, [applySnapshot, loadExplicitRepository, repositoryTrail])
+    if (!parentRepository) return null
+    return navigateToRepository(parentRepository.path, (snapshot) => `已返回父仓库：${snapshot.name}`)
+  }, [navigateToRepository, parentRepository])
 
   const openRepository = useCallback(async () => {
     setOpeningRepository(true)
@@ -227,20 +267,18 @@ export function useRepositoryWorkspace() {
     try {
       const snapshot = await pickAndLoadRepository()
       if (!snapshot) return null
-      let refreshed = snapshot
-      try { refreshed = await fetchRepository(snapshot.path) } catch { /* keep loaded snapshot when fetch is unavailable */ }
-      const parent = repositoryParentFromSnapshot(refreshed)
-      setRepositoryTrail(parent ? [parent] : [])
-      applySnapshot(refreshed, `已打开仓库：${refreshed.name}`)
-      rememberRepository(refreshed)
-      return refreshed
+      navigationSequence.current += 1
+      applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
+      rememberRepository(snapshot)
+      startBackgroundFetch(snapshot.path)
+      return snapshot
     } catch (error) {
       setRepositoryNotice(error instanceof Error ? error.message : String(error))
       return null
     } finally {
       setOpeningRepository(false)
     }
-  }, [applySnapshot, rememberRepository])
+  }, [applySnapshot, rememberRepository, setRepositoryNotice, startBackgroundFetch])
 
   useEffect(() => {
     if (initialRestoreStarted.current) return
@@ -253,8 +291,6 @@ export function useRepositoryWorkspace() {
     setOpeningRepository(true)
     loadRepository(previousRepository.path)
       .then((snapshot) => {
-        const parent = repositoryParentFromSnapshot(snapshot)
-        setRepositoryTrail(parent ? [parent] : [])
         applySnapshot(snapshot)
         rememberRepository(snapshot)
       })
@@ -271,7 +307,8 @@ export function useRepositoryWorkspace() {
     setFetching(true)
     try {
       const snapshot = await fetchRepository(repository.path)
-      setRepository(snapshot)
+      navigationFetchedAt.current.set(repositoryCacheKey(snapshot.path), Date.now())
+      applyRefreshedSnapshot(snapshot)
       setLastFetchAt(Date.now())
       if (!quiet) setRepositoryNotice('Fetch 完成，远程引用已更新')
       return snapshot
@@ -282,7 +319,7 @@ export function useRepositoryWorkspace() {
       fetchInProgress.current = false
       setFetching(false)
     }
-  }, [repository])
+  }, [applyRefreshedSnapshot, repository, setRepositoryNotice])
 
   useEffect(() => {
     if (!repository || !autoFetchSettings.enabled) return
@@ -292,10 +329,8 @@ export function useRepositoryWorkspace() {
 
   useEffect(() => {
     const repositoryPath = repository?.path
-    if (!repositoryPath) {
-      repositoryStateToken.current = null
-      return
-    }
+    if (!repositoryPath) return
+    const key = repositoryCacheKey(repositoryPath)
     let cancelled = false
     const synchronizeLocalState = async () => {
       if (document.hidden || stateRefreshInProgress.current) return
@@ -303,17 +338,16 @@ export function useRepositoryWorkspace() {
       try {
         const token = await loadRepositoryStateToken(repositoryPath)
         if (cancelled) return
-        const previous = repositoryStateToken.current
-        if (!previous || previous.path !== repositoryPath) {
-          repositoryStateToken.current = { path: repositoryPath, token }
+        const previous = repositoryTokens.current.get(key)
+        if (previous === token) return
+        if (previous === undefined) {
+          repositoryTokens.current.set(key, token)
           return
         }
-        if (previous.token === token) return
         const snapshot = await loadRepository(repositoryPath)
-        if (!cancelled) {
-          repositoryStateToken.current = { path: repositoryPath, token }
-          setRepository((current) => current?.path === repositoryPath ? snapshot : current)
-        }
+        if (cancelled) return
+        applyRefreshedSnapshot(snapshot)
+        repositoryTokens.current.set(key, token)
       } catch {
         // A transient lock or an in-progress external Git operation is retried on the next poll.
       } finally {
@@ -335,7 +369,7 @@ export function useRepositoryWorkspace() {
       window.removeEventListener('focus', synchronizeWhenVisible)
       document.removeEventListener('visibilitychange', synchronizeWhenVisible)
     }
-  }, [autoFetchSettings.localPollingEnabled, autoFetchSettings.localPollingIntervalSeconds, repository?.path])
+  }, [applyRefreshedSnapshot, autoFetchSettings.localPollingEnabled, autoFetchSettings.localPollingIntervalSeconds, repository?.path])
 
   const updateAutoFetchSettings = useCallback((next: Partial<AutoFetchSettings>) => {
     setAutoFetchSettings((current) => {
@@ -368,7 +402,7 @@ export function useRepositoryWorkspace() {
     pauseRepositoryNotice,
     resumeRepositoryNotice,
     lastFetchAt,
-    parentRepository: repositoryTrail[repositoryTrail.length - 1] ?? null,
+    parentRepository,
     setRepositoryNotice,
     applySnapshot,
     applyStructureSnapshot,

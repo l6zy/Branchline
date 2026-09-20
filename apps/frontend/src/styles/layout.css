@@ -66,6 +66,9 @@
 
 .parent-repository-chip:hover { border-color: var(--accent); }
 
+.root-repository-chip { color: var(--text-secondary); background: transparent; }
+
+
 .content-tabs { padding: 0 14px; display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--border-strong); background: var(--surface-chrome); container-type: inline-size; }
 
 .content-tabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }

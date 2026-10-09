@@ -322,7 +322,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .empty-search span { font-size: 12px; }
 
-.detail-heading { display: flex; align-items: flex-start; justify-content: space-between; }
+.detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.detail-heading > div:first-child { min-width: 0; flex: 1; }
+.detail-heading h2 { overflow-wrap: anywhere; }
+.detail-heading-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.detail-heading-actions .button-icon { width: 28px; min-width: 28px; flex: 0 0 28px; }
 
 .eyebrow { display: block; margin-bottom: 5px; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 

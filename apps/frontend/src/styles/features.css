@@ -167,11 +167,13 @@
 
 .changed-files-list button.active { background: var(--accent-dim); box-shadow: inset 2px 0 var(--accent); }
 
-.diff-panel { min-height: 0; display: grid; grid-template-rows: 41px 1fr; overflow: hidden; }
+.diff-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 
-.diff-toolbar { padding: 0 10px 0 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--code-border); background: var(--panel); }
+.diff-toolbar { flex-wrap: wrap; min-width: 0; min-height: 41px; padding: 5px 10px 5px 14px; display: flex; align-items: center; gap: 6px 10px; border-bottom: 1px solid var(--code-border); background: var(--panel); }
+.diff-toolbar > :not(.diff-search-bar) { flex-shrink: 0; }
+.diff-close-control { margin-left: auto; }
 
-.diff-search-bar { min-width: 180px; max-width: 330px; height: 28px; padding: 2px 4px 2px 7px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); }
+.diff-search-bar { flex: 1 1 180px; min-width: min(180px, 100%); max-width: 330px; height: 28px; padding: 2px 4px 2px 7px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); }
 
 .diff-search-bar input { min-width: 0; flex: 1; height: 22px; padding: 0 2px; border: 0; outline: 0; color: var(--text); background: transparent; font: 11px var(--font-code); }
 
@@ -1073,14 +1075,14 @@
 
 .git-config-template-field textarea { min-height: 148px; margin-top: 10px; padding: 9px; }
 
-.stage-section-header { min-height: 43px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line-soft); background: var(--panel-2); }
+.stage-section-header { grid-template-columns: auto minmax(0, 1fr) auto; min-height: 43px; padding: 0 9px; display: grid; align-items: center; gap: 8px; border-bottom: 1px solid var(--line-soft); background: var(--panel-2); }
 .stage-section-toggle { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
 .stage-section-toggle:hover { color: var(--text); background: var(--panel-3); }
 .stage-section-toggle svg { transition: transform .18s ease; }
 .stage-section.collapsed .stage-section-toggle svg { transform: rotate(-90deg); }
 .stage-section.collapsed .stage-section-header { border-bottom-color: transparent; }
 
-.stage-section-name { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.stage-section-name { grid-column: 2; min-width: 0; display: flex; align-items: center; gap: 8px; }
 
 .stage-section-name > div { min-width: 0; display: grid; gap: 2px; }
 
@@ -1101,6 +1103,7 @@
 .unstaged-section .stage-section-count { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
 
 .stage-section-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.stage-section-actions, .stage-section-hint { grid-column: 3; }
 
 .stage-section-actions button { min-height: 25px; padding: 4px 6px; display: flex; align-items: center; gap: 4px; border: 0; border-radius: 5px; color: var(--accent); background: transparent; font-size: 10px; cursor: pointer; }
 

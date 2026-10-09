@@ -5,7 +5,10 @@ const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 const tokens = readFileSync(new URL('./styles/tokens.css', import.meta.url), 'utf8')
 const components = readFileSync(new URL('./styles/components.css', import.meta.url), 'utf8')
 const features = readFileSync(new URL('./styles/features.css', import.meta.url), 'utf8')
+const layout = readFileSync(new URL('./styles/layout.css', import.meta.url), 'utf8')
 const themeOverrides = readFileSync(new URL('./styles/theme-overrides.css', import.meta.url), 'utf8')
+const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+const diffPanel = readFileSync(new URL('./features/diff/DiffPanel.tsx', import.meta.url), 'utf8')
 
 describe('semantic style architecture', () => {
   it('loads styles through explicit cascade layers', () => {
@@ -53,5 +56,49 @@ describe('semantic style architecture', () => {
     const searchMatchRule = features.match(/\.commit-row\.search-match \{[^}]+\}/)?.[0] ?? ''
     expect(fileHeaderRule).toContain('background: var(--code-surface);')
     expect(searchMatchRule).toContain('box-shadow: inset 3px 0')
+  })
+
+  it('places the diff close control at the far end of the toolbar', () => {
+    const closeRule = features.match(/\.diff-close-control \{[^}]+\}/)?.[0] ?? ''
+    expect(closeRule).toContain('margin-left: auto;')
+  })
+
+  it('keeps the cherry-pick progress indicator above its dialog', () => {
+    expect(layout).toContain('.operation-indicator.cherry-pick { z-index: 1201; }')
+    expect(app).toContain("activeOperation?.key === 'cherry-pick' ? 'cherry-pick' : ''")
+  })
+
+  it('omits branch navigation and switching from the branch context menu', () => {
+    const branchMenu = app.match(/\{contextBranch && <ContextMenu[\s\S]*?\n    <\/ContextMenu>\}/)?.[0] ?? ''
+    expect(branchMenu).not.toContain('定位到分支提交')
+    expect(branchMenu).not.toContain('切换到该分支')
+  })
+
+  it('closes the notifications popover on outside pointer input', () => {
+    expect(app).toContain("document.addEventListener('pointerdown'")
+    expect(app).toContain('notificationButtonRef.current?.contains(event.target as Node)')
+    expect(app).toContain('notificationPopoverRef.current?.contains(event.target as Node)')
+  })
+
+  it('keeps all diff toolbar actions reachable when search is open', () => {
+    expect(features).toContain('.diff-toolbar { flex-wrap: wrap;')
+    expect(features).toContain('.diff-search-bar { flex: 1 1 180px;')
+  })
+
+  it('aligns staging section labels independently from their action buttons', () => {
+    expect(features).toContain('.stage-section-header { grid-template-columns: auto minmax(0, 1fr) auto;')
+    expect(features).toContain('.stage-section-name { grid-column: 2;')
+  })
+
+  it('renders diff file paths without a decorative leading arrow', () => {
+    expect(diffPanel).not.toContain('<ChevronDown size={14}/><code title={activeFileInfo?.path}')
+  })
+
+  it('opens commit details from a selected row and closes them from the panel', () => {
+    expect(app).toContain("usePersistentState('branchline.inspectorCollapsed.v2', true")
+    expect(app).toContain('onSelect={(id) => { setSelected(id); setInspectorCollapsed(false) }}')
+    expect(app).toContain('onClose={() => setInspectorCollapsed(true)}')
+    expect(app).toContain('className="detail-heading-actions"')
+    expect(app).not.toContain('title={inspectorCollapsed ? \'展开右侧面板\' : \'收起右侧面板\'}')
   })
 })

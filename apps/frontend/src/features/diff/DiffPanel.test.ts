@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildStagePatch, changeBlock, shouldRenderLoadedRows } from './DiffPanel'
+import { buildStagePatch, changeBlock, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
+
+describe('shouldJumpToFirstChange', () => {
+  it('jumps to the first change when opening the full-file view', () => {
+    expect(shouldJumpToFirstChange('file', 'file-a', null)).toBe(true)
+  })
+
+  it('does not jump twice for the same file activation', () => {
+    expect(shouldJumpToFirstChange('file', 'file-a', 'file-a')).toBe(false)
+  })
+
+  it('does not jump in changes-only mode', () => {
+    expect(shouldJumpToFirstChange('changes', 'file-a', null)).toBe(false)
+  })
+
+  it('preserves a pending cross-file navigation target', () => {
+    expect(shouldJumpToFirstChange('file', 'file-b', 'file-a', true, true)).toBe(false)
+    // The explicit jump consumes this activation even after pending navigation clears.
+    expect(shouldJumpToFirstChange('file', 'file-b', 'file-b', false, true)).toBe(false)
+  })
+
+  it('waits for the current staged scope before consuming a new activation', () => {
+    const previousIdentity = 'staged\0file.ts'
+    const activeIdentity = 'unstaged\0file.ts'
+    const oldRowsReady = shouldRenderLoadedRows(true, previousIdentity, activeIdentity)
+    expect(shouldJumpToFirstChange('file', activeIdentity, previousIdentity, false, oldRowsReady)).toBe(false)
+    const currentRowsReady = shouldRenderLoadedRows(true, activeIdentity, activeIdentity)
+    expect(shouldJumpToFirstChange('file', activeIdentity, previousIdentity, false, currentRowsReady)).toBe(true)
+  })
+})
 
 describe('buildStagePatch', () => {
   it('uses the previous old line for an insertion-only hunk', () => {

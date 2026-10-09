@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
-import { AlignJustify, ArrowDown, ArrowUp, ChevronDown, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, ScanText, Search, X } from 'lucide-react'
+import { AlignJustify, ArrowDown, ArrowUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, ScanText, Search, X } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile } from '../../repository'
@@ -65,6 +65,11 @@ const EMPTY_DIFF_ROWS: RepositoryDiffLine[] = []
 export function shouldRenderLoadedRows(usesLoader: boolean, loadedIdentity: string | null, activeIdentity: string | null) {
   return !usesLoader || Boolean(activeIdentity && loadedIdentity === activeIdentity)
 }
+
+export function shouldJumpToFirstChange(scope: 'file' | 'changes', identity: string, previousIdentity: string | null, hasPendingJump = false, canRenderRows = true) {
+  return scope === 'file' && !hasPendingJump && canRenderRows && identity !== previousIdentity
+}
+
 
 const isFileMode = (value: unknown): value is 'list' | 'tree' => value === 'list' || value === 'tree'
 const isDiffView = (value: unknown): value is 'unified' | 'split' => value === 'unified' || value === 'split'
@@ -161,7 +166,6 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [fileMode, setFileMode] = usePersistentState('branchline.diffFileMode.v1', 'list', isFileMode)
   const [collapsedFolders, setCollapsedFolders] = usePersistentState('branchline.diffCollapsedFolders.v1', {}, isBooleanRecord)
   const [repositoryRows, setRepositoryRows] = useState<RepositoryDiffLine[]>([])
-  const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
   const [loadedFileIdentity, setLoadedFileIdentity] = useState<string | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
   const [diffError, setDiffError] = useState<string | null>(null)
@@ -169,6 +173,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [lineMenu, setLineMenu] = useState<{ rowIndex: number; side: DiffLineSide; line: number; code: string; x: number; y: number } | null>(null)
   const [activeChange, setActiveChange] = useState<{ fileIndex: number; rowIndex: number } | null>(null)
   const [pendingJump, setPendingJump] = useState<PendingDiffJump | null>(null)
+  const autoJumpIdentity = useRef<string | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
@@ -200,7 +205,6 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const loader = loadRows ?? (repositoryPath ? (path: string) => loadRepositoryFileDiff(repositoryPath, path) : null)
     if (!file || !loader) {
       setRepositoryRows([])
-      setLoadedFilePath(null)
       setLoadedFileIdentity(null)
       setDiffError(null)
       setDiffLoading(false)
@@ -211,7 +215,6 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const cachedRows = rowsCache.current.get(cacheKey)
     if (cachedRows) {
       setRepositoryRows(cachedRows)
-      setLoadedFilePath(file.path)
       setLoadedFileIdentity(fileIdentity)
       setDiffError(null)
       setDiffLoading(false)
@@ -221,8 +224,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     setDiffLoading(true)
     setDiffError(null)
     loader(file.path, activeFile)
-      .then((rows) => { if (!cancelled) { rowsCache.current.set(cacheKey, rows); setRepositoryRows(rows); setLoadedFilePath(file.path); setLoadedFileIdentity(fileIdentity) } })
-      .catch((error) => { if (!cancelled) { setDiffError(error instanceof Error ? error.message : String(error)); setLoadedFilePath(file.path) } })
+      .then((rows) => { if (!cancelled) { rowsCache.current.set(cacheKey, rows); setRepositoryRows(rows); setLoadedFileIdentity(fileIdentity) } })
+      .catch((error) => { if (!cancelled) setDiffError(error instanceof Error ? error.message : String(error)) })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
   }, [activeFile, files, loadRows, reloadKey, repositoryPath, viewKey])
@@ -454,9 +457,10 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     activateFile(adjacentFile(activeFile, direction))
   }
   useEffect(() => {
-    if (!pendingJump || diffLoading || !activeFileInfo) return
-    if (usesLoader && loadedFilePath !== activeFileInfo.path) return
+    if (!pendingJump || diffLoading || !activeFileInfo || !activeFileIdentity) return
+    if (!canRenderLoadedRows) return
     if (changeIndices.length) {
+      autoJumpIdentity.current = activeFileIdentity
       scrollToChange(changeIndices[pendingJump.edge === 'first' ? 0 : changeIndices.length - 1])
       setPendingJump(null)
       return
@@ -467,7 +471,18 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       return
     }
     setPendingJump(null)
-  }, [activateFile, activeFile, activeFileInfo, changeIndices, diffLoading, files.length, loadedFilePath, pendingJump, usesLoader])
+  }, [activateFile, activeFile, activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, files.length, pendingJump])
+  useEffect(() => {
+    if (scope !== 'file') {
+      autoJumpIdentity.current = null
+      return
+    }
+    if (diffLoading || !activeFileInfo || !activeFileIdentity || !changeIndices.length) return
+    const identity = activeFileIdentity
+    if (!shouldJumpToFirstChange(scope, identity, autoJumpIdentity.current, Boolean(pendingJump), canRenderLoadedRows)) return
+    autoJumpIdentity.current = identity
+    scrollToChange(changeIndices[0])
+  }, [activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, pendingJump, scope])
   const diffStyle = { '--diff-font-size': `${diffFontSize}px`, '--diff-line-number-width': `${Math.max(3, lineNumberDigits + 1)}ch` } as CSSProperties
   const renderStageActions = (block: RepositoryDiffLine[], isBlockStart: boolean) => <span className="diff-stage-slot">{allowStage && isBlockStart && onStagePatch && <button className="diff-stage-action" onClick={(event) => { event.stopPropagation(); onStagePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block, activeFileInfo?.type), '修改块') }} title="暂存此修改块">暂存</button>}{allowStage && isBlockStart && onRestorePatch && <button className="diff-restore-action" onClick={(event) => { event.stopPropagation(); onRestorePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block), '修改块') }} title="还原此修改块"><RotateCcw size={11}/></button>}</span>
   const renderUnifiedEntry = (entry: DiffContextEntry, index: number) => entry.kind === 'omitted'
@@ -488,12 +503,12 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {searchOpen ? <div className="diff-search-bar" role="search"><Search size={14}/><input ref={searchInputRef} value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSearchIndex(0) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); jumpSearch(event.shiftKey ? -1 : 1) } if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) } }} placeholder="搜索 Diff" aria-label="搜索 Diff"/><span>{searchQuery ? (searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : '无匹配') : '输入关键词'}</span><button type="button" onClick={() => jumpSearch(-1)} disabled={!searchMatches.length} title="上一个匹配"><ArrowUp size={13}/></button><button type="button" onClick={() => jumpSearch(1)} disabled={!searchMatches.length} title="下一个匹配"><ArrowDown size={13}/></button><button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="关闭搜索" aria-label="关闭搜索"><X size={13}/></button></div> : <Button variant="icon" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }} title="搜索 Diff（Ctrl/Cmd+F）" aria-label="搜索 Diff"><Search size={15}/></Button>}
       <div className="diff-font-controls" title="Diff 字体大小 · Ctrl/⌘ + 或 -"><button onClick={() => setDiffFontSize((value) => Math.max(MIN_DIFF_FONT_SIZE, value - 1))} disabled={diffFontSize <= MIN_DIFF_FONT_SIZE} aria-label="缩小 Diff 字体"><Minus size={13}/></button><button className="diff-font-size" onClick={() => setDiffFontSize(defaultFontSize)} title="恢复默认字号 · Ctrl/⌘ 0">{diffFontSize}px</button><button onClick={() => setDiffFontSize((value) => Math.min(MAX_DIFF_FONT_SIZE, value + 1))} disabled={diffFontSize >= MAX_DIFF_FONT_SIZE} aria-label="放大 Diff 字体"><Plus size={13}/></button></div>
       <Button variant="icon" onClick={() => onWideChange(!wide)} title={wide ? '退出宽屏 Diff' : '宽屏查看 Diff'}>{wide ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</Button>
-      {onClose && <Button variant="icon" onClick={onClose} title="关闭 Diff"><X size={15}/></Button>}
+      {onClose && <Button variant="icon" className="diff-close-control" onClick={onClose} title="关闭 Diff"><X size={15}/></Button>}
     </div>
     <div className={`diff-body ${hideFileList ? 'code-only' : ''}`}>
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
       <div ref={codeDiffRef} className={`code-diff ${view}`} onScroll={view === 'unified' ? handleCodeDiffScroll : undefined}>
-        <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><ChevronDown size={14}/><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
+        <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
         {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
         {diffLoading && !canRenderLoadedRows && <div className="diff-message">正在读取 Diff…</div>}
         {diffError && <div className="diff-message error">{diffError}</div>}

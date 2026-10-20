@@ -101,9 +101,9 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     ...unstagedFiles.map((file) => ({ file, scope: 'unstaged' as const })),
   ], [stagedFiles, unstagedFiles])
   const selectedDiffEntry = useMemo(() => diffFileEntries.find((entry) => stageSelectionKey({ path: entry.file.path, scope: entry.scope }) === stageSelectionKey(selectedFile)) ?? null, [diffFileEntries, selectedFile])
-  const loadStagingRows = useCallback((path: string) => selectedFile?.scope === 'unstaged'
-    ? loadRepositoryUnstagedFileDiff(repository?.path ?? '', path)
-    : loadRepositoryStagedFileDiff(repository?.path ?? '', path), [repository?.path, selectedFile?.scope])
+  const loadStagingRows = useCallback((path: string, _index: number | undefined, showWhitespace: boolean) => selectedFile?.scope === 'unstaged'
+    ? loadRepositoryUnstagedFileDiff(repository?.path ?? '', path, showWhitespace)
+    : loadRepositoryStagedFileDiff(repository?.path ?? '', path, showWhitespace), [repository?.path, selectedFile?.scope])
 
   useEffect(() => {
     if (!selectedDiffEntry) setSelectedFile(diffFileEntries[0] ? { path: diffFileEntries[0].file.path, scope: diffFileEntries[0].scope } : null)

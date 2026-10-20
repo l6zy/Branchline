@@ -846,7 +846,7 @@ fn hunk_start(header: &str, marker: char) -> Option<usize> {
         .and_then(|value| value.parse::<usize>().ok())
 }
 
-fn parse_diff_text(diff: &str) -> Vec<DiffLine> {
+fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
     let mut rows = Vec::new();
     let mut old_line = 0usize;
     let mut next_line = 0usize;
@@ -870,7 +870,9 @@ fn parse_diff_text(diff: &str) -> Vec<DiffLine> {
                     old: None,
                     next: Some(next_line),
                     kind: "add".into(),
-                    code,
+                    code: code.clone(),
+                    old_code: None,
+                    new_code: Some(code),
                 });
                 next_line += 1;
             }
@@ -879,7 +881,9 @@ fn parse_diff_text(diff: &str) -> Vec<DiffLine> {
                     old: Some(old_line),
                     next: None,
                     kind: "del".into(),
-                    code,
+                    code: code.clone(),
+                    old_code: Some(code),
+                    new_code: None,
                 });
                 old_line += 1;
             }
@@ -888,7 +892,9 @@ fn parse_diff_text(diff: &str) -> Vec<DiffLine> {
                     old: Some(old_line),
                     next: Some(next_line),
                     kind: "same".into(),
-                    code,
+                    code: code.clone(),
+                    old_code: Some(code.clone()),
+                    new_code: Some(code),
                 });
                 old_line += 1;
                 next_line += 1;
@@ -897,25 +903,76 @@ fn parse_diff_text(diff: &str) -> Vec<DiffLine> {
         }
     }
 
-    rows
+    if show_whitespace {
+        return rows;
+    }
+
+    let mut normalized = Vec::with_capacity(rows.len());
+    let mut index = 0;
+    while index < rows.len() {
+        if rows[index].kind == "same" {
+            normalized.push(rows[index].clone());
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < rows.len() && rows[index].kind != "same" {
+            index += 1;
+        }
+        let deletions: Vec<(usize, DiffLine)> = rows[start..index]
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.kind == "del")
+            .map(|(offset, row)| (start + offset, row.clone()))
+            .collect();
+        let additions: Vec<(usize, DiffLine)> = rows[start..index]
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.kind == "add")
+            .map(|(offset, row)| (start + offset, row.clone()))
+            .collect();
+        let paired_count = deletions.len().min(additions.len());
+        let mut paired_deletions = HashMap::new();
+        let mut paired_additions = HashSet::new();
+        for pair_index in 0..paired_count {
+            let (deletion_index, deletion) = &deletions[pair_index];
+            let (addition_index, addition) = &additions[pair_index];
+            if deletion.code.trim() == addition.code.trim() {
+                paired_deletions.insert(*deletion_index, DiffLine {
+                    old: deletion.old,
+                    next: addition.next,
+                    kind: "same".into(),
+                    code: addition.code.clone(),
+                    old_code: Some(deletion.code.clone()),
+                    new_code: Some(addition.code.clone()),
+                });
+                paired_additions.insert(*addition_index);
+            }
+        }
+        for source_index in start..index {
+            if let Some(row) = paired_deletions.get(&source_index) {
+                normalized.push(row.clone());
+            } else if rows[source_index].kind == "del" {
+                normalized.push(rows[source_index].clone());
+            }
+        }
+        for (source_index, row) in additions {
+            if !paired_additions.contains(&source_index) {
+                normalized.push(row);
+            }
+        }
+    }
+    normalized
 }
 
-pub fn parse_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String> {
-    let diff = optional_git_output(
-        path,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--no-color",
-            "--unified=100000",
-            "HEAD",
-            "--",
-            file_path,
-        ],
-    );
-    let mut rows = parse_diff_text(&diff);
-    if rows.is_empty() {
+pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
+    let mut args = vec!["-c", "core.quotepath=false", "diff", "--no-color", "--unified=100000", "HEAD"]
+        .into_iter().map(str::to_string).collect::<Vec<_>>();
+    args.push("--".into());
+    args.push(file_path.into());
+    let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut rows = parse_diff_text(&diff, show_whitespace);
+    if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", file_path]) {
         let root = path
             .canonicalize()
             .map_err(|error| format!("无法访问仓库：{error}"))?;
@@ -937,6 +994,8 @@ pub fn parse_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String>
                     next: Some(index + 1),
                     kind: "add".into(),
                     code: code.to_string(),
+                    old_code: None,
+                    new_code: Some(code.to_string()),
                 })
                 .collect();
         }
@@ -944,22 +1003,15 @@ pub fn parse_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String>
     Ok(rows)
 }
 
-pub fn parse_unstaged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String> {
+pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
     let file_path = validated_file_path(file_path)?;
-    let diff = optional_git_output(
-        path,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--no-color",
-            "--unified=100000",
-            "--",
-            &file_path,
-        ],
-    );
-    let mut rows = parse_diff_text(&diff);
-    if rows.is_empty() {
+    let mut args = vec!["-c", "core.quotepath=false", "diff", "--no-color", "--unified=100000"]
+        .into_iter().map(str::to_string).collect::<Vec<_>>();
+    args.push("--".into());
+    args.push(file_path.clone());
+    let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let mut rows = parse_diff_text(&diff, show_whitespace);
+    if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", &file_path]) {
         let root = path
             .canonicalize()
             .map_err(|error| format!("无法访问仓库：{error}"))?;
@@ -981,6 +1033,8 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>
                     next: Some(index + 1),
                     kind: "add".into(),
                     code: code.to_string(),
+                    old_code: None,
+                    new_code: Some(code.to_string()),
                 })
                 .collect();
         }
@@ -988,22 +1042,14 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>
     Ok(rows)
 }
 
-pub fn parse_staged_diff(path: &Path, file_path: &str) -> Result<Vec<DiffLine>, String> {
+pub fn parse_staged_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
     let file_path = validated_file_path(file_path)?;
-    let diff = optional_git_output(
-        path,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--cached",
-            "--no-color",
-            "--unified=100000",
-            "--",
-            &file_path,
-        ],
-    );
-    Ok(parse_diff_text(&diff))
+    let mut args = vec!["-c", "core.quotepath=false", "diff", "--cached", "--no-color", "--unified=100000"]
+        .into_iter().map(str::to_string).collect::<Vec<_>>();
+    args.push("--".into());
+    args.push(file_path);
+    let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
+    Ok(parse_diff_text(&diff, show_whitespace))
 }
 
 fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
@@ -1042,26 +1088,25 @@ pub fn parse_compare_diff(
     base: &str,
     target: &str,
     file_path: &str,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     let base_hash = resolve_commit(&root, base)?;
     let target_hash = resolve_commit(&root, target)?;
     let range = format!("{base_hash}..{target_hash}");
-    let diff = git_output_owned(
-        &root,
-        &[
+    let mut args = vec![
             "-c".into(),
             "core.quotepath=false".into(),
             "diff".into(),
             "--no-color".into(),
-            "--unified=100000".into(),
             range,
-            "--".into(),
-            file_path,
-        ],
-    )?;
-    Ok(parse_diff_text(&diff))
+            "--unified=100000".into(),
+        ];
+    args.push("--".into());
+    args.push(file_path);
+    let diff = git_output_owned(&root, &args)?;
+    Ok(parse_diff_text(&diff, show_whitespace))
 }
 
 fn parse_worktrees(path: &Path) -> Vec<RepositoryWorktree> {
@@ -2682,27 +2727,26 @@ pub fn load_stash_file_diff(
     repository_path: &str,
     reference: &str,
     file_path: &str,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     let root = repository_root(repository_path)?;
     let reference = validated_stash_reference(reference)?;
     let file_path = validated_file_path(file_path)?;
     resolve_commit(&root, reference)?;
     let base = format!("{reference}^1");
-    let tracked = git_output_owned(
-        &root,
-        &[
+    let mut tracked_args = vec![
             "-c".into(),
             "core.quotepath=false".into(),
             "diff".into(),
             "--no-color".into(),
-            "--unified=100000".into(),
             base,
             reference.into(),
-            "--".into(),
-            file_path.clone(),
-        ],
-    )?;
-    let rows = parse_diff_text(&tracked);
+            "--unified=100000".into(),
+        ];
+    tracked_args.push("--".into());
+    tracked_args.push(file_path.clone());
+    let tracked = git_output_owned(&root, &tracked_args)?;
+    let rows = parse_diff_text(&tracked, show_whitespace);
     if !rows.is_empty() {
         return Ok(rows);
     }
@@ -2711,21 +2755,19 @@ pub fn load_stash_file_diff(
     if resolve_commit(&root, &untracked).is_err() {
         return Ok(Vec::new());
     }
-    let diff = git_output_owned(
-        &root,
-        &[
+    let mut untracked_args = vec![
             "-c".into(),
             "core.quotepath=false".into(),
             "show".into(),
             "--format=".into(),
             "--no-color".into(),
-            "--unified=100000".into(),
             untracked,
-            "--".into(),
-            file_path,
-        ],
-    )?;
-    Ok(parse_diff_text(&diff))
+            "--unified=100000".into(),
+        ];
+    untracked_args.push("--".into());
+    untracked_args.push(file_path);
+    let diff = git_output_owned(&root, &untracked_args)?;
+    Ok(parse_diff_text(&diff, show_whitespace))
 }
 
 fn validated_file_args(file_paths: &[String]) -> Result<Vec<String>, String> {
@@ -3562,6 +3604,7 @@ pub fn load_file_commit_diff(
     repository_path: &str,
     commit: &str,
     file_path: &str,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
@@ -3580,38 +3623,31 @@ pub fn load_file_commit_diff(
         .split_whitespace()
         .nth(1)
         .map(ToString::to_string);
-    let diff = if let Some(parent) = parent {
-        git_output_owned(
-            &root,
-            &[
+    let mut args = if let Some(parent) = parent {
+        vec![
                 "-c".into(),
                 "core.quotepath=false".into(),
                 "diff".into(),
                 "--no-color".into(),
-                "--unified=100000".into(),
                 parent,
                 commit,
-                "--".into(),
-                file_path,
-            ],
-        )?
+                "--unified=100000".into(),
+            ]
     } else {
-        git_output_owned(
-            &root,
-            &[
+        vec![
                 "-c".into(),
                 "core.quotepath=false".into(),
                 "show".into(),
                 "--format=".into(),
                 "--no-color".into(),
-                "--unified=100000".into(),
                 commit,
-                "--".into(),
-                file_path,
-            ],
-        )?
+                "--unified=100000".into(),
+            ]
     };
-    Ok(parse_diff_text(&diff))
+    args.push("--".into());
+    args.push(file_path);
+    let diff = git_output_owned(&root, &args)?;
+    Ok(parse_diff_text(&diff, show_whitespace))
 }
 
 pub fn load_file_blame(
@@ -3808,6 +3844,58 @@ mod tests {
         let committed = repository_state_token(&repository.0.to_string_lossy())
             .expect("read committed repository token");
         assert_ne!(committed, modified);
+    }
+
+    #[test]
+    fn ignores_leading_and_trailing_whitespace_changes_when_requested() {
+        let repository = test_repository();
+        fs::write(repository.0.join("README.md"), "  first   \nsec ond\n")
+            .expect("change whitespace and add a substantive line");
+
+        let rows = parse_unstaged_diff(&repository.0, "README.md", false)
+            .expect("read whitespace-filtered diff");
+
+        assert!(rows.iter().all(|row| row.code.trim() != "first" || row.kind == "same"), "{:?}", rows.iter().map(|row| (&row.kind, &row.code)).collect::<Vec<_>>());
+        assert!(rows.iter().any(|row| row.code == "sec ond" && row.kind == "add"));
+        assert!(parse_unstaged_diff(&repository.0, "README.md", true)
+            .expect("read regular diff")
+            .iter()
+            .any(|row| row.code.trim() == "first" && row.kind != "same"));
+    }
+
+    #[test]
+    fn preserves_both_whitespace_variants_for_line_patch_context() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "first\nsecond\nthird\n")
+            .expect("write patch context baseline");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage patch context baseline");
+        git_output(&repository.0, &["commit", "-m", "patch context baseline"])
+            .expect("commit patch context baseline");
+        fs::write(repository.0.join("README.md"), "  first  \nsecond!\nthird\n")
+            .expect("modify whitespace and substantive content");
+
+        let rows = parse_unstaged_diff(&repository.0, "README.md", false)
+            .expect("read whitespace-filtered diff");
+        let hidden_whitespace_row = rows
+            .iter()
+            .find(|row| row.kind == "same" && row.old_code.is_some() && row.new_code.is_some())
+            .expect("retain old and new forms for the hidden whitespace change");
+        assert_eq!(hidden_whitespace_row.old_code.as_deref(), Some("first"));
+        assert_eq!(hidden_whitespace_row.new_code.as_deref(), Some("  first  "));
+
+        let stage_patch_text = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n first\n-second\n+second!\n third\n";
+        stage_patch(&path, stage_patch_text).expect("stage substantive line with old-side context");
+        let restore_patch_text = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n   first  \n-second\n+second!\n third\n";
+        restore_patch(&path, restore_patch_text).expect("restore substantive line with new-side context");
+
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read restored file"),
+            "  first  \nsecond\nthird\n"
+        );
+        assert!(git_output(&repository.0, &["diff", "--cached", "--", "README.md"])
+            .expect("read staged diff")
+            .contains("+second!"));
     }
 
     #[test]
@@ -4017,7 +4105,7 @@ mod tests {
         let root_files = load_commit_files(&path, &history[1].hash).expect("load root files");
         assert_eq!(root_files.len(), 1);
         assert_eq!(root_files[0].r#type, "A");
-        assert!(!load_file_commit_diff(&path, &history[0].hash, "README.md")
+        assert!(!load_file_commit_diff(&path, &history[0].hash, "README.md", true)
             .expect("load historical file diff")
             .is_empty());
         let blame = load_file_blame(&path, "README.md", None).expect("load file blame");
@@ -4070,8 +4158,8 @@ mod tests {
         fs::write(repository.0.join("README.md"), "first\nstaged\nunstaged\n")
             .expect("write unstaged change");
 
-        let staged = parse_staged_diff(&repository.0, "README.md").expect("read staged diff");
-        let unstaged = parse_unstaged_diff(&repository.0, "README.md").expect("read unstaged diff");
+        let staged = parse_staged_diff(&repository.0, "README.md", true).expect("read staged diff");
+        let unstaged = parse_unstaged_diff(&repository.0, "README.md", true).expect("read unstaged diff");
 
         assert!(staged.iter().any(|line| line.code == "staged" && line.kind == "add"));
         assert!(!staged.iter().any(|line| line.code == "unstaged" && line.kind == "add"));
@@ -4225,7 +4313,7 @@ mod tests {
         assert_eq!(comparison.behind, 0);
         assert_eq!(comparison.files.len(), 1);
         assert!(
-            !parse_compare_diff(&path, &base_branch, "feat/compare", "README.md")
+            !parse_compare_diff(&path, &base_branch, "feat/compare", "README.md", true)
                 .expect("compare diff")
                 .is_empty()
         );
@@ -4233,7 +4321,7 @@ mod tests {
             compare_repository_refs(&path, "feat/compare", &base_branch).expect("reverse compare");
         assert_eq!(reverse_comparison.files.len(), 1);
         assert!(
-            !parse_compare_diff(&path, "feat/compare", &base_branch, "README.md")
+            !parse_compare_diff(&path, "feat/compare", &base_branch, "README.md", true)
                 .expect("reverse compare diff")
                 .is_empty()
         );
@@ -4282,10 +4370,10 @@ mod tests {
         let stash_files = load_stash_files(&path, &reference).expect("load stash files");
         assert!(stash_files.iter().any(|file| file.path == "README.md"));
         assert!(stash_files.iter().any(|file| file.path == "untracked.txt"));
-        assert!(!load_stash_file_diff(&path, &reference, "README.md")
+        assert!(!load_stash_file_diff(&path, &reference, "README.md", true)
             .expect("load tracked stash diff")
             .is_empty());
-        assert!(!load_stash_file_diff(&path, &reference, "untracked.txt")
+        assert!(!load_stash_file_diff(&path, &reference, "untracked.txt", true)
             .expect("load untracked stash diff")
             .is_empty());
         apply_repository_stash(&path, &reference, false).expect("apply stash");
@@ -4312,7 +4400,7 @@ mod tests {
 
         let files = load_stash_files(&path, "stash@{0}").expect("load tracked-only stash files");
         assert!(files.iter().any(|file| file.path == "README.md"));
-        assert!(!load_stash_file_diff(&path, "stash@{0}", "README.md")
+        assert!(!load_stash_file_diff(&path, "stash@{0}", "README.md", true)
             .expect("load tracked-only stash diff")
             .is_empty());
     }

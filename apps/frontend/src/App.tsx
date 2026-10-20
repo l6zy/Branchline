@@ -823,12 +823,12 @@ export default function App() {
     setHistoryConflictPath(null)
     setOperationPath(null)
   }, [selectedStatsKey])
-  const loadSelectedCommitDiff = useCallback((filePath: string) => {
+  const loadSelectedCommitDiff = useCallback((filePath: string, _index: number | undefined, showWhitespace: boolean) => {
     if (!repository) return Promise.resolve([])
-    if (selectedWorkingTree) return loadRepositoryFileDiff(repository.path, filePath)
+    if (selectedWorkingTree) return loadRepositoryFileDiff(repository.path, filePath, showWhitespace)
     return selectedStashReference
-      ? loadRepositoryStashFileDiff(repository.path, selectedStashReference, filePath)
-      : loadFileCommitDiff(repository.path, selectedStatsKey, filePath)
+      ? loadRepositoryStashFileDiff(repository.path, selectedStashReference, filePath, showWhitespace)
+      : loadFileCommitDiff(repository.path, selectedStatsKey, filePath, showWhitespace)
   }, [repository?.path, selectedStashReference, selectedStatsKey, selectedWorkingTree])
   const handleOpenSnapshot = (snapshot: RepositorySnapshot | null) => {
     if (!snapshot) return

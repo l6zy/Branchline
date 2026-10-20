@@ -416,9 +416,20 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-panes { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: hidden; }
 
-.split-diff-pane { min-width: 0; min-height: 0; overflow: auto; background: var(--code-surface); scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--code-surface); }
+.split-diff-pane { min-width: 0; min-height: 0; overflow: auto; background: var(--code-surface); }
 
 .split-diff-pane + .split-diff-pane { border-left: 1px solid var(--code-border); }
+.split-diff-actions { min-width: 0; overflow: auto; scrollbar-width: none; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface-raised); }
+.split-diff-panes:has(.split-diff-actions) { grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); }
+.split-action-row { min-width: 0; min-height: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.split-action-row > button { position: static; width: 20px; height: 11px; padding: 0; display: grid; place-items: center; border-radius: 3px; opacity: .8; }
+.split-action-row .diff-stage-slot { display: contents; }
+.split-action-row .diff-stage-slot button { position: static; width: 20px; height: 11px; padding: 0; display: grid; place-items: center; }
+.diff-whitespace-toggle { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
+.diff-whitespace-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.line-action-add, .line-action-del { width: 2ch; padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.line-action-add { color: var(--accent); }
+.line-action-del { color: var(--danger); }
 
 .split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
 

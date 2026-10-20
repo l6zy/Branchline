@@ -122,12 +122,15 @@ pub struct CommandLogEntry {
     pub stderr: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiffLine {
     pub old: Option<usize>,
     pub next: Option<usize>,
     pub kind: String,
     pub code: String,
+    pub old_code: Option<String>,
+    pub new_code: Option<String>,
 }
 
 #[derive(Serialize)]

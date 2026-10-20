@@ -85,6 +85,19 @@ describe('semantic style architecture', () => {
     expect(features).toContain('.diff-search-bar { flex: 1 1 180px;')
   })
 
+  it('keeps standard scrollbar properties off diff scroll containers', () => {
+    const base = readFileSync(new URL('./styles/base.css', import.meta.url), 'utf8')
+    const codeDiffRule = features.match(/\.code-diff \{[^}]+\}/)?.[0] ?? ''
+    const splitDiffRule = components.match(/\.split-diff-pane \{[^}]+\}/)?.[0] ?? ''
+    expect(features).toContain('.diff-viewer { position: relative; min-width: 0; min-height: 0; overflow: hidden; scrollbar-color: auto; }')
+    expect(features).not.toContain('.code-diff::-webkit-scrollbar:vertical')
+    expect(features).toContain('.code-diff::-webkit-scrollbar-button { display: none; }')
+    expect(themeOverrides).toContain('.theme-light *:not(.diff-viewer):not(.diff-viewer *)')
+    expect(base).toContain('*:not(.diff-viewer):not(.diff-viewer *) { scrollbar-width: thin; scrollbar-color: #667788 transparent; }')
+    expect(codeDiffRule).not.toMatch(/scrollbar-(?:width|color)\s*:/)
+    expect(splitDiffRule).not.toMatch(/scrollbar-(?:width|color)\s*:/)
+  })
+
   it('aligns staging section labels independently from their action buttons', () => {
     expect(features).toContain('.stage-section-header { grid-template-columns: auto minmax(0, 1fr) auto;')
     expect(features).toContain('.stage-section-name { grid-column: 2;')

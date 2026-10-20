@@ -12,7 +12,6 @@
 .theme-light .split-code-side.line-context-active { box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px rgba(22, 119, 255, .52); }
 .theme-light .code-row.diff-navigation-active,
 .theme-light .split-code-side.diff-navigation-active { box-shadow: inset 3px 0 var(--accent), inset 0 0 0 1px rgba(22, 119, 255, .58); }
-.theme-light .split-diff-pane { scrollbar-color: var(--scroll-thumb) var(--code-surface); }
 .theme-light .line-no { color: var(--text-tertiary); border-right-color: var(--border-subtle); }
 
 .theme-light .commit-row:hover { background: #eaf3ff; }
@@ -64,6 +63,6 @@
 .theme-light .conflict-code-editor .cm-scroller { scrollbar-color: var(--scroll-thumb) #f6f8fa; }
 .theme-light .conflict-overview span.active { box-shadow: 0 0 0 2px orange; }
 /* Scrollbars are a browser-specific exception, so keep their light tuning here. */
-.theme-light * { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
+.theme-light *:not(.diff-viewer):not(.diff-viewer *) { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 .theme-light *::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: content-box; }
 .theme-light *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }

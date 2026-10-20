@@ -82,16 +82,16 @@ export async function pickAndLoadRepository(): Promise<RepositorySnapshot | null
   return path ? loadRepository(path) : null
 }
 
-export async function loadRepositoryFileDiff(repositoryPath: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_file_diff', { repositoryPath, filePath })
+export async function loadRepositoryFileDiff(repositoryPath: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_file_diff', { repositoryPath, filePath, showWhitespace })
 }
 
-export async function loadRepositoryUnstagedFileDiff(repositoryPath: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_unstaged_file_diff', { repositoryPath, filePath })
+export async function loadRepositoryUnstagedFileDiff(repositoryPath: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_unstaged_file_diff', { repositoryPath, filePath, showWhitespace })
 }
 
-export async function loadRepositoryStagedFileDiff(repositoryPath: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_staged_file_diff', { repositoryPath, filePath })
+export async function loadRepositoryStagedFileDiff(repositoryPath: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_staged_file_diff', { repositoryPath, filePath, showWhitespace })
 }
 
 export async function fetchRepository(repositoryPath: string) {
@@ -170,8 +170,8 @@ export async function loadFileHistory(repositoryPath: string, filePath: string) 
   return invoke<FileHistoryEntry[]>('load_file_history', { repositoryPath, filePath })
 }
 
-export async function loadFileCommitDiff(repositoryPath: string, commit: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_file_commit_diff', { repositoryPath, commit, filePath })
+export async function loadFileCommitDiff(repositoryPath: string, commit: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_file_commit_diff', { repositoryPath, commit, filePath, showWhitespace })
 }
 
 export async function loadFileBlame(repositoryPath: string, filePath: string, revision?: string) {
@@ -242,8 +242,8 @@ export async function compareRepositoryRefs(repositoryPath: string, base: string
   return invoke<RepositoryComparison>('compare_repository_refs', { repositoryPath, base, target })
 }
 
-export async function loadRepositoryCompareFileDiff(repositoryPath: string, base: string, target: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_compare_file_diff', { repositoryPath, base, target, filePath })
+export async function loadRepositoryCompareFileDiff(repositoryPath: string, base: string, target: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_compare_file_diff', { repositoryPath, base, target, filePath, showWhitespace })
 }
 
 export async function loadMergeQueue(repositoryPath: string) {
@@ -302,6 +302,6 @@ export async function loadRepositoryStashFiles(repositoryPath: string, reference
   return invoke<import('@branchline/git-models').RepositoryFile[]>('load_stash_files', { repositoryPath, reference })
 }
 
-export async function loadRepositoryStashFileDiff(repositoryPath: string, reference: string, filePath: string) {
-  return invoke<RepositoryDiffLine[]>('load_stash_file_diff', { repositoryPath, reference, filePath })
+export async function loadRepositoryStashFileDiff(repositoryPath: string, reference: string, filePath: string, showWhitespace = true) {
+  return invoke<RepositoryDiffLine[]>('load_stash_file_diff', { repositoryPath, reference, filePath, showWhitespace })
 }

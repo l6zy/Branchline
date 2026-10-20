@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
-import { AlignJustify, ArrowDown, ArrowUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, ScanText, Search, X } from 'lucide-react'
+import { AlignJustify, ArrowDown, ArrowUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, ScanText, Search, X, Check, EyeOff } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile } from '../../repository'
@@ -13,7 +13,7 @@ type SplitDiffEntry = { kind: 'row'; row: SplitDiffRow } | { kind: 'omitted'; co
 export type DiffLineSide = 'old' | 'new'
 type PendingDiffJump = { edge: 'first' | 'last'; direction: -1 | 1; remaining: number }
 
-export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string) {
+export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string, operation: 'stage' | 'restore' = 'stage') {
   const selected = rows.filter((row) => row.kind !== 'same')
   if (!selected.length) return ''
   const oldValues = rows.filter((row) => row.kind === 'del' || row.kind === 'same')
@@ -26,7 +26,12 @@ export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fi
   const firstNewLine = rows.find((row) => row.next != null)?.next
   const oldStart = oldCount ? (firstOldLine ?? 1) : Math.max(0, (first.next ?? 1) - 1)
   const newStart = newCount ? (firstNewLine ?? 1) : Math.max(0, (first.old ?? 1) - 1)
-  const body = rows.map((row) => `${row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}${row.code}`).join('\n')
+  const body = rows.map((row) => {
+    const code = row.kind === 'same'
+      ? operation === 'stage' ? row.oldCode ?? row.code : row.newCode ?? row.code
+      : row.code
+    return `${row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' '}${code}`
+  }).join('\n')
   const isNewFile = fileType === 'A' && selected.every((row) => row.kind === 'add')
   const isDeletedFile = fileType === 'D' && selected.every((row) => row.kind === 'del')
   const header = isNewFile
@@ -53,6 +58,16 @@ export function changeBlock(rows: RepositoryDiffLine[], index: number) {
   return rows.slice(contextStart, contextEnd + 1)
 }
 
+export function changeLine(rows: RepositoryDiffLine[], index: number) {
+  const changed = rows[index]
+  if (!changed || changed.kind === 'same') return []
+  let start = index
+  let end = index
+  while (start > 0 && index - start < 3 && rows[start - 1].kind === 'same') start -= 1
+  while (end + 1 < rows.length && end - index < 3 && rows[end + 1].kind === 'same') end += 1
+  return rows.slice(start, end + 1)
+}
+
 const DIFF_FONT_SIZE_KEY = 'branchline.diffFontSize.v1'
 const DEFAULT_DIFF_FONT_SIZE = 12
 const MIN_DIFF_FONT_SIZE = 9
@@ -64,6 +79,19 @@ const EMPTY_DIFF_ROWS: RepositoryDiffLine[] = []
 
 export function shouldRenderLoadedRows(usesLoader: boolean, loadedIdentity: string | null, activeIdentity: string | null) {
   return !usesLoader || Boolean(activeIdentity && loadedIdentity === activeIdentity)
+}
+
+export function diffOverviewMarkers(changeIndices: number[], entryCount: number) {
+  if (entryCount <= 0) return []
+  return changeIndices.map((index) => ({ index, top: Math.max(0, Math.min(100, index / entryCount * 100)) }))
+}
+
+export function diffOverviewBounds(viewerTop: number, viewerHeight: number, paneTop: number, paneBorderTop: number, paneClientHeight: number, headerHeight: number) {
+  const viewportTop = paneTop - viewerTop + paneBorderTop
+  return {
+    top: Math.max(0, viewportTop + headerHeight),
+    bottom: Math.max(0, viewerHeight - viewportTop - paneClientHeight),
+  }
 }
 
 export function shouldJumpToFirstChange(scope: 'file' | 'changes', identity: string, previousIdentity: string | null, hasPendingJump = false, canRenderRows = true) {
@@ -146,7 +174,7 @@ type DiffPanelProps = {
   onActiveFileChange?: (index: number) => void
   onClose?: () => void
   hideFileList?: boolean
-  loadRows?: (filePath: string, fileIndex?: number) => Promise<RepositoryDiffLine[]>
+  loadRows?: (filePath: string, fileIndex: number | undefined, showWhitespace: boolean) => Promise<RepositoryDiffLine[]>
   viewKey?: string
   reloadKey?: string
   fallbackRows?: Record<string, RepositoryDiffLine[]>
@@ -162,6 +190,7 @@ type DiffPanelProps = {
 export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onActiveFileChange, onClose, hideFileList = false, loadRows, viewKey = '', reloadKey = '', fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, onStagePatch, onRestorePatch, allowStage = false, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
   const [activeFile, setActiveFile] = useState(initialFile)
   const [view, setView] = usePersistentState('branchline.diffView.v1', 'unified', isDiffView)
+  const [showWhitespace, setShowWhitespace] = usePersistentState('branchline.diffShowWhitespace.v1', true, (value): value is boolean => typeof value === 'boolean')
   const [scope, setScope] = usePersistentState('branchline.diffScope.v1', 'changes', isDiffScope)
   const [fileMode, setFileMode] = usePersistentState('branchline.diffFileMode.v1', 'list', isFileMode)
   const [collapsedFolders, setCollapsedFolders] = usePersistentState('branchline.diffCollapsedFolders.v1', {}, isBooleanRecord)
@@ -178,6 +207,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
   const [virtualScrollTop, setVirtualScrollTop] = useState(0)
+  const [overviewViewport, setOverviewViewport] = useState({ top: 0, height: 100 })
+  const [overviewBounds, setOverviewBounds] = useState({ top: 0, bottom: 0 })
   const searchInputRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLElement>(null)
   const codeDiffRef = useRef<HTMLDivElement>(null)
@@ -185,6 +216,9 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const rowsCache = useRef(new Map<string, RepositoryDiffLine[]>())
   const splitLeftRef = useRef<HTMLDivElement>(null)
   const splitRightRef = useRef<HTMLDivElement>(null)
+  const splitActionsRef = useRef<HTMLDivElement>(null)
+  const overviewRef = useRef<HTMLDivElement>(null)
+  const overviewDragging = useRef(false)
   // Mirroring one split pane onto the other makes the browser fire that pane's own scroll event. What
   // that event reports is the offset the browser actually stored, which can differ from what was
   // written, so an equality check against the other pane cannot tell the echo apart from a real user
@@ -202,7 +236,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }, [loadRows, repositoryPath])
   useEffect(() => {
     const file = files[activeFile]
-    const loader = loadRows ?? (repositoryPath ? (path: string) => loadRepositoryFileDiff(repositoryPath, path) : null)
+    const loader = loadRows ?? (repositoryPath ? (path: string, _index: number | undefined, whitespace: boolean) => loadRepositoryFileDiff(repositoryPath, path, whitespace) : null)
     if (!file || !loader) {
       setRepositoryRows([])
       setLoadedFileIdentity(null)
@@ -211,7 +245,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       return
     }
     const fileIdentity = `${viewKey}\0${activeFile}\0${file.path}`
-    const cacheKey = `${fileIdentity}\0${reloadKey}`
+    const cacheKey = `${fileIdentity}\0${reloadKey}\0${showWhitespace}`
     const cachedRows = rowsCache.current.get(cacheKey)
     if (cachedRows) {
       setRepositoryRows(cachedRows)
@@ -223,12 +257,12 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     let cancelled = false
     setDiffLoading(true)
     setDiffError(null)
-    loader(file.path, activeFile)
+    loader(file.path, activeFile, showWhitespace)
       .then((rows) => { if (!cancelled) { rowsCache.current.set(cacheKey, rows); setRepositoryRows(rows); setLoadedFileIdentity(fileIdentity) } })
       .catch((error) => { if (!cancelled) setDiffError(error instanceof Error ? error.message : String(error)) })
       .finally(() => { if (!cancelled) setDiffLoading(false) })
     return () => { cancelled = true }
-  }, [activeFile, files, loadRows, reloadKey, repositoryPath, viewKey])
+  }, [activeFile, files, loadRows, reloadKey, repositoryPath, showWhitespace, viewKey])
   useEffect(() => {
     window.localStorage.setItem(fontSizeStorageKey, String(diffFontSize))
   }, [diffFontSize, fontSizeStorageKey])
@@ -292,6 +326,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const virtualEnd = virtualized ? Math.min(visibleEntryCount, virtualStart + DIFF_VIRTUAL_OVERSCAN * 2 + 80) : visibleEntryCount
   const virtualTopHeight = virtualStart * virtualRowHeight
   const virtualBottomHeight = Math.max(0, (visibleEntryCount - virtualEnd) * virtualRowHeight)
+  const overviewMarkers = useMemo(() => diffOverviewMarkers(changeIndices, visibleEntryCount), [changeIndices, visibleEntryCount])
   const searchMatches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return []
@@ -380,8 +415,73 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     pane.scrollTop = top
     splitScrollEcho.current = { side, top }
   }
+  // The overview sits beside the right pane, whose horizontal scrollbar may differ from the left.
+  const activeScrollPane = () => view === 'unified' ? codeDiffRef.current : splitRightRef.current
+  const updateOverviewViewport = () => {
+    const pane = activeScrollPane()
+    const viewer = overviewRef.current
+    if (!pane || !viewer) return
+    const bounds = diffOverviewBounds(
+      viewer.getBoundingClientRect().top, viewer.clientHeight,
+      pane.getBoundingClientRect().top, pane.clientTop, pane.clientHeight,
+      view === 'unified' ? pane.querySelector<HTMLElement>('.file-header')?.offsetHeight ?? 0 : 0,
+    )
+    setOverviewBounds((previous) => previous.top === bounds.top && previous.bottom === bounds.bottom ? previous : bounds)
+    const scrollable = Math.max(0, pane.scrollHeight - pane.clientHeight)
+    const height = pane.scrollHeight > 0 ? Math.min(100, pane.clientHeight / pane.scrollHeight * 100) : 100
+    setOverviewViewport({
+      top: scrollable > 0 ? pane.scrollTop / scrollable * (100 - height) : 0,
+      height,
+    })
+  }
+  const scrollOverviewTo = (clientY: number, element: HTMLDivElement) => {
+    const pane = activeScrollPane()
+    if (!pane) return
+    const bounds = element.getBoundingClientRect()
+    const percent = Math.max(0, Math.min(1, (clientY - bounds.top) / Math.max(1, bounds.height)))
+    const target = Math.max(0, pane.scrollHeight - pane.clientHeight) * percent
+    if (view === 'unified') {
+      pane.scrollTop = target
+      handleCodeDiffScroll({ currentTarget: pane } as UIEvent<HTMLDivElement>)
+    } else {
+      writeSplitScrollTop('left', target)
+      writeSplitScrollTop('right', target)
+      if (splitActionsRef.current) splitActionsRef.current.scrollTop = target
+      queueVirtualScrollTop(target)
+    }
+    updateOverviewViewport()
+  }
+  const beginOverviewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    overviewDragging.current = true
+    scrollOverviewTo(event.clientY, event.currentTarget)
+  }
+  const moveOverviewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!overviewDragging.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return
+    scrollOverviewTo(event.clientY, event.currentTarget)
+  }
+  const endOverviewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    overviewDragging.current = false
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+  useEffect(() => {
+    const viewer = overviewRef.current
+    if (!viewer) return
+    updateOverviewViewport()
+    const observer = new ResizeObserver(updateOverviewViewport)
+    observer.observe(viewer)
+    const pane = activeScrollPane()
+    if (pane) {
+      observer.observe(pane)
+      // Virtualization and font changes can add/remove horizontal overflow without resizing the viewer.
+      for (const child of Array.from(pane.children)) observer.observe(child)
+    }
+    return () => observer.disconnect()
+  }, [activeFile, diffLoading, visibleEntryCount, view, virtualized, virtualStart, virtualEnd, diffFontSize, scope, showWhitespace, canRenderLoadedRows])
   const handleCodeDiffScroll = (event: UIEvent<HTMLDivElement>) => {
     queueVirtualScrollTop(event.currentTarget.scrollTop)
+    updateOverviewViewport()
   }
   const scrollToVirtualEntry = (rowIndex: number) => {
     const offset = rowIndex * virtualRowHeight + (view === 'unified' ? virtualHeaderHeight : 0)
@@ -421,6 +521,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const source = side === 'left' ? splitLeftRef.current : splitRightRef.current
     if (!source) return
     const top = source.scrollTop
+    if (splitActionsRef.current) splitActionsRef.current.scrollTop = top
+    updateOverviewViewport()
     if (splitScrollEcho.current?.side === side) {
       // Our own mirrored write coming back: the panes already agree, so neither re-mirroring nor a
       // re-render is needed.
@@ -484,20 +586,31 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     scrollToChange(changeIndices[0])
   }, [activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, pendingJump, scope])
   const diffStyle = { '--diff-font-size': `${diffFontSize}px`, '--diff-line-number-width': `${Math.max(3, lineNumberDigits + 1)}ch` } as CSSProperties
-  const renderStageActions = (block: RepositoryDiffLine[], isBlockStart: boolean) => <span className="diff-stage-slot">{allowStage && isBlockStart && onStagePatch && <button className="diff-stage-action" onClick={(event) => { event.stopPropagation(); onStagePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block, activeFileInfo?.type), '修改块') }} title="暂存此修改块">暂存</button>}{allowStage && isBlockStart && onRestorePatch && <button className="diff-restore-action" onClick={(event) => { event.stopPropagation(); onRestorePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block), '修改块') }} title="还原此修改块"><RotateCcw size={11}/></button>}</span>
+  const renderStageActions = (block: RepositoryDiffLine[], isBlockStart: boolean) => <span className="diff-stage-slot">{allowStage && isBlockStart && onStagePatch && <button className="diff-stage-action" onClick={(event) => { event.stopPropagation(); onStagePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block, activeFileInfo?.type), '修改块') }} title="暂存此修改块" aria-label="暂存此修改块"><Plus size={12}/></button>}{allowStage && isBlockStart && onRestorePatch && <button className="diff-restore-action" onClick={(event) => { event.stopPropagation(); onRestorePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', block, undefined, 'restore'), '修改块') }} title="还原此修改块" aria-label="还原此修改块"><RotateCcw size={11}/></button>}</span>
   const renderUnifiedEntry = (entry: DiffContextEntry, index: number) => entry.kind === 'omitted'
     ? <div className="hunk diff-omitted" style={virtualized ? { height: virtualRowHeight } : undefined} key={`omitted-${index}`}>省略 {entry.count} 行未修改源码</div>
     : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' ? changeBlock(sourceRows, entry.sourceIndex) : []; const isBlockStart = block.length > 0 && (entry.sourceIndex === 0 || sourceRows[entry.sourceIndex - 1]?.kind === 'same'); return <div data-diff-row-index={index} style={virtualized ? { height: virtualRowHeight } : undefined} className={`code-row ${row.kind} ${searchMatches.includes(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row, index, side)} title="右键查看该行历史">
-      {renderStageActions(block, isBlockStart)}<span className="line-no">{row.old ?? row.next ?? ''}</span><span className="change-sign">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</span><HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/>
+      {renderStageActions(block, isBlockStart)}<span className="line-no">{row.old ?? row.next ?? ''}</span>{row.kind === 'add' && allowStage && onStagePatch ? <button className="change-sign line-action-add" onClick={(event) => { event.stopPropagation(); onStagePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', changeLine(sourceRows, entry.sourceIndex), activeFileInfo?.type), '单行') }} title="暂存此行" aria-label="暂存此行">+</button> : row.kind === 'del' && allowStage && onRestorePatch ? <button className="change-sign line-action-del" onClick={(event) => { event.stopPropagation(); onRestorePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', changeLine(sourceRows, entry.sourceIndex), undefined, 'restore'), '单行') }} title="还原此行" aria-label="还原此行">−</button> : <span className="change-sign">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</span>}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/>
     </div> })()
   const renderSplitEntry = (entry: SplitDiffEntry, index: number, side: DiffLineSide) => entry.kind === 'omitted'
     ? <div className="hunk diff-omitted" style={virtualized ? { height: virtualRowHeight } : undefined} key={`omitted-${side}-${index}`}>省略 {entry.count} 行未修改源码</div>
-    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceRows.indexOf(row) : -1; const block = sourceIndex >= 0 ? changeBlock(sourceRows, sourceIndex) : []; const isBlockStart = Boolean(row && block.length && (sourceIndex === 0 || sourceRows[sourceIndex - 1]?.kind === 'same')); return <div data-diff-row-index={index} style={virtualized ? { height: virtualRowHeight } : undefined} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatches.includes(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={`${side}-${index}`} onContextMenu={(event) => openLineMenu(event, row, index, side)} title={row ? '右键查看该行历史' : undefined}><span className="line-no">{side === 'old' ? row?.old ?? '' : row?.next ?? ''}</span><span className="change-sign">{side === 'old' ? row?.kind === 'del' ? '−' : '' : row?.kind === 'add' ? '+' : ''}</span>{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}{renderStageActions(block, isBlockStart && (side === 'old' || !entry.row.left))}</div> })()
+    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceRows.indexOf(row) : -1; const actionRows = sourceIndex >= 0 ? changeLine(sourceRows, sourceIndex) : []; const action = row?.kind === 'del' && allowStage && onRestorePatch ? <button className="change-sign line-action-del" onClick={(event) => { event.stopPropagation(); onRestorePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', actionRows, undefined, 'restore'), '单行') }} title="还原此行" aria-label="还原此行">−</button> : row?.kind === 'add' && allowStage && onStagePatch ? <button className="change-sign line-action-add" onClick={(event) => { event.stopPropagation(); onStagePatch(activeFileInfo?.path ?? '', buildStagePatch(activeFileInfo?.path ?? '', actionRows, activeFileInfo?.type), '单行') }} title="暂存此行" aria-label="暂存此行">+</button> : <span className="change-sign">{side === 'old' ? row?.kind === 'del' ? '−' : '' : row?.kind === 'add' ? '+' : ''}</span>; return <div data-diff-row-index={index} style={virtualized ? { height: virtualRowHeight } : undefined} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatches.includes(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={`${side}-${index}`} onContextMenu={(event) => openLineMenu(event, row, index, side)} title={row ? '右键查看该行历史' : undefined}><span className="line-no">{side === 'old' ? row?.old ?? '' : row?.next ?? ''}</span>{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div> })()
+  const renderSplitActions = (entry: SplitDiffEntry, index: number) => {
+    if (entry.kind === 'omitted') return <div className="split-action-row" style={virtualized ? { height: virtualRowHeight } : undefined} key={`actions-${index}`}/>
+    const row = entry.row.left ?? entry.row.right
+    const sourceIndex = row ? sourceRows.indexOf(row) : -1
+    const block = sourceIndex >= 0 ? changeBlock(sourceRows, sourceIndex) : []
+    const blockStart = Boolean(block.length && (sourceIndex === 0 || sourceRows[sourceIndex - 1]?.kind === 'same'))
+    return <div className="split-action-row" style={virtualized ? { height: virtualRowHeight } : undefined} key={`actions-${index}`}>
+      {blockStart && renderStageActions(block, true)}
+    </div>
+  }
   return <section ref={panelRef} className={`diff-panel ${wide ? 'wide' : ''} ${stageActionsEnabled ? 'stage-actions-enabled' : ''}`} style={diffStyle} onPointerEnter={() => { pointerInside.current = true }} onPointerLeave={() => { pointerInside.current = false }}>
     <div className="diff-toolbar">
       <div className="diff-title"><FileCode2 size={16}/><strong>{hideFileList ? 'Diff' : '变更文件'}</strong>{!hideFileList && <span>{files.length}</span>}</div>
       {!hideFileList && <div className="segmented icon-segmented view-switch"><button className={fileMode === 'tree' ? 'active' : ''} onClick={() => setFileMode('tree')} title="树形视图" aria-label="树形视图"><FolderOpen size={14}/></button><button className={fileMode === 'list' ? 'active' : ''} onClick={() => setFileMode('list')} title="列表视图" aria-label="列表视图"><List size={14}/></button></div>}
       <div className="segmented icon-segmented diff-scope"><button className={scope === 'file' ? 'active' : ''} onClick={() => setScope('file')} title="显示完整文件" aria-label="显示完整文件"><FileText size={14}/></button><button className={scope === 'changes' ? 'active' : ''} onClick={() => setScope('changes')} title="仅显示改动" aria-label="仅显示改动"><ScanText size={14}/></button></div>
+      <button type="button" className={`diff-whitespace-toggle ${showWhitespace ? 'active' : ''}`} onClick={() => setShowWhitespace((value) => !value)} title={showWhitespace ? '隐藏空白差异' : '显示空白差异'} aria-label="显示空白差异" aria-pressed={showWhitespace}>{showWhitespace ? <Check size={13}/> : <EyeOff size={13}/>}</button>
       <div className="segmented icon-segmented"><button className={view === 'unified' ? 'active' : ''} onClick={() => setView('unified')} title="统一 Diff" aria-label="统一 Diff"><AlignJustify size={14}/></button><button className={view === 'split' ? 'active' : ''} onClick={() => setView('split')} title="并排 Diff" aria-label="并排 Diff"><Columns2 size={14}/></button></div>
       <div className="segmented icon-segmented diff-navigation"><button onClick={() => jumpToChange(-1)} disabled={!files.length || diffLoading} title="上一处改动（跨文件）" aria-label="上一处改动"><ArrowUp size={14}/></button><button onClick={() => jumpToChange(1)} disabled={!files.length || diffLoading} title="下一处改动（跨文件）" aria-label="下一处改动"><ArrowDown size={14}/></button></div>
       {searchOpen ? <div className="diff-search-bar" role="search"><Search size={14}/><input ref={searchInputRef} value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSearchIndex(0) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); jumpSearch(event.shiftKey ? -1 : 1) } if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) } }} placeholder="搜索 Diff" aria-label="搜索 Diff"/><span>{searchQuery ? (searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : '无匹配') : '输入关键词'}</span><button type="button" onClick={() => jumpSearch(-1)} disabled={!searchMatches.length} title="上一个匹配"><ArrowUp size={13}/></button><button type="button" onClick={() => jumpSearch(1)} disabled={!searchMatches.length} title="下一个匹配"><ArrowDown size={13}/></button><button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="关闭搜索" aria-label="关闭搜索"><X size={13}/></button></div> : <Button variant="icon" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }} title="搜索 Diff（Ctrl/Cmd+F）" aria-label="搜索 Diff"><Search size={15}/></Button>}
@@ -507,6 +620,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     </div>
     <div className={`diff-body ${hideFileList ? 'code-only' : ''}`}>
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
+      <div className="diff-viewer" ref={overviewRef}>
       <div ref={codeDiffRef} className={`code-diff ${view}`} onScroll={view === 'unified' ? handleCodeDiffScroll : undefined}>
         <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
         {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
@@ -516,10 +630,16 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
         {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div>}
         {canRenderLoadedRows && !diffError && view === 'split' && <div className="split-diff-panes">
           <div ref={splitLeftRef} className="split-diff-pane split-left" aria-label="旧版本代码" onScroll={() => syncSplitScroll('left')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))}</div></div>
+          {stageActionsEnabled && <div ref={splitActionsRef} className="split-diff-actions" aria-label="差异操作"><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitActions(entry, index + virtualStart))}</div></div>}
           <div ref={splitRightRef} className="split-diff-pane split-right" aria-label="新版本代码" onScroll={() => syncSplitScroll('right')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={virtualized ? { paddingTop: virtualTopHeight, paddingBottom: virtualBottomHeight } : undefined}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'new'))}</div></div>
         </div>}
       </div>
+      {overviewMarkers.length > 0 && <div className="diff-overview" style={overviewBounds} onPointerDown={beginOverviewDrag} onPointerMove={moveOverviewDrag} onPointerUp={endOverviewDrag} onPointerCancel={endOverviewDrag} title="点击或拖拽跳转到对应差异位置" aria-label="Diff 差异位置">
+        {overviewMarkers.map(({ index, top }) => <span className="diff-overview-marker" key={index} style={{ top: `${top}%` }}/>) }
+        <span className="diff-overview-viewport" style={{ top: `${overviewViewport.top}%`, height: `${overviewViewport.height}%` }}/>
+      </div>}
+      </div>
     </div>
-    {lineMenu && activeFileInfo && <ContextMenu x={lineMenu.x} y={lineMenu.y} onClose={() => setLineMenu(null)}><div className="context-menu-title"><FileCode2 size={13}/><span>{activeFileInfo.path}:{lineMenu.line} · {lineMenu.side === 'old' ? '旧版本' : '新版本'}</span></div>{allowStage && onStagePatch && (view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)?.kind !== 'same' : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side)?.kind !== 'same') && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onStagePatch(activeFileInfo.path, buildStagePatch(activeFileInfo.path, [row], activeFileInfo.type), '单行'); setLineMenu(null) }}><Plus size={14}/><span>暂存此行</span></button>}{allowStage && onRestorePatch && (view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)?.kind !== 'same' : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side)?.kind !== 'same') && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onRestorePatch(activeFileInfo.path, buildStagePatch(activeFileInfo.path, [row]), '单行'); setLineMenu(null) }}><RotateCcw size={14}/><span>还原此行</span></button>}{onOpenLineHistory && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onOpenLineHistory(activeFileInfo.path, lineMenu.line, lineMenu.side, row); setLineMenu(null) }}><History size={14}/><span>查看第 {lineMenu.line} 行历史</span></button>}<button onClick={() => { navigator.clipboard?.writeText(lineMenu.code).catch(() => undefined); setLineMenu(null) }}><Copy size={14}/><span>复制本行内容</span></button></ContextMenu>}
+    {lineMenu && activeFileInfo && <ContextMenu x={lineMenu.x} y={lineMenu.y} onClose={() => setLineMenu(null)}><div className="context-menu-title"><FileCode2 size={13}/><span>{activeFileInfo.path}:{lineMenu.line} · {lineMenu.side === 'old' ? '旧版本' : '新版本'}</span></div>{allowStage && onStagePatch && (view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)?.kind !== 'same' : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side)?.kind !== 'same') && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onStagePatch(activeFileInfo.path, buildStagePatch(activeFileInfo.path, [row], activeFileInfo.type), '单行'); setLineMenu(null) }}><Plus size={14}/><span>暂存此行</span></button>}{allowStage && onRestorePatch && (view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)?.kind !== 'same' : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side)?.kind !== 'same') && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onRestorePatch(activeFileInfo.path, buildStagePatch(activeFileInfo.path, [row], undefined, 'restore'), '单行'); setLineMenu(null) }}><RotateCcw size={14}/><span>还原此行</span></button>}{onOpenLineHistory && <button onClick={() => { const row = view === 'unified' ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex) : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side); if (row) onOpenLineHistory(activeFileInfo.path, lineMenu.line, lineMenu.side, row); setLineMenu(null) }}><History size={14}/><span>查看第 {lineMenu.line} 行历史</span></button>}<button onClick={() => { navigator.clipboard?.writeText(lineMenu.code).catch(() => undefined); setLineMenu(null) }}><Copy size={14}/><span>复制本行内容</span></button></ContextMenu>}
   </section>
 }

@@ -101,9 +101,9 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
     : undefined, [history, lineHistory, selectedBlame])
   const displayedEntry = tab === 'blame' ? selectedBlameEntry : selectedEntry
   const selectedFile = useMemo(() => filePath ? [{ path: filePath, type: 'M', add: 0, del: 0 }] : [], [filePath])
-  const loadSelectedDiff = useCallback((path: string) => {
+  const loadSelectedDiff = useCallback((path: string, _index: number | undefined, showWhitespace: boolean) => {
     if (!repositoryPath || !displayedEntry) return Promise.resolve([])
-    return loadFileCommitDiff(repositoryPath, displayedEntry.hash, path)
+    return loadFileCommitDiff(repositoryPath, displayedEntry.hash, path, showWhitespace)
   }, [displayedEntry?.hash, repositoryPath])
 
   if (!filePath) return null

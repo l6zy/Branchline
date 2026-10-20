@@ -121,9 +121,10 @@ pub async fn load_repository_state_token(repository_path: String) -> Result<Stri
 pub async fn load_file_diff(
     repository_path: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::parse_diff(Path::new(&repository_path), &file_path)
+        git::parse_diff(Path::new(&repository_path), &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取 Diff", error))?
@@ -133,9 +134,10 @@ pub async fn load_file_diff(
 pub async fn load_unstaged_file_diff(
     repository_path: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::parse_unstaged_diff(Path::new(&repository_path), &file_path)
+        git::parse_unstaged_diff(Path::new(&repository_path), &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取未暂存 Diff", error))?
@@ -145,9 +147,10 @@ pub async fn load_unstaged_file_diff(
 pub async fn load_staged_file_diff(
     repository_path: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::parse_staged_diff(Path::new(&repository_path), &file_path)
+        git::parse_staged_diff(Path::new(&repository_path), &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取已暂存 Diff", error))?
@@ -331,9 +334,10 @@ pub async fn load_file_commit_diff(
     repository_path: String,
     commit: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::load_file_commit_diff(&repository_path, &commit, &file_path)
+        git::load_file_commit_diff(&repository_path, &commit, &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取文件提交 Diff", error))?
@@ -643,9 +647,10 @@ pub async fn load_compare_file_diff(
     base: String,
     target: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::parse_compare_diff(&repository_path, &base, &target, &file_path)
+        git::parse_compare_diff(&repository_path, &base, &target, &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取比较 Diff", error))?
@@ -834,9 +839,10 @@ pub async fn load_stash_file_diff(
     repository_path: String,
     reference: String,
     file_path: String,
+    show_whitespace: bool,
 ) -> Result<Vec<DiffLine>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        git::load_stash_file_diff(&repository_path, &reference, &file_path)
+        git::load_stash_file_diff(&repository_path, &reference, &file_path, show_whitespace)
     })
     .await
     .map_err(|error| task_error("读取 Stash Diff", error))?

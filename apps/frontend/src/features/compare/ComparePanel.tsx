@@ -104,9 +104,9 @@ export function ComparePanel({ repository, initialBase, initialTarget, onNotice 
       setLoading(false)
     }
   }
-  const loadRows = useCallback((filePath: string) => {
+  const loadRows = useCallback((filePath: string, _index: number | undefined, showWhitespace: boolean) => {
     if (!repository || !comparison) return Promise.resolve([])
-    return loadRepositoryCompareFileDiff(repository.path, comparison.base, comparison.target, filePath)
+    return loadRepositoryCompareFileDiff(repository.path, comparison.base, comparison.target, filePath, showWhitespace)
   }, [comparison, repository?.path])
 
   if (!repository) return <section className="workspace-empty"><GitCompareArrows size={34}/><strong>比较分支或提交</strong><span>打开本地仓库后，可选择两个引用并查看完整 Diff。</span></section>

@@ -107,6 +107,8 @@ export type RepositoryDiffLine = {
   next: number | null
   kind: 'same' | 'add' | 'del'
   code: string
+  oldCode?: string | null
+  newCode?: string | null
 }
 
 export type FileHistoryEntry = {

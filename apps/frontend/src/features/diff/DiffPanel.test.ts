@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildStagePatch, changeBlock, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
+import { buildStagePatch, changeBlock, changeLine, diffOverviewBounds, diffOverviewMarkers, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
+
+describe('diffOverviewBounds', () => {
+  it('ends above the horizontal scrollbar when it consumes viewport height', () => {
+    expect(diffOverviewBounds(100, 600, 100, 0, 590, 34)).toEqual({ top: 34, bottom: 10 })
+    expect(diffOverviewBounds(100, 600, 100, 0, 600, 34)).toEqual({ top: 34, bottom: 0 })
+  })
+
+  it('uses the split pane viewport below the header and hunk', () => {
+    expect(diffOverviewBounds(100, 600, 158, 0, 532, 0)).toEqual({ top: 58, bottom: 10 })
+  })
+
+  it('accounts for pane borders without depending on horizontal scroll position', () => {
+    expect(diffOverviewBounds(100, 600, 134, 1, 554, 0)).toEqual({ top: 35, bottom: 11 })
+  })
+})
+
+describe('diffOverviewMarkers', () => {
+  it('maps changed entry indexes onto normalized overview positions', () => {
+    expect(diffOverviewMarkers([0, 5, 9], 10)).toEqual([
+      { index: 0, top: 0 },
+      { index: 5, top: 50 },
+      { index: 9, top: 90 },
+    ])
+  })
+
+  it('returns no markers for an empty diff', () => {
+    expect(diffOverviewMarkers([0], 0)).toEqual([])
+  })
+})
 
 describe('shouldJumpToFirstChange', () => {
   it('jumps to the first change when opening the full-file view', () => {
@@ -61,6 +90,16 @@ describe('buildStagePatch', () => {
     expect(patch).toContain(' before\n-removed\n+replacement\n after')
   })
 
+  it('uses the correct whitespace variant as context for staging and restoring', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: '  first  ', oldCode: 'first', newCode: '  first  ' },
+      { old: 2, next: null, kind: 'del', code: 'removed' },
+    ]
+
+    expect(buildStagePatch('README.md', rows, undefined, 'stage')).toContain(' first\n-removed')
+    expect(buildStagePatch('README.md', rows, undefined, 'restore')).toContain('   first  \n-removed')
+  })
+
   it('builds a valid deletion-only patch with context', () => {
     const rows: RepositoryDiffLine[] = [
       { old: 10, next: 10, kind: 'same', code: 'before' },
@@ -104,6 +143,20 @@ describe('buildStagePatch', () => {
     const block = changeBlock(rows, 1)
     expect(block.some((row) => row.code === 'first new')).toBe(true)
     expect(block.some((row) => row.code === 'second new')).toBe(false)
+  })
+})
+
+describe('changeLine', () => {
+  it('keeps only contiguous context around a changed row', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: 'before' },
+      { old: 2, next: null, kind: 'del', code: 'removed' },
+      { old: null, next: 2, kind: 'add', code: 'replacement' },
+      { old: 3, next: 3, kind: 'same', code: 'after' },
+      { old: 4, next: null, kind: 'del', code: 'other removed' },
+    ]
+    const line = changeLine(rows, 2)
+    expect(line.map((row) => row.code)).toEqual(['replacement', 'after'])
   })
 })
 

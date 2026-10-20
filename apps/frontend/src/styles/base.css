@@ -30,4 +30,4 @@ button, .commit-row { -webkit-tap-highlight-color: transparent; }
 
 body, button, input, textarea { font-size: 12px; }
 
-* { scrollbar-width: thin; scrollbar-color: #667788 transparent; }
+*:not(.diff-viewer):not(.diff-viewer *) { scrollbar-width: thin; scrollbar-color: #667788 transparent; }

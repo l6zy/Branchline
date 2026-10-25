@@ -1,8 +1,8 @@
 export type HistoryColumnWidths = { branch: number; graph: number; time: number; hash: number; author: number }
-export type HistoryVisibleColumns = { time: boolean; hash: boolean }
+export type HistoryVisibleColumns = { time: boolean; hash: boolean; committer?: boolean }
 
 export const DEFAULT_HISTORY_COLUMN_WIDTHS: HistoryColumnWidths = { branch: 140, graph: 200, time: 104, hash: 82, author: 110 }
-export const DEFAULT_HISTORY_VISIBLE_COLUMNS: HistoryVisibleColumns = { time: false, hash: false }
+export const DEFAULT_HISTORY_VISIBLE_COLUMNS: HistoryVisibleColumns = { time: false, hash: false, committer: true }
 
 export function isHistoryColumnWidths(value: unknown): value is HistoryColumnWidths {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -13,5 +13,7 @@ export function isHistoryColumnWidths(value: unknown): value is HistoryColumnWid
 export function isHistoryVisibleColumns(value: unknown): value is HistoryVisibleColumns {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Record<string, unknown>
-  return typeof candidate.time === 'boolean' && typeof candidate.hash === 'boolean'
+  return typeof candidate.time === 'boolean'
+    && typeof candidate.hash === 'boolean'
+    && (candidate.committer === undefined || typeof candidate.committer === 'boolean')
 }

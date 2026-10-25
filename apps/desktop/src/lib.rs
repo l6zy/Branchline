@@ -24,6 +24,7 @@ pub fn run() {
             commands::fetch_repository,
             commands::stage_files,
             commands::stage_patch,
+            commands::unstage_patch,
             commands::restore_patch,
             commands::unstage_files,
             commands::discard_worktree_files,

@@ -325,7 +325,7 @@ pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, String> 
     command_output(path, args)
 }
 
-fn git_apply_cached(path: &Path, patch: &str) -> Result<(), String> {
+fn git_apply_cached(path: &Path, patch: &str, reverse: bool) -> Result<(), String> {
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args([
         "apply",
@@ -334,6 +334,9 @@ fn git_apply_cached(path: &Path, patch: &str) -> Result<(), String> {
         "--whitespace=nowarn",
         "-",
     ]);
+    if reverse {
+        command.arg("--reverse");
+    }
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let mut child = command
@@ -847,32 +850,44 @@ fn hunk_start(header: &str, marker: char) -> Option<usize> {
 }
 
 fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
-    let mut rows = Vec::new();
+    let mut rows: Vec<DiffLine> = Vec::new();
     let mut old_line = 0usize;
     let mut next_line = 0usize;
     let mut in_hunk = false;
-    for line in diff.lines() {
+    // Git separates patch records with LF. A preceding CR belongs to the file
+    // content and must survive round trips through partial staging patches.
+    for line in diff.split_terminator('\n') {
         if line.starts_with("@@") {
             old_line = hunk_start(line, '-').unwrap_or(1);
             next_line = hunk_start(line, '+').unwrap_or(1);
             in_hunk = true;
             continue;
         }
-        if !in_hunk || line.starts_with("\\ No newline") {
+        if line.starts_with("\\ No newline") {
+            if let Some(row) = rows.last_mut() {
+                row.old_no_newline = row.kind != "add";
+                row.new_no_newline = row.kind != "del";
+            }
+            continue;
+        }
+        if !in_hunk {
             continue;
         }
         let mut chars = line.chars();
         let prefix = chars.next().unwrap_or(' ');
         let code = chars.collect::<String>();
+        let display_code = code.strip_suffix('\r').unwrap_or(&code).to_string();
         match prefix {
             '+' => {
                 rows.push(DiffLine {
                     old: None,
                     next: Some(next_line),
                     kind: "add".into(),
-                    code: code.clone(),
+                    code: display_code,
                     old_code: None,
                     new_code: Some(code),
+                    old_no_newline: false,
+                    new_no_newline: false,
                 });
                 next_line += 1;
             }
@@ -881,9 +896,11 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
                     old: Some(old_line),
                     next: None,
                     kind: "del".into(),
-                    code: code.clone(),
+                    code: display_code,
                     old_code: Some(code),
                     new_code: None,
+                    old_no_newline: false,
+                    new_no_newline: false,
                 });
                 old_line += 1;
             }
@@ -892,9 +909,11 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
                     old: Some(old_line),
                     next: Some(next_line),
                     kind: "same".into(),
-                    code: code.clone(),
+                    code: display_code,
                     old_code: Some(code.clone()),
                     new_code: Some(code),
+                    old_no_newline: false,
+                    new_no_newline: false,
                 });
                 old_line += 1;
                 next_line += 1;
@@ -931,36 +950,33 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
             .filter(|(_, row)| row.kind == "add")
             .map(|(offset, row)| (start + offset, row.clone()))
             .collect();
-        let paired_count = deletions.len().min(additions.len());
-        let mut paired_deletions = HashMap::new();
-        let mut paired_additions = HashSet::new();
-        for pair_index in 0..paired_count {
-            let (deletion_index, deletion) = &deletions[pair_index];
-            let (addition_index, addition) = &additions[pair_index];
-            if deletion.code.trim() == addition.code.trim() {
-                paired_deletions.insert(*deletion_index, DiffLine {
-                    old: deletion.old,
-                    next: addition.next,
-                    kind: "same".into(),
-                    code: addition.code.clone(),
-                    old_code: Some(deletion.code.clone()),
-                    new_code: Some(addition.code.clone()),
-                });
-                paired_additions.insert(*addition_index);
+        let mut pending_deletions = Vec::new();
+        let mut pending_additions = Vec::new();
+        for pair_index in 0..deletions.len().max(additions.len()) {
+            let deletion = deletions.get(pair_index).map(|(_, row)| row);
+            let addition = additions.get(pair_index).map(|(_, row)| row);
+            if let (Some(deletion), Some(addition)) = (deletion, addition) {
+                if deletion.code.trim() == addition.code.trim() {
+                    normalized.append(&mut pending_deletions);
+                    normalized.append(&mut pending_additions);
+                    normalized.push(DiffLine {
+                        old: deletion.old,
+                        next: addition.next,
+                        kind: "same".into(),
+                        code: addition.code.clone(),
+                        old_code: deletion.old_code.clone(),
+                        new_code: addition.new_code.clone(),
+                        old_no_newline: deletion.old_no_newline,
+                        new_no_newline: addition.new_no_newline,
+                    });
+                    continue;
+                }
             }
+            if let Some(row) = deletion { pending_deletions.push(row.clone()); }
+            if let Some(row) = addition { pending_additions.push(row.clone()); }
         }
-        for source_index in start..index {
-            if let Some(row) = paired_deletions.get(&source_index) {
-                normalized.push(row.clone());
-            } else if rows[source_index].kind == "del" {
-                normalized.push(rows[source_index].clone());
-            }
-        }
-        for (source_index, row) in additions {
-            if !paired_additions.contains(&source_index) {
-                normalized.push(row);
-            }
-        }
+        normalized.append(&mut pending_deletions);
+        normalized.append(&mut pending_additions);
     }
     normalized
 }
@@ -986,6 +1002,7 @@ pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result
             }
             let content = std::fs::read_to_string(&resolved)
                 .map_err(|_| "暂不支持预览二进制文件".to_string())?;
+            let line_count = content.lines().count();
             rows = content
                 .lines()
                 .enumerate()
@@ -996,6 +1013,8 @@ pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result
                     code: code.to_string(),
                     old_code: None,
                     new_code: Some(code.to_string()),
+                    old_no_newline: false,
+                    new_no_newline: !content.ends_with('\n') && index + 1 == line_count,
                 })
                 .collect();
         }
@@ -1025,6 +1044,7 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) 
             }
             let content = std::fs::read_to_string(&resolved)
                 .map_err(|_| "暂不支持预览二进制文件".to_string())?;
+            let line_count = content.lines().count();
             rows = content
                 .lines()
                 .enumerate()
@@ -1035,6 +1055,8 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) 
                     code: code.to_string(),
                     old_code: None,
                     new_code: Some(code.to_string()),
+                    old_no_newline: false,
+                    new_no_newline: !content.ends_with('\n') && index + 1 == line_count,
                 })
                 .collect();
         }
@@ -2848,7 +2870,7 @@ pub fn stage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryF
     if file_count == 0 {
         return Err("暂存 patch 缺少有效文件路径".into());
     }
-    git_apply_cached(&root, &patch)?;
+    git_apply_cached(&root, &patch, false)?;
     Ok(parse_changed_files(&root))
 }
 
@@ -2881,6 +2903,37 @@ pub fn restore_patch(repository_path: &str, patch: &str) -> Result<Vec<Repositor
             let _ = std::fs::remove_file(target);
         }
     }
+    Ok(parse_changed_files(&root))
+}
+
+pub fn unstage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+    let root = repository_root(repository_path)?;
+    let patch = patch.trim_start_matches('\u{feff}');
+    if patch.trim().is_empty() {
+        return Err("没有选择要取消暂存的修改".into());
+    }
+    let mut file_count = 0;
+    for line in patch.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/").or_else(|| line.strip_prefix("--- a/")) {
+            validated_file_path(path)?;
+            file_count += 1;
+        }
+    }
+    if file_count == 0 {
+        return Err("取消暂存 patch 缺少有效文件路径".into());
+    }
+    // Reversing a deletion recreates the index entry with its committed mode.
+    let mut patch = patch.to_string();
+    if patch.contains("deleted file mode 100644\n") {
+        if let Some(path) = patch.lines().find_map(|line| line.strip_prefix("--- a/")) {
+            if let Ok(entry) = git_output(&root, &["ls-tree", "HEAD", "--", path]) {
+                if let Some(mode @ ("100644" | "100755" | "120000")) = entry.split_whitespace().next() {
+                    patch = patch.replace("deleted file mode 100644\n", &format!("deleted file mode {mode}\n"));
+                }
+            }
+        }
+    }
+    git_apply_cached(&root, &patch, true)?;
     Ok(parse_changed_files(&root))
 }
 
@@ -3912,6 +3965,108 @@ mod tests {
             fs::read_to_string(repository.0.join("README.md")).expect("read restored file"),
             "first\n"
         );
+    }
+
+    #[test]
+    fn unstages_a_selected_patch_without_changing_the_worktree() {
+        let repository = test_repository();
+        git_output(&repository.0, &["config", "core.autocrlf", "false"]).unwrap();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::write(repository.0.join("README.md"), "first!\nsecond\n").unwrap();
+        git_output(&repository.0, &["add", "README.md"]).unwrap();
+        fs::write(repository.0.join("README.md"), "first!\nsecond\nlocal\n").unwrap();
+        let patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,2 @@\n first!\n+second\n";
+        unstage_patch(&path, patch).expect("unstage selected insertion");
+        assert_eq!(git_output(&repository.0, &["show", ":README.md"]).unwrap(), "first!\n");
+        assert_eq!(fs::read_to_string(repository.0.join("README.md")).unwrap(), "first!\nsecond\nlocal\n");
+        assert!(unstage_patch(&path, "").is_err());
+        assert!(unstage_patch(&path, "--- a/../outside\n+++ b/../outside\n").is_err());
+    }
+
+    #[test]
+    fn unstages_a_new_file_patch_without_head() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        git_output(&repository.0, &["checkout", "--orphan", "empty"]).unwrap();
+        git_output(&repository.0, &["rm", "--cached", "README.md"]).unwrap();
+        fs::write(repository.0.join("new.txt"), "new\n").unwrap();
+        git_output(&repository.0, &["add", "new.txt"]).unwrap();
+        let patch = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,1 @@\n+new\n";
+        unstage_patch(&path, patch).expect("unstage added file without HEAD");
+        assert!(git_output(&repository.0, &["ls-files", "--", "new.txt"]).unwrap().is_empty());
+        assert_eq!(fs::read_to_string(repository.0.join("new.txt")).unwrap(), "new\n");
+    }
+
+    #[test]
+    fn unstaging_a_deleted_executable_preserves_its_head_mode() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        git_output(&repository.0, &["update-index", "--chmod=+x", "README.md"]).unwrap();
+        git_output(&repository.0, &["commit", "-m", "make executable"]).unwrap();
+        git_output(&repository.0, &["rm", "-f", "README.md"]).unwrap();
+        let patch = "diff --git a/README.md b/README.md\ndeleted file mode 100644\n--- a/README.md\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-first\n";
+        unstage_patch(&path, patch).expect("restore deleted executable to index");
+        let index_entry = git_output(&repository.0, &["ls-files", "--stage", "--", "README.md"]).unwrap();
+        assert!(index_entry.starts_with("100755 "), "{index_entry}");
+        assert!(!repository.0.join("README.md").exists());
+    }
+
+    #[test]
+    fn crlf_diff_rows_keep_patch_content_separate_from_display_text() {
+        let rows = parse_diff_text("@@ -1,3 +1,3 @@\n context\r\n-old\r\n+new\r\n tail\r\n", true);
+        assert_eq!(rows[0].old_code.as_deref(), Some("context\r"));
+        assert_eq!(rows[1].old_code.as_deref(), Some("old\r"));
+        assert_eq!(rows[2].new_code.as_deref(), Some("new\r"));
+        assert_eq!(rows[2].code, "new");
+        let hidden = parse_diff_text("@@ -1,2 +1,2 @@\n-old\r\n-tail\r\n+new\r\n+  tail  \r\n", false);
+        assert_eq!(hidden[2].old_code.as_deref(), Some("tail\r"));
+        assert_eq!(hidden[2].new_code.as_deref(), Some("  tail  \r"));
+    }
+
+    #[test]
+    fn parsed_crlf_block_can_be_staged_unstaged_and_restored() {
+        let repository = test_repository();
+        let root = &repository.0;
+        let path = root.to_string_lossy().to_string();
+        git_output(root, &["config", "core.autocrlf", "false"]).unwrap();
+        let before = "context\r\nold\r\ntail\r\n";
+        let after = "context\r\nnew\r\ntail\r\n";
+        fs::write(root.join("README.md"), before).unwrap();
+        git_output(root, &["add", "README.md"]).unwrap();
+        git_output(root, &["commit", "-m", "CRLF baseline"]).unwrap();
+        // Reproduce repositories whose existing index retains CRLF even with input conversion.
+        git_output(root, &["config", "core.autocrlf", "input"]).unwrap();
+        fs::write(root.join("README.md"), after).unwrap();
+        let rows = parse_unstaged_diff(root, "README.md", true).unwrap();
+        let body: String = rows.iter().map(|row| {
+            let (prefix, code) = match row.kind.as_str() {
+                "del" => ('-', row.old_code.as_ref().unwrap()),
+                "add" => ('+', row.new_code.as_ref().unwrap()),
+                _ => (' ', row.old_code.as_ref().unwrap()),
+            };
+            format!("{prefix}{code}\n")
+        }).collect();
+        let patch = format!("diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n{body}");
+        stage_patch(&path, &patch).expect("stage parsed CRLF block");
+        assert_eq!(git_output(root, &["show", ":README.md"]).unwrap(), after);
+        unstage_patch(&path, &patch).expect("unstage CRLF block");
+        assert_eq!(git_output(root, &["show", ":README.md"]).unwrap(), before);
+        assert_eq!(fs::read_to_string(root.join("README.md")).unwrap(), after);
+        restore_patch(&path, &patch).expect("restore CRLF block");
+        assert_eq!(fs::read_to_string(root.join("README.md")).unwrap(), before);
+    }
+
+    #[test]
+    fn retains_missing_newline_markers_in_diff_rows() {
+        let rows = parse_diff_text("@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", true);
+        assert!(rows[0].old_no_newline);
+        assert!(rows[1].new_no_newline);
+    }
+
+    #[test]
+    fn hidden_whitespace_context_keeps_replacements_in_file_order() {
+        let rows = parse_diff_text("@@ -1,2 +1,2 @@\n-old\n-tail\n+new\n+  tail  \n", false);
+        assert_eq!(rows.iter().map(|row| (row.kind.as_str(), row.code.as_str())).collect::<Vec<_>>(), vec![("del", "old"), ("add", "new"), ("same", "  tail  ")]);
     }
 
     #[test]

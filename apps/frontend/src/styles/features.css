@@ -251,23 +251,35 @@
 
 .stats b, .file-header b { color: var(--danger); font-weight: 400; }
 
-.code-diff { min-width: 0; min-height: 0; overflow: auto; color: var(--code-text); background: var(--code-surface); font-family: var(--font-code); font-variant-ligatures: none; tab-size: 4; }
+.code-diff { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; color: var(--code-text); background: var(--code-surface); font-family: var(--font-code); font-variant-ligatures: none; tab-size: 4; }
 
 .code-diff::-webkit-scrollbar-button { display: none; }
+
+.diff-viewer *::-webkit-scrollbar-button { width: 0; height: 0; display: none; }
 
 .diff-viewer > .code-diff { width: 100%; height: 100%; }
 
 .diff-overview { position: absolute; z-index: 5; right: 0; width: 10px; overflow: hidden; border-radius: 3px; cursor: pointer; background: color-mix(in srgb, var(--code-surface) 76%, transparent); touch-action: none; }
 
-.diff-overview-marker { position: absolute; left: 2px; right: 2px; height: 3px; min-height: 3px; border-radius: 2px; background: var(--danger); opacity: .9; }
+.diff-overview-marker { position: absolute; left: 2px; right: 2px; opacity: .96; }
+
+.diff-overview-marker.add { background: var(--success); }
+
+.diff-overview-marker.del { background: var(--danger); }
+
+.diff-overview.split .diff-overview-marker.old { left: 1px; right: auto; width: 3px; }
+
+.diff-overview.split .diff-overview-marker.new { left: 6px; right: auto; width: 3px; }
 
 .diff-overview-viewport { position: absolute; left: 0; right: 0; min-height: 5px; border: 1px solid color-mix(in srgb, var(--accent) 72%, #ffffff); border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); pointer-events: none; }
 
-.code-diff.split { overflow: hidden; display: flex; flex-direction: column; }
+.unified-diff-pane { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 
-.code-diff.split > .file-header { flex: 0 0 34px; }
+.code-diff > .file-header { flex: 0 0 34px; }
 
-.file-header { position: sticky; top: 0; left: 0; z-index: 2; width: max-content; min-width: 100%; height: 34px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); background: var(--code-surface); font-size: 10px; }
+.code-diff > .hunk { flex: 0 0 24px; }
+
+.file-header { z-index: 2; min-width: 0; height: 34px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--code-border); color: var(--code-muted); background: var(--code-surface); font-size: 10px; }
 
 .file-header-path { min-width: 0; flex: 1; display: flex; align-items: center; gap: 5px; overflow: hidden; }
 
@@ -288,6 +300,8 @@
 .code-row { position: relative; width: max-content; min-width: max(660px, 100%); min-height: 22px; display: grid; grid-template-columns: 9.5ch 4.5ch 2ch 1fr; align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
 .diff-panel:not(.stage-actions-enabled) .code-row { grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); }
+
+.diff-panel.stage-actions-enabled .code-row { grid-template-columns: 32px var(--diff-line-number-width, 5ch) 26px minmax(max-content, 1fr); }
 
 .diff-panel:not(.stage-actions-enabled) .diff-stage-slot { display: none; }
 
@@ -321,17 +335,21 @@
 
 .code-row code { padding: 3px 9px; line-height: 1.5; white-space: pre; }
 
-.diff-stage-action, .diff-restore-action { position: absolute; z-index: 2; top: 2px; border-radius: 4px; background: var(--code-surface-raised); font-size: 10px; cursor: pointer; opacity: .92; transition: opacity .12s, background .12s, color .12s; }
+.diff-stage-slot { position: relative; height: 100%; min-width: 0; background: var(--code-surface); }
 
-.diff-stage-action { left: 4px; padding: 2px 7px; border: 1px solid var(--accent); color: var(--accent); }
+.diff-block-range { position: absolute; left: 50%; z-index: 1; width: 1px; background: var(--code-border); pointer-events: none; }
 
-.diff-restore-action { left: 45px; width: 22px; height: 18px; padding: 0; display: grid; place-items: center; border: 1px solid var(--danger); color: var(--danger); }
+.diff-block-actions { position: absolute; left: 50%; transform: translate(-50%, -50%); z-index: 3; display: flex; flex-direction: column; align-items: center; overflow: hidden; border-radius: 3px; color: var(--code-text); background: color-mix(in srgb, var(--accent) 16%, var(--code-surface)); }
 
-.code-row:hover .diff-stage-action, .code-row:hover .diff-restore-action, .diff-stage-action:focus-visible, .diff-restore-action:focus-visible { opacity: 1; }
+.diff-block-actions > button { position: static; width: 24px; height: 20px; flex-shrink: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; color: inherit; background: transparent; cursor: pointer; transition: background .12s, color .12s; }
 
-.diff-stage-action:hover { color: var(--accent-contrast, #fff); background: var(--accent); }
+.diff-block-actions > button:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
-.diff-restore-action:hover { color: #fff; background: var(--danger); }
+.diff-block-actions > .diff-restore-action:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, var(--code-surface)); }
+
+.diff-block-actions > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; background: var(--accent-dim); }
+
+.diff-block-actions > button:disabled { opacity: .4; cursor: wait; }
 
 .syntax { min-width: max-content; color: inherit; }
 

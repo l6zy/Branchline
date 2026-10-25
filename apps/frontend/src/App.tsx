@@ -31,6 +31,7 @@ import { DEFAULT_HISTORY_LOAD_LIMIT, nextHistoryLoadLimit } from './features/his
 import { formatLocalDateTime } from './dateTime'
 import { isBooleanRecord, usePersistentState } from './persistentState'
 import { DEFAULT_HISTORY_COLUMN_WIDTHS, DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryColumnWidths, isHistoryVisibleColumns } from './features/history/historyColumns'
+import { committerInitials, committerName, isHistoryCommitVisibleOnSelectedBranches, matchesCommitterFilter, reachableHistoryCommitIds, toggleFilterValue, unloadedHistoryBranches } from './features/history/historyFilters'
 import { acquireOperationLock, releaseOperationLock } from './features/operation/operationLock'
 import {
   Archive,
@@ -315,12 +316,12 @@ function commitDay(commit: Commit) {
   }
 }
 
-function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onRevertCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onRevertCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
+function CommitList({ commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onRevertCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string[]; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onRevertCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
   const [widths, setWidths] = usePersistentState('branchline.historyColumnWidths.v1', DEFAULT_HISTORY_COLUMN_WIDTHS, isHistoryColumnWidths)
   const [visibleColumns, setVisibleColumns] = usePersistentState('branchline.historyVisibleColumns.v1', DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryVisibleColumns)
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
-  const [authorFilter, setAuthorFilter] = useState<string | null>(null)
-  const [authorMenuOpen, setAuthorMenuOpen] = useState(false)
+  const [committerFilter, setCommitterFilter] = useState<string[]>([])
+  const [committerMenuOpen, setCommitterMenuOpen] = useState(false)
   const [contextCommit, setContextCommit] = useState<{ commit: Commit; x: number; y: number } | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [listHeight, setListHeight] = useState(600)
@@ -332,52 +333,24 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
   const handledSearchAction = useRef(0)
   const autoLocatedSearch = useRef('')
   const deferredQuery = useDeferredValue(query)
-  const authors = useMemo(() => Array.from(new Set(commits.map((commit) => commit.author))), [commits])
+  const committers = useMemo(() => Array.from(new Set(commits.filter((commit) => commit.status !== 'working').map((commit) => committerName(commit)))), [commits])
   const remoteBranchSet = useMemo(() => new Set(remoteBranches), [remoteBranches])
   const tagSet = useMemo(() => new Set(tags), [tags])
   const mergeBranch = contextCommit?.commit.branches?.find((reference) => remoteBranchSet.has(reference) || remoteBranchSet.has(reference.replace(/^refs\/remotes\//, '')))
   const mergeTargetLabel = mergeBranch ? `分支 ${mergeBranch.replace(/^refs\/remotes\//, '')}` : `提交 ${contextCommit?.commit.id ?? ''}`
   const contextStashReference = contextCommit?.commit.fullHash ? stashReferences[contextCommit.commit.fullHash] : undefined
-  const branchCommitIds = useMemo(() => {
-    if (branchFilter === 'all') return null
-    const byReference = new Map<string, Commit>()
-    commits.forEach((commit) => {
-      byReference.set(commit.id, commit)
-      if (commit.fullHash) {
-        byReference.set(commit.fullHash, commit)
-        for (let length = 7; length < commit.fullHash.length; length += 1) {
-          const prefix = commit.fullHash.slice(0, length)
-          if (!byReference.has(prefix)) byReference.set(prefix, commit)
-        }
-      }
-    })
-    const tip = commits.find((commit) => commit.branches?.includes(branchFilter))
-    const reachable = new Set<string>()
-    const stack = tip ? [tip] : []
-    while (stack.length) {
-      const commit = stack.pop()!
-      if (reachable.has(commit.id)) continue
-      reachable.add(commit.id)
-      ;(commit.parents ?? (commit.parent ? [commit.parent] : [])).forEach((parent) => {
-        const parentCommit = byReference.get(parent)
-        if (parentCommit) stack.push(parentCommit)
-      })
-    }
-    return reachable
-  }, [branchFilter, commits])
+  const branchCommitIds = useMemo(() => reachableHistoryCommitIds(commits, branchFilter), [branchFilter, commits])
   const baseFiltered = useMemo(() => {
     const timeWindow = timeFilter === 'day' ? 86_400_000 : timeFilter === 'week' ? 7 * 86_400_000 : timeFilter === 'month' ? 30 * 86_400_000 : null
     const threshold = timeWindow ? Date.now() - timeWindow : null
     return commits.filter((commit) => {
       const timestamp = threshold ? commitTimestamp(commit) : null
-      const visibleOnBranch = commit.status === 'working'
-        ? (!branchCommitIds || branchFilter === currentBranch)
-        : (!branchCommitIds || branchCommitIds.has(commit.id))
-      return (!authorFilter || commit.author === authorFilter)
+      const visibleOnBranch = isHistoryCommitVisibleOnSelectedBranches(commit, branchFilter, currentBranch, branchCommitIds)
+      return matchesCommitterFilter(commit, committerFilter)
         && visibleOnBranch
         && (!threshold || timestamp === null || timestamp >= threshold)
     })
-  }, [authorFilter, branchCommitIds, branchFilter, commits, currentBranch, timeFilter])
+  }, [branchCommitIds, branchFilter, commits, committerFilter, currentBranch, timeFilter])
   const searchMatches = useMemo(() => matchingCommitIds(baseFiltered, deferredQuery), [baseFiltered, deferredQuery])
   const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches])
   const filtered = useMemo(() => visibleHistoryCommits(baseFiltered, deferredQuery, searchMode), [baseFiltered, deferredQuery, searchMode])
@@ -408,10 +381,10 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     const closeMenus = (event: PointerEvent) => {
       if (!columnsHeaderRef.current?.contains(event.target as Node)) {
         setColumnMenuOpen(false)
-        setAuthorMenuOpen(false)
+        setCommitterMenuOpen(false)
       }
     }
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setColumnMenuOpen(false); setAuthorMenuOpen(false) } }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') { setColumnMenuOpen(false); setCommitterMenuOpen(false) } }
     document.addEventListener('pointerdown', closeMenus)
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('pointerdown', closeMenus); document.removeEventListener('keydown', onKeyDown) }
@@ -450,7 +423,10 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
       element.scrollTo({ top: Math.max(0, top - element.clientHeight / 2), behavior: 'smooth' })
     }
   }, [selected])
-  const template = [`${widths.branch}px`, `${widths.graph}px`, 'minmax(180px, 1fr)', visibleColumns.time ? `${widths.time}px` : '', visibleColumns.hash ? `${widths.hash}px` : '', `${widths.author}px`].filter(Boolean).join(' ')
+  const committerColumnVisible = visibleColumns.committer ?? true
+  const template = [`${widths.branch}px`, `${widths.graph}px`, 'minmax(180px, 1fr)', visibleColumns.time ? `${widths.time}px` : '', visibleColumns.hash ? `${widths.hash}px` : '', committerColumnVisible ? `${widths.author}px` : ''].filter(Boolean).join(' ')
+  const committerFilterButton = <Button variant="icon" active={committerFilter.length > 0} onClick={() => { setCommitterMenuOpen((value) => !value); setColumnMenuOpen(false) }} title="筛选提交人" aria-label="筛选提交人"><ListFilter size={14}/></Button>
+  const committerFilterMenu = committerMenuOpen && <div className="column-config-menu author-filter-menu"><strong>筛选提交人（可多选）</strong><button className={committerFilter.length === 0 ? 'active' : ''} onClick={() => setCommitterFilter([])}>全部提交人</button>{committers.map((committer) => <button className={committerFilter.includes(committer) ? 'active' : ''} key={committer} onClick={() => setCommitterFilter((values) => toggleFilterValue(values, committer))}><Check size={13} className={committerFilter.includes(committer) ? '' : 'filter-check-hidden'}/><span>{committer}</span></button>)}</div>
   const beginResize = (column: ColumnKey, event: React.PointerEvent<HTMLSpanElement>) => {
     event.preventDefault()
     const startX = event.clientX
@@ -458,7 +434,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     const onMove = (moveEvent: PointerEvent) => {
       const delta = moveEvent.clientX - startX
       const minimum = column === 'graph' ? 120 : column === 'author' ? 128 : column === 'time' ? 88 : column === 'branch' ? 90 : 68
-      setWidths((current) => ({ ...current, [column]: Math.max(minimum, startWidth + (column === 'author' ? -delta : delta)) }))
+      setWidths((current) => ({ ...current, [column]: Math.max(minimum, startWidth + delta) }))
     }
     const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
     window.addEventListener('pointermove', onMove)
@@ -478,10 +454,10 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
     <div ref={columnsHeaderRef} className="commit-columns-header" style={{ gridTemplateColumns: template }}>
       <div className="column-label">分支 / 标签{resizer('branch')}</div>
       <div className="column-label">图谱{resizer('graph')}</div>
-      <div className="column-label">提交信息{resizer('author')}</div>
+      <div className="column-label message-label"><span className="column-title">提交信息</span><div className="column-actions">{committerFilterButton}<Button variant="icon" onClick={() => { setColumnMenuOpen((value) => !value); setCommitterMenuOpen(false) }} title="配置列" aria-label="配置列"><Settings2 size={14}/></Button></div>{columnMenuOpen && <div className="column-config-menu"><strong>显示列</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>时间</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label><label><input type="checkbox" checked={committerColumnVisible} onChange={(event) => setVisibleColumns((value) => ({ ...value, committer: event.target.checked }))}/>提交人</label></div>}{committerFilterMenu}</div>
       {visibleColumns.time && <div className="column-label">时间{resizer('time')}</div>}
       {visibleColumns.hash && <div className="column-label">Hash{resizer('hash')}</div>}
-      <div className="column-label author-label"><span className="column-title">提交人</span><div className="column-actions"><Button variant="icon" active={Boolean(authorFilter)} onClick={() => { setAuthorMenuOpen((value) => !value); setColumnMenuOpen(false) }} title="筛选提交人" aria-label="筛选提交人"><ListFilter size={14}/></Button><Button variant="icon" onClick={() => { setColumnMenuOpen((value) => !value); setAuthorMenuOpen(false) }} title="配置列" aria-label="配置列"><Settings2 size={14}/></Button></div>{authorMenuOpen && <div className="column-config-menu author-filter-menu"><strong>筛选提交人</strong><button className={!authorFilter ? 'active' : ''} onClick={() => { setAuthorFilter(null); setAuthorMenuOpen(false) }}>全部提交人</button>{authors.map((author) => <button className={authorFilter === author ? 'active' : ''} key={author} onClick={() => { setAuthorFilter(author); setAuthorMenuOpen(false) }}>{author}</button>)}</div>}{columnMenuOpen && <div className="column-config-menu"><strong>显示列</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>时间</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label></div>}</div>
+      {committerColumnVisible && <div className="column-label author-label"><span className="column-title">提交人</span>{resizer('author')}</div>}
     </div>
     <div className="commit-list" ref={commitListRef} onScroll={(event) => {
       pendingScrollTop.current = event.currentTarget.scrollTop
@@ -509,7 +485,7 @@ function CommitList({ commits, selected, onSelect, query, searchMode, searchActi
         </div>
         {visibleColumns.time && <div className="optional-cell time-cell" title={formatLocalDateTime(commit.commitTime ?? commit.authorTime ?? commit.time)}>{formatCommitListTime(commit)}</div>}
         {visibleColumns.hash && <div className="optional-cell hash-cell">{commit.id}</div>}
-        <div className={`author-cell ${authorFilter === commit.author ? 'filtered-author' : ''}`}><div className="avatar tiny">{commit.avatar}</div><span>{commit.author}</span></div>
+        {committerColumnVisible && <div className={`author-cell ${committerFilter.includes(committerName(commit)) ? 'filtered-author' : ''}`}><div className="avatar tiny">{committerInitials(committerName(commit))}</div><span>{committerName(commit)}</span></div>}
       </button>
     })}
     {virtualRange.end < filtered.length && <div className="commit-list-spacer" style={{ height: (filtered.length - virtualRange.end) * COMMIT_ROW_HEIGHT }}/>} 
@@ -675,7 +651,7 @@ export default function App() {
     setSearchSummary((current) => retainUnchangedSearchSummary(current, next))
   }, [])
   const [repositorySwitcherSignal, setRepositorySwitcherSignal] = useState(0)
-  const [branchFilter, setBranchFilter] = useState('all')
+  const [branchFilter, setBranchFilter] = useState<string[]>([])
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
   const [filterMenu, setFilterMenu] = useState<{ kind: 'branch' | 'time'; x: number; y: number } | null>(null)
   const [notificationOpen, setNotificationOpen] = useState(false)
@@ -727,6 +703,37 @@ export default function App() {
   const activeCommits = useMemo<Commit[]>(() => workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
     : repository?.commits ?? [], [repository?.commits, workingTreeCommit])
+  const unloadedBranchFilters = useMemo(
+    () => unloadedHistoryBranches(activeCommits, branchFilter),
+    [activeCommits, branchFilter],
+  )
+  const repositoryPath = repository?.path
+  useEffect(() => {
+    if (!repositoryPath || !unloadedBranchFilters.length || historyLoadInProgress.current) return
+    const nextLimit = nextHistoryLoadLimit(historyLoadLimit)
+    if (!nextLimit) return
+    historyLoadInProgress.current = true
+    setActiveOperation({ key: 'history', label: '正在扩大提交图谱…', detail: `正在读取 ${nextLimit.toLocaleString()} 条提交以定位 ${unloadedBranchFilters.join('、')}` })
+    let cancelled = false
+    loadRepositoryHistory(repositoryPath, nextLimit)
+      .then((snapshot) => {
+        if (cancelled) return
+        setHistoryLoadLimit(nextLimit)
+        applySnapshot(snapshot)
+      })
+      .catch((error) => {
+        if (!cancelled) setRepositoryNotice(error instanceof Error ? error.message : String(error))
+      })
+      .finally(() => {
+        if (cancelled) return
+        historyLoadInProgress.current = false
+        setActiveOperation((current) => current?.key === 'history' ? null : current)
+      })
+    return () => {
+      cancelled = true
+      historyLoadInProgress.current = false
+    }
+  }, [applySnapshot, historyLoadLimit, repositoryPath, setRepositoryNotice, unloadedBranchFilters])
   const currentBranchHead = useMemo(
     () => activeCommits.find((commit) => commit.status !== 'working' && commit.branches?.includes(repository?.branch ?? ''))
       ?? activeCommits.find((commit) => commit.status !== 'working')
@@ -839,7 +846,7 @@ export default function App() {
     setDiffFile(null)
     setWideDiff(false)
     setQuery('')
-    setBranchFilter('all')
+    setBranchFilter([])
     setTimeFilter('all')
     setWorkspaceView('history')
   }
@@ -1108,7 +1115,7 @@ export default function App() {
       return
     }
     setQuery('')
-    setBranchFilter('all')
+    setBranchFilter([])
     setTimeFilter('all')
     setSelected(stashCommit.id)
     setWorkspaceView('history')
@@ -1173,7 +1180,7 @@ export default function App() {
     }
     setWorkspaceView('history')
     setQuery('')
-    setBranchFilter('all')
+    setBranchFilter([])
     setTimeFilter('all')
     setSelected(commit.id)
     requestAnimationFrame(() => {
@@ -1195,7 +1202,7 @@ export default function App() {
     }
     setWorkspaceView('history')
     setQuery('')
-    setBranchFilter('all')
+    setBranchFilter([])
     setTimeFilter('all')
     setSelected(commit.id)
     requestAnimationFrame(() => {
@@ -1258,7 +1265,7 @@ export default function App() {
   }, [handleFetch])
   const inspectorVisible = workspaceView === 'history' && !inspectorCollapsed && !(wideDiff && diffFile !== null)
   const timeFilterLabels: Record<TimeFilter, string> = { all: '全部时间', day: '最近 24 小时', week: '最近 7 天', month: '最近 30 天' }
-  const branchFilterLabel = branchFilter === 'all' ? '全部分支' : branchFilter
+  const branchFilterLabel = branchFilter.length === 0 ? '全部分支' : branchFilter.length === 1 ? branchFilter[0] : `已选 ${branchFilter.length} 个分支`
   return <main className={`app-shell ${theme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`}>
     <div className={`sidebar-shell ${sidebarCollapsed || !repository ? 'collapsed' : ''}`} style={{ width: sidebarCollapsed ? 0 : sidebarWidth, flexBasis: sidebarCollapsed ? 0 : sidebarWidth }}>
       <Sidebar repository={repository} structureRepository={structureRepository} parentRepository={parentRepository} recentRepositories={recentRepositories} openingRepository={openingRepository} activeView={workspaceView} structureSelection={structureSelection} repositorySwitcherSignal={repositorySwitcherSignal} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onReturnToParentRepository={handleReturnToParentRepository} onCreateBranch={openCreateBranchDialog} onDeleteBranchPrefix={(prefix) => void handleDeleteBranchPrefix(prefix)} onJumpBranch={handleJumpBranch} onSwitchBranch={(branch) => void handleSwitchBranch(branch)} onPullBranch={(branch) => void handlePullBranch(branch)} onMergeBranch={(branch) => void handleMergeReference(branch)} onDeleteBranch={(branch) => void handleDeleteBranch(branch)} onCopyBranch={(branch) => void copyText(branch, `已复制分支名：${branch}`)} onSelectView={setWorkspaceView} onSelectStructure={(selection) => { setStructureSelection(selection); setWorkspaceView('structure') }} onOpenGitConfig={() => setGitConfigOpen(true)} onOpenCommandLog={() => setCommandLogOpen(true)} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}/>
@@ -1284,9 +1291,9 @@ export default function App() {
           </div>
         </header>
       }
-      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="在统一图谱中查看提交、工作区和 Stash"><GitCommitHorizontal size={14}/><span className="tab-label">提交图谱</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="暂存文件并创建提交"><FileDiff size={14}/><span className="tab-label">暂存与提交</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="创建、应用或删除 Stash"><Archive size={14}/><span className="tab-label">Stash 管理</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} title="撤回当前分支的上一次提交，修改保留在工作区"><Undo2 size={14}/><span>撤回上次提交</span></Button><Button variant="secondary" className="filter-button" active={branchFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
+      {repository ? <><div className="content-tabs"><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} title="在统一图谱中查看提交、工作区和 Stash"><GitCommitHorizontal size={14}/><span className="tab-label">提交图谱</span></button><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} title="暂存文件并创建提交"><FileDiff size={14}/><span className="tab-label">暂存与提交</span></button><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} title="创建、应用或删除 Stash"><Archive size={14}/><span className="tab-label">Stash 管理</span></button><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} title="比较两个提交或分支的差异"><GitCompareArrows size={14}/><span className="tab-label">Diff 比较</span></button><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} title="查看待合并分支和冲突"><GitMerge size={14}/><span className="tab-label">合并队列</span></button>{repository.operation && <button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} title="处理当前 Git 操作"><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? '变基处理' : repository.operation.conflicts.length ? '冲突处理' : repository.operation.kind === 'merge' ? '合并处理' : repository.operation.kind === 'cherry-pick' ? '挑选处理' : '操作处理'}</span><span className="tab-badge">{repository.operation.conflicts.length || repository.operation.currentStep || '!'}</span></button>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} title="撤回当前分支的上一次提交，修改保留在工作区"><Undo2 size={14}/><span>撤回上次提交</span></Button><Button variant="secondary" className="filter-button" active={branchFilter.length > 0} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`分支筛选：${branchFilterLabel}`}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} title={`时间筛选：${timeFilterLabels[timeFilter]}`}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
-        {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选提交</span></div><div className="context-menu-options"><button className={branchFilter === 'all' ? 'selected-option' : ''} onClick={() => { setBranchFilter('all'); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <button className={branchFilter === branch ? 'selected-option' : ''} key={branch} onClick={() => { setBranchFilter(branch); setFilterMenu(null) }}><GitBranch size={14}/><span>{branch}</span></button>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
+        {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选（可多选）</span></div><div className="context-menu-options"><button className={branchFilter.length === 0 ? 'selected-option' : ''} onClick={() => { setBranchFilter([]); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <label className="history-filter-option" key={branch}><input type="checkbox" checked={branchFilter.includes(branch)} onChange={() => setBranchFilter((values) => toggleFilterValue(values, branch))}/><GitBranch size={14}/><span>{branch}</span></label>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
       <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">

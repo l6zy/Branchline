@@ -109,6 +109,8 @@ export type RepositoryDiffLine = {
   code: string
   oldCode?: string | null
   newCode?: string | null
+  oldNoNewline?: boolean
+  newNoNewline?: boolean
 }
 
 export type FileHistoryEntry = {

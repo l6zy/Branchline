@@ -131,6 +131,8 @@ pub struct DiffLine {
     pub code: String,
     pub old_code: Option<String>,
     pub new_code: Option<String>,
+    pub old_no_newline: bool,
+    pub new_no_newline: bool,
 }
 
 #[derive(Serialize)]

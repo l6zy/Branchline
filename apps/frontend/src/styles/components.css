@@ -256,7 +256,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .column-label { position: relative; min-width: 0; height: 100%; padding: 0 10px; display: flex; align-items: center; }
 
-.column-label.author-label { position: static; padding-left: 8px; padding-right: 72px; gap: 4px; white-space: nowrap; }
+.column-label.message-label { padding-right: 62px; }
+
+.column-label.author-label { position: relative; padding-left: 8px; padding-right: 34px; gap: 4px; white-space: nowrap; }
 
 .column-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -372,7 +374,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .column-config-menu input { accent-color: var(--accent); }
 
-.column-config-menu > button { min-height: 24px; padding: 0 6px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
+.column-config-menu > button { min-height: 24px; padding: 0 6px; display: flex; align-items: center; gap: 6px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; text-align: left; font-size: 12px; cursor: pointer; }
+
+.column-config-menu.author-filter-menu { min-width: 185px; max-height: min(320px, calc(100vh - 48px)); overflow-y: auto; }
+
+.filter-check-hidden { opacity: 0; }
 
 .column-config-menu > button:hover, .column-config-menu > button.active { color: #1677ff; background: var(--accent-dim); }
 
@@ -419,17 +425,17 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 .split-diff-pane { min-width: 0; min-height: 0; overflow: auto; background: var(--code-surface); }
 
 .split-diff-pane + .split-diff-pane { border-left: 1px solid var(--code-border); }
-.split-diff-actions { min-width: 0; overflow: auto; scrollbar-width: none; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface-raised); }
-.split-diff-panes:has(.split-diff-actions) { grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); }
+.split-diff-actions { min-width: 0; overflow: hidden; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
+.split-diff-panes:has(.split-diff-actions) { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); }
 .split-action-row { min-width: 0; min-height: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
-.split-action-row > button { position: static; width: 20px; height: 11px; padding: 0; display: grid; place-items: center; border-radius: 3px; opacity: .8; }
-.split-action-row .diff-stage-slot { display: contents; }
-.split-action-row .diff-stage-slot button { position: static; width: 20px; height: 11px; padding: 0; display: grid; place-items: center; }
+.split-action-row .diff-stage-slot.split { position: relative; width: 100%; height: 100%; }
 .diff-whitespace-toggle { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
 .diff-whitespace-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
-.line-action-add, .line-action-del { width: 2ch; padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; }
-.line-action-add { color: var(--accent); }
-.line-action-del { color: var(--danger); }
+.line-action-add, .line-action-del { width: 20px; height: 20px; margin: auto; padding: 0; display: grid; place-items: center; border: 1px solid transparent; border-radius: 4px; background: transparent; font: inherit; font-weight: 700; cursor: pointer; transition: color .12s, background .12s, border-color .12s, box-shadow .12s; }
+.line-action-add { border-color: color-mix(in srgb, var(--success) 32%, transparent); color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.line-action-del { border-color: color-mix(in srgb, var(--danger) 32%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.line-action-add:hover, .line-action-add:focus-visible { border-color: color-mix(in srgb, var(--success) 40%, transparent); color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
+.line-action-del:hover, .line-action-del:focus-visible { border-color: color-mix(in srgb, var(--danger) 40%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); }
 
 .split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
 
@@ -437,9 +443,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
    into `min-height` — leaving the pane with no scrollable overflow at all. */
 .split-diff-content.virtual-diff-list, .unified-diff-content.virtual-diff-list { box-sizing: content-box; }
 
-.split-code-side { position: relative; width: max-content; min-width: 100%; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+.split-code-side { position: relative; width: max-content; min-width: 100%; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 22px minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
-.diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: 10ch 2ch minmax(max-content, 1fr); }
+.diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: var(--diff-line-number-width, 5ch) 26px minmax(max-content, 1fr); }
 
 .split-code-side.add { background: var(--code-add); }
 
@@ -458,8 +464,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 .split-code-side.add .change-sign { color: var(--accent); }
 
 .split-code-side.del .change-sign { color: var(--danger); }
-
-.split-code-side .diff-stage-action { left: 4px; right: auto; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
 
@@ -710,6 +714,16 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .context-menu-options { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #595959 transparent; }
 
+.context-menu-options .history-filter-option { width: 100%; min-height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border-radius: 5px; color: var(--text); font-size: 12px; cursor: pointer; }
+
+.context-menu-options .history-filter-option:hover { color: var(--accent); background: var(--accent-dim); }
+
+.context-menu-options .history-filter-option:has(input:checked) { color: var(--accent); background: var(--accent-dim); }
+
+.history-filter-option input { margin: 0; accent-color: var(--accent); }
+
+.history-filter-option span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .context-menu button.selected-option { color: var(--accent); background: var(--accent-dim); }
 
 .drawer-heading { display: flex; justify-content: space-between; }
@@ -873,3 +887,5 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 /* 工作区分区只保留一条状态栏，避免说明文字侵占提交编辑空间。 */
 
 /* 让冲突工具栏沿用紧凑的分段操作样式，而非独立的按钮体系。 */
+
+.line-action-add:disabled, .line-action-del:disabled { opacity: .4; cursor: wait; }

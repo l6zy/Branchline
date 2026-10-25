@@ -198,6 +198,16 @@ pub async fn restore_patch(
 }
 
 #[tauri::command]
+pub async fn unstage_patch(
+    repository_path: String,
+    patch: String,
+) -> Result<Vec<RepositoryFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::unstage_patch(&repository_path, &patch))
+        .await
+        .map_err(|error| task_error("取消暂存修改块", error))?
+}
+
+#[tauri::command]
 pub async fn unstage_files(
     repository_path: String,
     file_paths: Vec<String>,

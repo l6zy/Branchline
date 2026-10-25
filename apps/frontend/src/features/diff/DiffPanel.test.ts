@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildStagePatch, changeBlock, changeLine, diffOverviewBounds, diffOverviewMarkers, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
+import { buildStagePatch, changeBlock, changeLine, diffActionEdgeSpace, diffOverviewBounds, diffOverviewMarkers, diffOverviewViewport, diffSplitRowHeight, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
 
 describe('diffOverviewBounds', () => {
   it('ends above the horizontal scrollbar when it consumes viewport height', () => {
@@ -18,16 +18,71 @@ describe('diffOverviewBounds', () => {
 })
 
 describe('diffOverviewMarkers', () => {
-  it('maps changed entry indexes onto normalized overview positions', () => {
-    expect(diffOverviewMarkers([0, 5, 9], 10)).toEqual([
-      { index: 0, top: 0 },
-      { index: 5, top: 50 },
-      { index: 9, top: 90 },
-    ])
-  })
+	it('maps contiguous additions and deletions to proportional overview ranges', () => {
+		expect(diffOverviewMarkers([
+			{ kind: 'same' },
+			{ kind: 'add' },
+			{ kind: 'add' },
+			{ kind: 'del' },
+			{ kind: 'same' },
+		], 'unified')).toEqual([
+			{ index: 1, top: 20, height: 40, kind: 'add', column: 'unified' },
+			{ index: 3, top: 60, height: 20, kind: 'del', column: 'unified' },
+		])
+	})
+
+	it('renders additions and deletions in separate columns for split diffs', () => {
+		expect(diffOverviewMarkers([
+			{ oldKind: 'same', newKind: 'same' },
+			{ oldKind: 'del', newKind: 'add' },
+			{ oldKind: 'del', newKind: 'add' },
+			{ oldKind: 'same', newKind: 'same' },
+		], 'split')).toEqual([
+			{ index: 1, top: 25, height: 50, kind: 'del', column: 'old' },
+			{ index: 1, top: 25, height: 50, kind: 'add', column: 'new' },
+		])
+	})
+
+	it('uses rendered row heights when mapping markers across mixed-height entries', () => {
+		expect(diffOverviewMarkers([
+			{ kind: 'same', height: 24 },
+			{ kind: 'add', height: 30 },
+			{ kind: 'add', height: 30 },
+			{ kind: 'del', height: 24 },
+		], 'unified')).toEqual([
+			{ index: 1, top: 22.2, height: 55.6, kind: 'add', column: 'unified' },
+			{ index: 3, top: 77.8, height: 22.2, kind: 'del', column: 'unified' },
+		])
+	})
 
   it('returns no markers for an empty diff', () => {
-    expect(diffOverviewMarkers([0], 0)).toEqual([])
+		expect(diffOverviewMarkers([], 'unified')).toEqual([])
+  })
+})
+
+describe('diffOverviewViewport', () => {
+	it('maps the content viewport below a sticky header to the overview track', () => {
+		expect(diffOverviewViewport(0, 1034, 400, 34)).toEqual({ top: 0, height: 36.6 })
+		expect(diffOverviewViewport(317, 1034, 400, 34)).toEqual({ top: 31.7, height: 36.6 })
+		expect(diffOverviewViewport(634, 1034, 400, 34)).toEqual({ top: 63.4, height: 36.6 })
+	})
+
+	it('fills the overview when the diff content does not scroll', () => {
+		expect(diffOverviewViewport(0, 400, 400, 34)).toEqual({ top: 0, height: 100 })
+	})
+})
+
+describe('diffSplitRowHeight', () => {
+  it('keeps code rows compact independently of block actions and scales with the font', () => {
+    expect(diffSplitRowHeight(12)).toBe(24)
+    expect(diffSplitRowHeight(22)).toBe(39)
+  })
+})
+
+describe('diffActionEdgeSpace', () => {
+  it('adds enough trailing room for a toolbar taller than the final row', () => {
+    expect(diffActionEdgeSpace(24, 40)).toBe(16)
+    expect(diffActionEdgeSpace(48, 40)).toBe(0)
   })
 })
 
@@ -147,7 +202,7 @@ describe('buildStagePatch', () => {
 })
 
 describe('changeLine', () => {
-  it('keeps only contiguous context around a changed row', () => {
+  it('keeps the complete replacement block and contiguous context around a changed row', () => {
     const rows: RepositoryDiffLine[] = [
       { old: 1, next: 1, kind: 'same', code: 'before' },
       { old: 2, next: null, kind: 'del', code: 'removed' },
@@ -156,7 +211,33 @@ describe('changeLine', () => {
       { old: 4, next: null, kind: 'del', code: 'other removed' },
     ]
     const line = changeLine(rows, 2)
-    expect(line.map((row) => row.code)).toEqual(['replacement', 'after'])
+    expect(line.map((row) => row.code)).toEqual(['before', 'removed', 'replacement', 'after'])
+  })
+
+  it('keeps only the matching replacement pair when several replacements share a hunk', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: 'before' },
+      { old: 2, next: null, kind: 'del', code: 'old one' },
+      { old: 3, next: null, kind: 'del', code: 'old two' },
+      { old: null, next: 2, kind: 'add', code: 'new one' },
+      { old: null, next: 3, kind: 'add', code: 'new two' },
+      { old: 4, next: 4, kind: 'same', code: 'after' },
+    ]
+
+    expect(changeLine(rows, 4).map((row) => row.code)).toEqual(['old two', 'new two'])
+  })
+
+  it('does not cross an independent change while collecting context', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: 'before' },
+      { old: 2, next: null, kind: 'del', code: 'removed' },
+      { old: null, next: 2, kind: 'add', code: 'replacement' },
+      { old: 3, next: 3, kind: 'same', code: 'between' },
+      { old: 4, next: null, kind: 'del', code: 'other removed' },
+      { old: 5, next: 4, kind: 'same', code: 'after' },
+    ]
+
+    expect(changeLine(rows, 2).map((row) => row.code)).toEqual(['before', 'removed', 'replacement', 'between'])
   })
 })
 

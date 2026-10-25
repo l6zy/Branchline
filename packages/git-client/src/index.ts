@@ -110,6 +110,10 @@ export async function restoreRepositoryPatch(repositoryPath: string, patch: stri
   return invoke<RepositoryFile[]>('restore_patch', { repositoryPath, patch })
 }
 
+export async function unstageRepositoryPatch(repositoryPath: string, patch: string) {
+  return invoke<RepositoryFile[]>('unstage_patch', { repositoryPath, patch })
+}
+
 export async function unstageRepositoryFiles(repositoryPath: string, filePaths: string[]) {
   return invoke<RepositoryFile[]>('unstage_files', { repositoryPath, filePaths })
 }

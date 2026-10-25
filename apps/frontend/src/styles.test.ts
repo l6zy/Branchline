@@ -56,6 +56,37 @@ describe('semantic style architecture', () => {
     const searchMatchRule = features.match(/\.commit-row\.search-match \{[^}]+\}/)?.[0] ?? ''
     expect(fileHeaderRule).toContain('background: var(--code-surface);')
     expect(searchMatchRule).toContain('box-shadow: inset 3px 0')
+    expect(features).toContain('.diff-viewer *::-webkit-scrollbar-button { width: 0; height: 0; display: none; }')
+  })
+
+  it('draws height-scaled green and red difference ranges in both overview columns', () => {
+    expect(features).toContain('.diff-overview-marker.add { background: var(--success); }')
+    expect(features).toContain('.diff-overview-marker.del { background: var(--danger); }')
+    expect(features).toContain('.diff-overview.split .diff-overview-marker.old')
+    expect(features).toContain('.diff-overview.split .diff-overview-marker.new')
+    expect(diffPanel).toContain('height: `${height}%`')
+  })
+
+  it('keeps diff actions aligned with compact line numbers and highlights row actions', () => {
+    expect(features).toContain('.diff-panel.stage-actions-enabled .code-row { grid-template-columns: 32px var(--diff-line-number-width, 5ch) 26px')
+    expect(components).toContain('.diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: var(--diff-line-number-width, 5ch) 26px')
+    expect(features).toContain('.diff-block-actions { position: absolute;')
+    expect(features).toContain('flex-direction: column; align-items: center; overflow: hidden;')
+    expect(features).toContain('.diff-block-actions > button { position: static; width: 24px; height: 20px;')
+    expect(diffPanel).toContain('className={`split-code-side')
+    expect(diffPanel).toContain('style={{ height: virtualRowHeight }}')
+    expect(components).toContain('.line-action-add:hover, .line-action-add:focus-visible')
+    expect(components).toContain('.line-action-del:hover, .line-action-del:focus-visible')
+  })
+
+  it('allows committer and branch filters to select multiple values', () => {
+    expect(app).toContain('提交人（可多选）')
+    expect(app).toContain('按分支筛选（可多选）')
+    expect(app).toContain('committerName(commit)')
+    expect(app).toContain('checked={branchFilter.includes(branch)}')
+    expect(app).toContain('committerColumnVisible ? `${widths.author}px` : \'\'')
+    expect(app).toMatch(/message-label[^\n]*\{committerFilterButton\}/)
+    expect(app).toMatch(/const committerFilterButton = .*aria-label="筛选提交人"/)
   })
 
   it('places the diff close control at the far end of the toolbar', () => {

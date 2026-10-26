@@ -1,12 +1,17 @@
 mod commands;
 mod git;
 mod models;
+mod repository_management;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            commands::load_repository_details,
+            commands::load_repository_readme,
+            commands::create_repository,
+            commands::open_repository_in_vscode,
             commands::load_git_user_config,
             commands::update_git_user_config,
             commands::update_repository_commit_template,

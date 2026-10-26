@@ -1,6 +1,9 @@
 import type { BlameLine, CommandLogEntry, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
 
 export type {
+  RepositoryDetails,
+  RepositoryReadme,
+  RepositoryRemote,
   BlameLine,
   CommandLogEntry,
   ConflictFileContent,
@@ -62,6 +65,29 @@ async function invoke<T>(command: string, args: Record<string, unknown>) {
 
 export async function loadRepository(path: string) {
   return invoke<RepositorySnapshot>('load_repository', { path })
+}
+
+export async function pickRepositoryDirectory(title = '选择仓库目录'): Promise<string | null> {
+  if (!isTauriRuntime()) throw new Error('选择本地目录需要桌面版')
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({ directory: true, multiple: false, title })
+  return (Array.isArray(selected) ? selected[0] : selected) ?? null
+}
+
+export async function loadRepositoryDetails(repositoryPath: string) {
+  return invoke<import('@branchline/git-models').RepositoryDetails>('load_repository_details', { repositoryPath })
+}
+
+export async function loadRepositoryReadme(repositoryPath: string) {
+  return invoke<import('@branchline/git-models').RepositoryReadme | null>('load_repository_readme', { repositoryPath })
+}
+
+export async function createRepository(destination: string, source: string | null = null) {
+  return invoke<import('@branchline/git-models').RepositoryDetails>('create_repository', { destination, source })
+}
+
+export async function openRepositoryInVscode(repositoryPath: string) {
+  return invoke<void>('open_repository_in_vscode', { repositoryPath })
 }
 
 export async function loadRepositoryHistory(path: string, commitLimit: number) {

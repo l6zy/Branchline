@@ -6,4 +6,5 @@
 @import './styles/layout.css' layer(layout);
 @import './styles/components.css' layer(components);
 @import './styles/features.css' layer(features);
+@import './styles/repository-manager.css' layer(features);
 @import './styles/theme-overrides.css' layer(theme-overrides);

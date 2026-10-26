@@ -11,6 +11,30 @@ fn task_error(action: &str, error: impl std::fmt::Display) -> String {
     format!("{action}失败：{error}")
 }
 
+#[tauri::command]
+pub async fn load_repository_details(repository_path: String) -> Result<crate::repository_management::RepositoryDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::repository_management::load_repository_details(&repository_path))
+        .await.map_err(|error| task_error("读取仓库信息", error))?
+}
+
+#[tauri::command]
+pub async fn load_repository_readme(repository_path: String) -> Result<Option<crate::repository_management::RepositoryReadme>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::repository_management::load_repository_readme(&repository_path))
+        .await.map_err(|error| task_error("读取 README", error))?
+}
+
+#[tauri::command]
+pub async fn create_repository(destination: String, source: Option<String>) -> Result<crate::repository_management::RepositoryDetails, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::repository_management::create_repository(&destination, source.as_deref()))
+        .await.map_err(|error| task_error("创建仓库", error))?
+}
+
+#[tauri::command]
+pub async fn open_repository_in_vscode(repository_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || crate::repository_management::open_repository_in_vscode(&repository_path))
+        .await.map_err(|error| task_error("打开 VS Code", error))?
+}
+
 fn operation_snapshot(
     repository_path: &str,
     result: Result<(), String>,

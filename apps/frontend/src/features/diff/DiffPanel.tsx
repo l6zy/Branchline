@@ -892,7 +892,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
         </div>}
       </div>
       {overviewMarkers.length > 0 && <div className={`diff-overview ${view === 'split' ? 'split' : ''}`} style={overviewBounds} onPointerDown={beginOverviewDrag} onPointerMove={moveOverviewDrag} onPointerUp={endOverviewDrag} onPointerCancel={endOverviewDrag} title="点击或拖拽跳转到对应差异位置" aria-label="Diff 差异位置">
-        {overviewMarkers.map(({ index, top, height, kind, column }) => <span className={`diff-overview-marker ${kind} ${column}`} key={`${column}-${index}`} style={{ top: `${top}%`, height: `${height}%` }}/>) }
+        {overviewMarkers.map(({ index, top, height, kind, column }) => <span className={`diff-overview-marker ${kind} ${column}`} key={`${column}-${index}`} style={{ top: `max(0px, min(${top}%, calc(100% - 3px)))`, height: `${height}%` }}/>) }
         <span className="diff-overview-viewport" style={{ top: `${overviewViewport.top}%`, height: `${overviewViewport.height}%` }}/>
       </div>}
       </div>

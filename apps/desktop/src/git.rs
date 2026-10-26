@@ -37,12 +37,44 @@ fn next_command_log_id() -> u64 {
     *id
 }
 
+fn redact_log_urls(value: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = value;
+    while let Some(scheme_end) = remaining.find("://") {
+        let authority_start = scheme_end + 3;
+        let url_end = remaining[authority_start..]
+            .find(|character: char| character.is_whitespace() || matches!(character, '\'' | '"' | '<' | '>'))
+            .map(|index| authority_start + index).unwrap_or(remaining.len());
+        let authority_end = remaining[authority_start..url_end].find(['/', '?', '#'])
+            .map(|index| authority_start + index).unwrap_or(url_end);
+        result.push_str(&remaining[..authority_start]);
+        let authority = &remaining[authority_start..authority_end];
+        if let Some(at) = authority.rfind('@') {
+            result.push_str("[redacted]@");
+            result.push_str(&authority[at + 1..]);
+        } else {
+            result.push_str(authority);
+        }
+        let suffix = &remaining[authority_end..url_end];
+        if let Some(query) = suffix.find('?') {
+            result.push_str(&suffix[..query]);
+            result.push_str("?[redacted]");
+        } else {
+            result.push_str(suffix);
+        }
+        remaining = &remaining[url_end..];
+    }
+    result.push_str(remaining);
+    result
+}
+
 fn sanitize_command(args: &[String]) -> String {
     let mut redact_next = false;
     args.iter().map(|part| {
         let value = if redact_next { "[redacted]".to_string() } else {
-            let shortened: String = part.chars().take(180).collect();
-            if shortened.chars().count() < part.chars().count() { format!("{shortened}…") } else { shortened }
+            let safe = redact_log_urls(part);
+            let shortened: String = safe.chars().take(180).collect();
+            if shortened.chars().count() < safe.chars().count() { format!("{shortened}…") } else { shortened }
         };
         redact_next = matches!(part.as_str(), "-m" | "--message" | "user.email" | "user.name");
         value
@@ -50,8 +82,27 @@ fn sanitize_command(args: &[String]) -> String {
 }
 
 fn limit_log_output(value: String) -> String {
+    let value = redact_log_urls(&value);
     let shortened: String = value.chars().take(20_000).collect();
     if shortened.chars().count() < value.chars().count() { format!("{shortened}\n… 输出已截断") } else { shortened }
+}
+
+#[cfg(test)]
+mod command_log_redaction_tests {
+    use super::*;
+
+    #[test]
+    fn hides_url_credentials_and_queries_in_commands_and_output() {
+        let source = "https://user:secret@example.com/team/repo.git?token=private";
+        let command = sanitize_command(&["clone".into(), source.into()]);
+        let output = limit_log_output(format!("Cloning {source}\nssh://git@example.com/team/repo.git"));
+        for value in [command, output] {
+            assert!(!value.contains("secret"));
+            assert!(!value.contains("private"));
+            assert!(value.contains("example.com/team/repo.git"));
+        }
+        assert_eq!(limit_log_output("plain output\nhttps://example.com/repo.git".into()), "plain output\nhttps://example.com/repo.git");
+    }
 }
 
 fn record_command(path: &Path, args: &[String], output: &std::process::Output, started: SystemTime) {
@@ -1168,7 +1219,7 @@ fn parse_worktrees(path: &Path) -> Vec<RepositoryWorktree> {
         .collect()
 }
 
-fn parse_submodules(path: &Path) -> Vec<RepositorySubmodule> {
+pub(crate) fn parse_submodules(path: &Path) -> Vec<RepositorySubmodule> {
     optional_git_output(path, &["submodule", "status", "--recursive"])
         .lines()
         .filter_map(|line| {
@@ -1370,7 +1421,7 @@ fn parse_branches(path: &Path) -> Vec<String> {
     branches
 }
 
-fn parse_remote_branches(path: &Path) -> Vec<String> {
+pub(crate) fn parse_remote_branches(path: &Path) -> Vec<String> {
     optional_git_output(
         path,
         &["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
@@ -1382,7 +1433,7 @@ fn parse_remote_branches(path: &Path) -> Vec<String> {
     .collect()
 }
 
-fn parse_local_branches(path: &Path) -> Vec<String> {
+pub(crate) fn parse_local_branches(path: &Path) -> Vec<String> {
     optional_git_output(
         path,
         &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
@@ -1503,7 +1554,7 @@ fn parse_commit_template(path: &Path) -> Option<RepositoryCommitTemplate> {
 // `canonicalize` answers with the extended-length form on Windows (`\\?\E:\repo`), which is not what
 // the user typed and not what the rest of the app compares against. `\\?\UNC\server\share` maps back
 // to the ordinary `\\server\share` spelling.
-fn display_path(path: &Path) -> String {
+pub(crate) fn display_path(path: &Path) -> String {
     let text = path.to_string_lossy().to_string();
     if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
         return format!(r"\\{rest}");

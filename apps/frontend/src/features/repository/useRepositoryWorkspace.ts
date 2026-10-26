@@ -16,6 +16,8 @@ import {
   type RepositoryRefreshSettings,
 } from './repositoryRefreshSettings'
 import { repositoryCacheKey } from './repositoryPaths'
+import { addRecentRepository, FAVORITE_REPOSITORIES_KEY, parseRecentRepositories, readFavoriteRepositories, removeRepositoryRecord, toggleFavoriteRepository } from './repositoryCatalog'
+import type { FavoriteRepository } from './repositorySwitcher'
 
 const RECENT_REPOSITORIES_KEY = 'branchline.recentRepositories.v1'
 const STARTUP_REPOSITORY_KEY = 'branchline.startupRepository.v1'
@@ -33,7 +35,7 @@ export type { RepositoryParent } from './repositoryParents'
 function readRecentRepositories(): RecentRepository[] {
   try {
     const value = window.localStorage.getItem(RECENT_REPOSITORIES_KEY)
-    return value ? JSON.parse(value) as RecentRepository[] : []
+    return parseRecentRepositories(value ? JSON.parse(value) : [])
   } catch {
     return []
   }
@@ -60,6 +62,7 @@ export function useRepositoryWorkspace() {
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
   const [structureRepository, setStructureRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
+  const [favoriteRepositories, setFavoriteRepositories] = useState(readFavoriteRepositories)
   const [openingRepository, setOpeningRepository] = useState(recentRepositories.length > 0)
   const [fetching, setFetching] = useState(false)
   const [repositoryNotice, setRepositoryNoticeState] = useState<string | null>(null)
@@ -124,25 +127,38 @@ export function useRepositoryWorkspace() {
     startNoticeTimer(noticeRemaining.current)
   }, [repositoryNotice, startNoticeTimer])
 
+  const registerRepository = useCallback((snapshot: Pick<RecentRepository, 'name' | 'path' | 'branch'>) => {
+    setRecentRepositories((current) => addRecentRepository(current, snapshot))
+  }, [])
+
+  const toggleFavorite = useCallback((item: FavoriteRepository) => {
+    setFavoriteRepositories((current) => toggleFavoriteRepository(current, item))
+  }, [])
+
+  const forgetRepository = useCallback((path: string) => {
+    setRecentRepositories((current) => removeRepositoryRecord(current, [], path).recent)
+    setFavoriteRepositories((current) => removeRepositoryRecord([], current, path).favorites)
+    try {
+      const startup = window.localStorage.getItem(STARTUP_REPOSITORY_KEY)
+      if (startup && repositoryCacheKey(startup) === repositoryCacheKey(path)) window.localStorage.removeItem(STARTUP_REPOSITORY_KEY)
+    } catch { /* Storage may be unavailable. */ }
+  }, [])
+
+  useEffect(() => {
+    try { window.localStorage.setItem(RECENT_REPOSITORIES_KEY, JSON.stringify(recentRepositories)) } catch { /* Keep session state. */ }
+  }, [recentRepositories])
+  useEffect(() => {
+    try { window.localStorage.setItem(FAVORITE_REPOSITORIES_KEY, JSON.stringify(favoriteRepositories)) } catch { /* Keep session state. */ }
+  }, [favoriteRepositories])
+
   const rememberRepository = useCallback((snapshot: RepositorySnapshot) => {
     try {
       window.localStorage.setItem(STARTUP_REPOSITORY_KEY, snapshot.path)
     } catch {
       // The current session still works when browser storage is unavailable.
     }
-    setRecentRepositories((current) => {
-      const next = [
-        { name: snapshot.name, path: snapshot.path, branch: snapshot.branch, openedAt: Date.now() },
-        ...current.filter((item) => item.path.toLowerCase() !== snapshot.path.toLowerCase()),
-      ].slice(0, 50)
-      try {
-        window.localStorage.setItem(RECENT_REPOSITORIES_KEY, JSON.stringify(next))
-      } catch {
-        // Keep the in-memory list usable when browser storage is unavailable.
-      }
-      return next
-    })
-  }, [])
+    registerRepository(snapshot)
+  }, [registerRepository])
 
   const cacheSnapshot = useCallback((snapshot: RepositorySnapshot) => {
     const key = repositoryCacheKey(snapshot.path)
@@ -396,6 +412,10 @@ export function useRepositoryWorkspace() {
     repository,
     structureRepository,
     recentRepositories,
+    favoriteRepositories,
+    toggleFavorite,
+    forgetRepository,
+    registerRepository,
     openingRepository,
     fetching,
     repositoryNotice,

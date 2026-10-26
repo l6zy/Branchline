@@ -6,31 +6,11 @@ import type { RecentRepository, RepositoryParent } from './useRepositoryWorkspac
 import {
   buildRepositorySwitchTargets,
   filterRepositoryTargets,
-  normalizedRepositoryTargetPath,
   quickAccessRepositoryTargets,
   type FavoriteRepository,
   type RepositorySwitchSource,
   type RepositorySwitchTarget,
 } from './repositorySwitcher'
-
-const FAVORITE_REPOSITORIES_KEY = 'branchline.favoriteRepositories.v1'
-
-function readFavoriteRepositories(): FavoriteRepository[] {
-  try {
-    const value = window.localStorage.getItem(FAVORITE_REPOSITORIES_KEY)
-    if (!value) return []
-    const parsed = JSON.parse(value) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((favorite): favorite is FavoriteRepository => Boolean(
-      favorite
-      && typeof favorite === 'object'
-      && typeof (favorite as FavoriteRepository).name === 'string'
-      && typeof (favorite as FavoriteRepository).path === 'string',
-    ))
-  } catch {
-    return []
-  }
-}
 
 function targetIcon(source: RepositorySwitchSource) {
   if (source === 'worktree') return GitFork
@@ -41,6 +21,9 @@ function targetIcon(source: RepositorySwitchSource) {
 type RepositoryQuickSwitcherProps = {
   repository: RepositorySnapshot | null
   parentRepository: RepositoryParent | null
+  favorites: FavoriteRepository[]
+  onToggleFavorite: (repository: FavoriteRepository) => void
+  onManageRepositories: () => void
   recentRepositories: RecentRepository[]
   openingRepository: boolean
   openSignal: number
@@ -50,11 +33,10 @@ type RepositoryQuickSwitcherProps = {
   onReturnToParentRepository: () => void
 }
 
-export function RepositoryQuickSwitcher({ repository, parentRepository, recentRepositories, openingRepository, openSignal, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onReturnToParentRepository }: RepositoryQuickSwitcherProps) {
+export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, onManageRepositories, repository, parentRepository, recentRepositories, openingRepository, openSignal, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onReturnToParentRepository }: RepositoryQuickSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const [favorites, setFavorites] = useState<FavoriteRepository[]>(readFavoriteRepositories)
   const [menuPosition, setMenuPosition] = useState({ left: 12, top: 72, width: 420 })
   const rootRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -120,22 +102,6 @@ export function RepositoryQuickSwitcher({ repository, parentRepository, recentRe
     else onOpenRepositoryPath(target.path)
   }
 
-  const toggleFavorite = (target: RepositorySwitchTarget) => {
-    setFavorites((current) => {
-      const key = normalizedRepositoryTargetPath(target.path)
-      const exists = current.some((favorite) => normalizedRepositoryTargetPath(favorite.path) === key)
-      const next = exists
-        ? current.filter((favorite) => normalizedRepositoryTargetPath(favorite.path) !== key)
-        : [...current, { name: target.label, path: target.path }]
-      try {
-        window.localStorage.setItem(FAVORITE_REPOSITORIES_KEY, JSON.stringify(next))
-      } catch {
-        // Keep favorites available in memory when local storage is unavailable.
-      }
-      return next
-    })
-  }
-
   const shortcutTargets = query.trim() ? [] : quickTargets
   const shortcutIds = new Set(shortcutTargets.map((target) => target.id))
   const groups = [
@@ -153,7 +119,7 @@ export function RepositoryQuickSwitcher({ repository, parentRepository, recentRe
         <span className="repository-switch-text"><strong title={target.label}>{target.label}</strong><small title={target.path}>{target.kind} · {target.path}</small></span>
         {target.source === 'current' && <Check size={14}/>} 
       </button>
-      <button type="button" className={`repository-pin-button ${target.pinned ? 'active' : ''}`} onClick={() => toggleFavorite(target)} title={target.pinned ? '取消收藏' : '收藏仓库'} aria-label={target.pinned ? `取消收藏 ${target.label}` : `收藏 ${target.label}`}><Star size={13} fill={target.pinned ? 'currentColor' : 'none'}/></button>
+      <button type="button" className={`repository-pin-button ${target.pinned ? 'active' : ''}`} onClick={() => onToggleFavorite({ name: target.label, path: target.path })} title={target.pinned ? '取消收藏' : '收藏仓库'} aria-label={target.pinned ? `取消收藏 ${target.label}` : `收藏 ${target.label}`}><Star size={13} fill={target.pinned ? 'currentColor' : 'none'}/></button>
     </div>
   }
 
@@ -170,7 +136,8 @@ export function RepositoryQuickSwitcher({ repository, parentRepository, recentRe
       {groups.map((group) => <div className="repository-switch-group" key={group.label}><div className="switcher-label">{group.label}</div>{group.items.map(renderTarget)}</div>)}
       {!filteredTargets.length && <div className="repository-switch-empty">没有匹配的仓库</div>}
     </div>
-    <button type="button" className="open-repository-action" disabled={openingRepository} onClick={() => { onOpenRepository(); closeSwitcher() }}><span className="switcher-icon"><FolderOpen size={14}/></span><span><strong>{openingRepository ? '正在读取仓库…' : '打开本地仓库'}</strong><small>选择其他 Git 仓库或 Worktree</small></span></button>
+    <button type="button" className="open-repository-action" onClick={() => { closeSwitcher(); onManageRepositories() }}><FolderGit2 size={16}/><span>仓库管理</span></button>
+      <button type="button" className="open-repository-action" disabled={openingRepository} onClick={() => { onOpenRepository(); closeSwitcher() }}><span className="switcher-icon"><FolderOpen size={14}/></span><span><strong>{openingRepository ? '正在读取仓库…' : '打开本地仓库'}</strong><small>选择其他 Git 仓库或 Worktree</small></span></button>
   </div>
 
   return <div className="repo-switcher-wrap" ref={rootRef}>

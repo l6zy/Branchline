@@ -154,6 +154,18 @@ export type RepositorySubmodule = {
   branch?: string
 }
 
+export type RepositoryRemote = { name: string; fetchUrls: string[]; pushUrls: string[] }
+export type RepositoryDetails = {
+  name: string
+  path: string
+  branch: string
+  branches: string[]
+  remoteBranches: string[]
+  submodules: RepositorySubmodule[]
+  remotes: RepositoryRemote[]
+}
+export type RepositoryReadme = { name: string; content: string; truncated: boolean }
+
 export type RepositoryBranchTracking = {
   upstream?: string
   ahead: number

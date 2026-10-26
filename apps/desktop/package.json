@@ -1,7 +1,7 @@
 {
   "name": "@branchline/desktop",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "scripts": {
     "generate:icons": "tauri icon app-icon.svg -o icons",
     "prebuild": "pnpm generate:icons",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildStagePatch, changeBlock, changeLine, diffActionEdgeSpace, diffOverviewBounds, diffOverviewMarkers, diffOverviewViewport, diffSplitRowHeight, shouldJumpToFirstChange, shouldRenderLoadedRows } from './DiffPanel'
+import { buildStagePatch, changeBlock, changeLine, diffActionEdgeSpace, diffOverviewBounds, diffOverviewMarkers, diffOverviewViewport, diffSplitRowHeight, shouldJumpToFirstChange, shouldRenderLoadedRows, shouldShowDiffOverviewViewport } from './DiffPanel'
 
 describe('diffOverviewBounds', () => {
   it('ends above the horizontal scrollbar when it consumes viewport height', () => {
@@ -61,6 +61,11 @@ describe('diffOverviewMarkers', () => {
 })
 
 describe('diffOverviewViewport', () => {
+	it('hides the viewport indicator when there is no vertical scroll range', () => {
+		expect(shouldShowDiffOverviewViewport(400, 400)).toBe(false)
+		expect(shouldShowDiffOverviewViewport(300, 400)).toBe(false)
+		expect(shouldShowDiffOverviewViewport(401, 400)).toBe(true)
+	})
 	it('maps the content viewport below a sticky header to the overview track', () => {
 		expect(diffOverviewViewport(0, 1034, 400, 34)).toEqual({ top: 0, height: 36.6 })
 		expect(diffOverviewViewport(317, 1034, 400, 34)).toEqual({ top: 31.7, height: 36.6 })

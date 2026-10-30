@@ -156,6 +156,14 @@ export async function loadRepositoryCommitFiles(repositoryPath: string, commit: 
   return invoke<RepositoryFile[]>('load_commit_files', { repositoryPath, commit })
 }
 
+export async function loadRepositoryCommitTreeFiles(repositoryPath: string, commit: string) {
+  return invoke<string[]>('load_commit_tree_files', { repositoryPath, commit })
+}
+
+export async function loadRepositoryCommitFileContent(repositoryPath: string, commit: string, filePath: string) {
+  return invoke<string>('load_commit_file_content', { repositoryPath, commit, filePath })
+}
+
 export async function commitRepository(repositoryPath: string, message: string, amend = false, sign = false) {
   return invoke<RepositorySnapshot>('commit_repository', { repositoryPath, message, amend, sign })
 }
@@ -238,6 +246,10 @@ export async function cherryPickRepositoryCommit(repositoryPath: string, commit:
 
 export async function pullRepositoryBranch(repositoryPath: string, branch: string) {
   return invoke<RepositorySnapshot>('pull_repository_branch', { repositoryPath, branch })
+}
+
+export async function fastForwardRepositoryBranch(repositoryPath: string, branch: string) {
+  return invoke<RepositorySnapshot>('fast_forward_repository_branch', { repositoryPath, branch })
 }
 
 export async function pushRepository(repositoryPath: string) {

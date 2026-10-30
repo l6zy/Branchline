@@ -75,7 +75,7 @@ export function RepositoryStructurePanel({ repository, activePath, view, query =
   const title = selection.kind === 'worktrees' ? 'Worktrees' : selection.kind === 'worktree' ? (worktree?.path.split(/[\\/]/).pop() || 'Worktree') : selection.kind === 'submodules' ? 'Submodules' : selection.kind === 'submodule-folder' ? selection.path : selection.kind === 'submodule' ? (submodule?.path || 'Submodule') : repository.name
   const description = selection.kind === 'worktrees' ? '管理同一仓库的多个工作目录。' : selection.kind === 'submodules' ? '初始化、更新和同步项目中的 Submodule。' : selection.kind === 'worktree' ? 'Worktree 详情与生命周期操作。' : selection.kind === 'submodule' ? 'Submodule 详情与生命周期操作。' : selection.kind === 'submodule-folder' ? '该路径下的 Submodule 汇总。' : '当前项目及其仓库结构概览。'
   const removeWorktree = async (path: string) => {
-    if (await confirm({ title: '移除 Worktree', message: `确定移除 Worktree？\n${path}\n\n不会使用 --force，存在未提交修改时 Git 会拒绝。`, confirmLabel: '移除', variant: 'danger' })) await run('remove', () => removeRepositoryWorktree(repository.path, path), '已移除 Worktree')
+    if (await confirm({ title: '移除 Worktree', message: `确定强制移除 Worktree？\n${path}\n\n此操作将删除该工作目录及其中已初始化的 Submodule 工作目录，所有未提交内容都会丢失。`, confirmLabel: '强制移除', variant: 'danger' })) await run('remove', () => removeRepositoryWorktree(repository.path, path), '已移除 Worktree')
   }
   const deinitializeSubmodule = async (path: string) => {
     if (await confirm({ title: '取消初始化 Submodule', message: `确定取消初始化 Submodule？\n${path}`, confirmLabel: '取消初始化', variant: 'danger' })) await run('deinit', () => deinitializeRepositorySubmodule(repository.path, path), '已取消初始化 Submodule')

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GitCommitHorizontal, History, Rows3, X } from 'lucide-react'
 import { Button } from '../../components/Button'
 import { loadFileBlame, loadFileCommitDiff, loadFileHistory, loadLineHistory, type BlameLine, type FileHistoryEntry } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
+import { BLAME_VIRTUALIZATION_THRESHOLD, getBlameVirtualRange } from './blameVirtualization'
 
 type HistoryDrawerProps = {
   repositoryPath?: string
@@ -34,12 +35,55 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
   const [activeLineNumber, setActiveLineNumber] = useState<number | undefined>(lineNumber)
   const [blameLineLoading, setBlameLineLoading] = useState(false)
   const [wideDiff, setWideDiff] = useState(false)
+  const [blameListWidth, setBlameListWidth] = useState(55)
+  const [blameResizing, setBlameResizing] = useState(false)
+  const [blameRangeState, setBlameRangeState] = useState({ start: 0, end: 0 })
+  const blameListRef = useRef<HTMLDivElement>(null)
+
+  const changeTab = useCallback((nextTab: 'history' | 'blame' | 'line') => {
+    setWideDiff(false)
+    setTab(nextTab)
+  }, [])
+
+  const updateBlameRange = useCallback((list: HTMLDivElement) => {
+    if (blame.length <= BLAME_VIRTUALIZATION_THRESHOLD) return
+    const next = getBlameVirtualRange(blame.length, list.scrollTop, list.clientHeight)
+    setBlameRangeState((current) => current.start === next.start && current.end === next.end ? current : next)
+  }, [blame.length])
 
   useEffect(() => {
-    setTab(initialTab)
+    if (tab !== 'blame') return
+    const list = blameListRef.current
+    if (!list) return
+    list.scrollTop = 0
+    updateBlameRange(list)
+    const observer = new ResizeObserver(() => updateBlameRange(list))
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [filePath, tab, updateBlameRange])
+
+  const beginBlameResize = (event: React.PointerEvent<HTMLSpanElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = blameListWidth
+    const workspace = event.currentTarget.parentElement
+    const width = workspace?.clientWidth ?? window.innerWidth
+    setBlameResizing(true)
+    const onMove = (moveEvent: PointerEvent) => setBlameListWidth(Math.max(30, Math.min(70, startWidth + (moveEvent.clientX - startX) / width * 100)))
+    const onUp = () => {
+      setBlameResizing(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  useEffect(() => {
+    changeTab(initialTab)
     setActiveLineNumber(lineNumber)
     setSelectedBlame(null)
-  }, [filePath, initialTab, lineNumber])
+  }, [changeTab, filePath, initialTab, lineNumber])
 
   useEffect(() => {
     if (!repositoryPath || !filePath) return
@@ -99,6 +143,10 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
   const selectedBlameEntry = useMemo(() => selectedBlame
     ? lineHistory.find((entry) => entry.hash === selectedBlame.hash) ?? history.find((entry) => entry.hash === selectedBlame.hash) ?? lineHistory[0]
     : undefined, [history, lineHistory, selectedBlame])
+  const blameVirtualized = blame.length > BLAME_VIRTUALIZATION_THRESHOLD
+  const blameRange = blameVirtualized
+    ? blameRangeState
+    : { start: 0, end: blame.length }
   const displayedEntry = tab === 'blame' ? selectedBlameEntry : selectedEntry
   const selectedFile = useMemo(() => filePath ? [{ path: filePath, type: 'M', add: 0, del: 0 }] : [], [filePath])
   const loadSelectedDiff = useCallback((path: string, _index: number | undefined, showWhitespace: boolean) => {
@@ -108,11 +156,11 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
 
   if (!filePath) return null
   const fileName = filePath.split(/[\\/]/).pop() || filePath
-  return <div className="drawer-backdrop" onClick={onClose}><aside className="history-drawer" onClick={(event) => event.stopPropagation()}>
+  return <div className="drawer-backdrop history-drawer-backdrop" onClick={onClose}><aside className={`history-drawer ${wideDiff ? 'wide-diff' : ''}`} onClick={(event) => event.stopPropagation()}>
     <div className="drawer-heading"><div className="history-drawer-title"><span className="eyebrow">{tab === 'line' ? `第 ${activeLineNumber} 行历史` : '文件追踪'}</span><h2 title={filePath}>{fileName}</h2><span className="history-file-path" title={filePath}>{filePath}{tab === 'line' && activeLineNumber ? ` · 第 ${activeLineNumber} 行${revision ? ` · ${revision.slice(0, 12)}` : ''}` : ''}</span></div><Button variant="icon" onClick={onClose} title="关闭"><X size={18}/></Button></div>
-    <div className="history-tabs"><button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><History size={14}/>文件历史 <span>{history.length}</span></button><button className={tab === 'blame' ? 'active' : ''} onClick={() => setTab('blame')}><Rows3 size={14}/>逐行归属 <span>{blame.length}</span></button>{activeLineNumber && <button className={tab === 'line' ? 'active' : ''} onClick={() => setTab('line')}><GitCommitHorizontal size={14}/>第 {activeLineNumber} 行历史 <span>{lineHistory.length}</span></button>}</div>
+    <div className="history-tabs"><button className={tab === 'history' ? 'active' : ''} onClick={() => changeTab('history')}><History size={14}/>文件历史 <span>{history.length}</span></button><button className={tab === 'blame' ? 'active' : ''} onClick={() => changeTab('blame')}><Rows3 size={14}/>逐行归属 <span>{blame.length}</span></button>{activeLineNumber && <button className={tab === 'line' ? 'active' : ''} onClick={() => changeTab('line')}><GitCommitHorizontal size={14}/>第 {activeLineNumber} 行历史 <span>{lineHistory.length}</span></button>}</div>
     {loading && <div className="history-empty">正在读取历史…</div>}
-    {!loading && (tab === 'history' || tab === 'line') && <div className="file-history-workspace">
+    {!loading && (tab === 'history' || tab === 'line') && <div className={`file-history-workspace ${wideDiff ? 'wide' : ''}`}>
       <div className="file-history-list">
         {tab === 'line' && blameLineLoading && <div className="history-empty">正在读取第 {activeLineNumber} 行历史…</div>}
         {!(tab === 'line' && blameLineLoading) && (tab === 'line' ? lineHistoryError : historyError) && <div className="history-empty error">{tab === 'line' ? lineHistoryError : historyError}</div>}
@@ -124,15 +172,18 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
         <div className="file-history-diff"><DiffPanel key={selectedEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff}/></div>
       </section> : <div className="history-empty">选择提交查看详情和文件修改</div>}
     </div>}
-    {!loading && tab === 'blame' && <div className="blame-workspace">
-      <div className="blame-list">
+    {!loading && tab === 'blame' && <div className={`blame-workspace ${wideDiff ? 'wide' : ''} ${blameResizing ? 'resizing' : ''}`} style={{ gridTemplateColumns: wideDiff ? undefined : `${blameListWidth}% 7px minmax(360px, 1fr)` }}>
+      <div className="blame-list" ref={blameListRef} onScroll={(event) => updateBlameRange(event.currentTarget)}>
         {blameError && <div className="history-empty error">{blameError}</div>}
-        {!blameError && blame.map((line) => <button className={`blame-row ${selectedBlame?.line === line.line ? 'selected' : ''}`} key={`${line.hash}-${line.line}`} onClick={() => { setSelectedBlame(line); setActiveLineNumber(line.line); setWideDiff(false) }} title={`查看第 ${line.line} 行的归属提交与完整历史`}><span className="blame-line-number">{line.line}</span><code className="blame-hash" title={line.hash}>{line.shortHash}</code><span className="blame-author" title={line.email}>{line.author}</span><time>{formatBlameTime(line.time)}</time><code className="blame-content">{line.content || ' '}</code></button>)}
+        {!blameError && blameVirtualized && <div className="blame-virtual-spacer" aria-hidden="true" style={{ height: blameRange.start * 26 }} />}
+        {!blameError && blame.slice(blameRange.start, blameRange.end).map((line) => <button className={`blame-row ${selectedBlame?.line === line.line ? 'selected' : ''}`} key={`${line.hash}-${line.line}`} onClick={() => { setSelectedBlame(line); setActiveLineNumber(line.line); setWideDiff(false) }} title={`查看第 ${line.line} 行的归属提交与完整历史`}><span className="blame-line-number">{line.line}</span><code className="blame-hash" title={line.hash}>{line.shortHash}</code><span className="blame-author" title={line.email}>{line.author}</span><time>{formatBlameTime(line.time)}</time><code className="blame-content">{line.content || ' '}</code></button>)}
+        {!blameError && blameVirtualized && <div className="blame-virtual-spacer" aria-hidden="true" style={{ height: (blame.length - blameRange.end) * 26 }} />}
         {!blameError && !blame.length && <div className="history-empty">该文件暂无可展示的逐行归属信息</div>}
       </div>
+      <span className="panel-resizer blame-resizer" role="separator" aria-label="拖动调整归属代码与 Diff 宽度" aria-orientation="vertical" onPointerDown={beginBlameResize}/>
       {selectedBlame ? <section className="file-history-detail blame-detail">
         {blameLineLoading && !selectedBlameEntry ? <div className="history-empty">正在读取第 {selectedBlame.line} 行的提交信息…</div> : selectedBlameEntry ? <>
-          <div className="file-history-commit"><div><strong>{selectedBlameEntry.title}</strong><code>{selectedBlameEntry.hash}</code></div><dl><div><dt>作者</dt><dd>{selectedBlameEntry.author} &lt;{selectedBlameEntry.email}&gt;</dd></div><div><dt>提交人</dt><dd>{selectedBlameEntry.committer} &lt;{selectedBlameEntry.committerEmail}&gt;</dd></div><div><dt>提交时间</dt><dd>{formatLocalDateTime(selectedBlameEntry.commitTime || selectedBlameEntry.time)}</dd></div><div><dt>父级</dt><dd>{selectedBlameEntry.parents.length ? selectedBlameEntry.parents.join(', ') : '根提交'}</dd></div></dl><pre>{selectedBlameEntry.message}</pre><button className="line-history-button" disabled={blameLineLoading || !lineHistory.length} onClick={() => { setSelectedHash(lineHistory.find((entry) => entry.hash === selectedBlame.hash)?.hash ?? lineHistory[0]?.hash ?? null); setTab('line'); setWideDiff(false) }}><History size={14}/>查看第 {selectedBlame.line} 行完整历史 <span>{lineHistory.length}</span></button></div>
+          <div className="file-history-commit"><div><strong>{selectedBlameEntry.title}</strong><code>{selectedBlameEntry.hash}</code></div><dl><div><dt>作者</dt><dd>{selectedBlameEntry.author} &lt;{selectedBlameEntry.email}&gt;</dd></div><div><dt>提交人</dt><dd>{selectedBlameEntry.committer} &lt;{selectedBlameEntry.committerEmail}&gt;</dd></div><div><dt>提交时间</dt><dd>{formatLocalDateTime(selectedBlameEntry.commitTime || selectedBlameEntry.time)}</dd></div><div><dt>父级</dt><dd>{selectedBlameEntry.parents.length ? selectedBlameEntry.parents.join(', ') : '根提交'}</dd></div></dl><pre>{selectedBlameEntry.message}</pre><button className="line-history-button" disabled={blameLineLoading || !lineHistory.length} onClick={() => { setSelectedHash(lineHistory.find((entry) => entry.hash === selectedBlame.hash)?.hash ?? lineHistory[0]?.hash ?? null); changeTab('line') }}><History size={14}/>查看第 {selectedBlame.line} 行完整历史 <span>{lineHistory.length}</span></button></div>
           <div className="file-history-diff"><DiffPanel key={selectedBlameEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff}/></div>
         </> : <div className="history-empty error">{lineHistoryError ?? '无法读取该行的归属提交，可能是尚未提交的内容'}</div>}
       </section> : <div className="history-empty blame-detail-empty"><Rows3 size={28}/><strong>选择一行查看详情</strong><span>单击左侧任意代码行，可查看归属提交、文件 Diff 和该行完整历史。</span></div>}

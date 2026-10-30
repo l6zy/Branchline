@@ -11,6 +11,48 @@ const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
 const diffPanel = readFileSync(new URL('./features/diff/DiffPanel.tsx', import.meta.url), 'utf8')
 
 describe('semantic style architecture', () => {
+  it('reserves horizontal scrollbar tracks for unified and split diff panes', () => {
+    expect(features.match(/\.unified-diff-pane \{[^}]+\}/)?.[0]).toContain('overflow-x: scroll;')
+    expect(components.match(/\.split-diff-pane \{[^}]+\}/)?.[0]).toContain('overflow-x: scroll;')
+  })
+
+  it('aligns the native title bar with the active theme and gives blame a wide code workspace', () => {
+    expect(app).toContain('getCurrentWindow().setTheme(theme)')
+    expect(app).toContain('className="app-titlebar"')
+    expect(readFileSync(new URL('../../desktop/tauri.conf.json', import.meta.url), 'utf8')).toContain('"decorations": false')
+    expect(features.match(/\.history-drawer \{[^}]+\}/)?.[0]).toContain('96vw')
+    expect(features.match(/\.blame-workspace \{[^}]+\}/)?.[0]).toContain('minmax(360px, 1fr)')
+    expect(features).toContain('.blame-workspace.wide { grid-template-columns: minmax(0, 1fr); }')
+    expect(features).toContain('.blame-row { width: 100%; height: 26px; min-height: 26px;')
+    expect(layout).toContain('.window-controls { height: 100%; display: flex; }')
+  })
+  it('removes both leading grid items when expanding the blame Diff', () => {
+    expect(features).toContain('.blame-workspace.wide > .blame-list, .blame-workspace.wide > .blame-resizer { display: none; }')
+    const drawer = readFileSync(new URL('./features/history/HistoryDrawer.tsx', import.meta.url), 'utf8')
+    expect(drawer).not.toContain("wideDiff ? '0 0 minmax(0, 1fr)'")
+  })
+  it('keeps the history drawer below the custom title bar and expands file history diffs in wide mode', () => {
+    expect(readFileSync(new URL('./features/history/HistoryDrawer.tsx', import.meta.url), 'utf8')).toContain('history-drawer-backdrop')
+    expect(readFileSync(new URL('./features/history/HistoryDrawer.tsx', import.meta.url), 'utf8')).toContain('file-history-workspace ${wideDiff ? \'wide\' : \'\'}')
+    expect(components).toContain('.history-drawer-backdrop { inset: 30px 0 0; }')
+    expect(features).toContain('.file-history-workspace.wide { grid-template-columns: minmax(0, 1fr); }')
+    expect(features).toContain('.file-history-workspace.wide > .file-history-list { display: none; }')
+    expect(features).toContain('.history-drawer.wide-diff { width: 100vw; }')
+  })
+  it('keeps the Diff toolbar visible in the file history detail pane', () => {
+    expect(features).toContain('.file-history-diff .diff-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; }')
+    expect(features).toContain('.file-history-diff .diff-toolbar { position: relative; z-index: 1; flex: 0 0 auto; }')
+    expect(features).toContain('.file-history-diff .diff-body { min-height: 0; flex: 1; }')
+  })
+  it('grants the custom title bar permission to minimize, maximize, and close the window', () => {
+    const capability = JSON.parse(readFileSync(new URL('../../desktop/capabilities/default.json', import.meta.url), 'utf8')) as { permissions: string[] }
+    expect(capability.permissions).toEqual(expect.arrayContaining([
+      'core:window:allow-close',
+      'core:window:allow-is-maximized',
+      'core:window:allow-minimize',
+      'core:window:allow-toggle-maximize',
+    ]))
+  })
   it('loads styles through explicit cascade layers', () => {
     expect(styles).toContain('@layer tokens, base, layout, components, features, theme-overrides;')
     expect(styles).toContain("@import './styles/tokens.css' layer(tokens);")
@@ -132,6 +174,12 @@ describe('semantic style architecture', () => {
   it('aligns staging section labels independently from their action buttons', () => {
     expect(features).toContain('.stage-section-header { grid-template-columns: auto minmax(0, 1fr) auto;')
     expect(features).toContain('.stage-section-name { grid-column: 2;')
+  })
+
+  it('keeps staging section headers compact', () => {
+    const headerRules = features.match(/\.stage-section-header \{[^}]+\}/g) ?? []
+    const headerRule = headerRules[headerRules.length - 1] ?? ''
+    expect(headerRule).toContain('min-height: 28px;')
   })
 
   it('renders diff file paths without a decorative leading arrow', () => {

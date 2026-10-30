@@ -243,6 +243,7 @@ pub struct RepositorySnapshot {
     pub path: String,
     pub superproject_path: Option<String>,
     pub branch: String,
+    pub default_branch: Option<String>,
     pub remote: Option<String>,
     pub ahead: usize,
     pub behind: usize,

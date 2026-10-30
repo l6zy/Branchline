@@ -20,8 +20,9 @@ use std::sync::{Mutex, OnceLock};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-const LANE_COLORS: [&str; 6] = [
-    "#36cfc9", "#9254de", "#fa8c16", "#52c41a", "#f759ab", "#597ef7",
+const LANE_COLORS: [&str; 12] = [
+    "#36cfc9", "#9254de", "#fa8c16", "#52c41a", "#f759ab", "#597ef7", "#13c2c2", "#eb2f96", "#d4b106",
+    "#389e0d", "#2f54eb", "#cf1322",
 ];
 
 static COMMAND_LOGS: OnceLock<Mutex<Vec<CommandLogEntry>>> = OnceLock::new();
@@ -1334,7 +1335,12 @@ pub fn remove_repository_worktree(repository_path: &str, worktree_path: &str) ->
     }
     git_output_owned(
         &root,
-        &["worktree".into(), "remove".into(), worktree.path.clone()],
+        &[
+            "worktree".into(),
+            "remove".into(),
+            "--force".into(),
+            worktree.path.clone(),
+        ],
     )
     .map(|_| ())
 }
@@ -1443,6 +1449,17 @@ pub(crate) fn parse_local_branches(path: &Path) -> Vec<String> {
     .filter(|branch| !branch.is_empty())
     .map(ToString::to_string)
     .collect()
+}
+
+fn repository_default_branch(root: &Path) -> Option<String> {
+    optional_git_output(
+        root,
+        &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .trim()
+    .strip_prefix("origin/")
+    .filter(|branch| !branch.is_empty())
+    .map(str::to_owned)
 }
 
 fn parse_branch_tracking(path: &Path) -> HashMap<String, RepositoryBranchTracking> {
@@ -1943,6 +1960,7 @@ pub fn read_repository_with_commit_limit(
         path: root_text.to_string(),
         superproject_path,
         branch,
+        default_branch: repository_default_branch(root_path),
         remote: (!remote_text.is_empty()).then_some(remote_text),
         ahead,
         behind,
@@ -2253,6 +2271,30 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
         ],
     )
     .map(|_| ())
+}
+
+// Fetch already updated upstream refs. Never check out or merge a branch here.
+pub fn fast_forward_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+    let root = repository_root(repository_path)?;
+    let branch = branch.trim();
+    let local_ref = format!("refs/heads/{branch}");
+    if branch.is_empty() || !git_success(&root, &["show-ref", "--verify", "--quiet", &local_ref]) {
+        return Err(format!("本地分支不存在：{branch}"));
+    }
+    if optional_git_output(&root, &["branch", "--show-current"]).trim() == branch {
+        return Err(format!("分支 {branch} 正在检出，跳过自动快进"));
+    }
+    let upstream = git_output(&root, &["for-each-ref", "--format=%(upstream)", &local_ref])?
+        .trim()
+        .to_string();
+    if upstream.is_empty() {
+        return Err(format!("分支 {branch} 尚未配置上游分支"));
+    }
+    if !git_success(&root, &["merge-base", "--is-ancestor", &local_ref, &upstream]) {
+        return Err(format!("分支 {branch} 无法安全快进，保留本地提交"));
+    }
+    // Git also refuses branches checked out in another worktree, or checked out while this ran.
+    git_output(&root, &["branch", "-f", "--", branch, &upstream]).map(|_| ())
 }
 
 pub fn push_repository(repository_path: &str) -> Result<(), String> {
@@ -3201,6 +3243,36 @@ pub fn load_commit_files(
     Ok(parse_repository_files(&numstat, &status))
 }
 
+pub fn load_commit_tree_files(repository_path: &str, commit: &str) -> Result<Vec<String>, String> {
+    let root = repository_root(repository_path)?;
+    let hash = resolve_commit(&root, commit.trim())?;
+    let output = git_output_owned(
+        &root,
+        &[
+            "ls-tree".into(),
+            "-r".into(),
+            "--name-only".into(),
+            "-z".into(),
+            hash,
+        ],
+    )?;
+    Ok(output
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+pub fn load_commit_file_content(repository_path: &str, commit: &str, file_path: &str) -> Result<String, String> {
+    let path = Path::new(file_path);
+    if file_path.is_empty() || path.is_absolute() || path.components().any(|component| matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+        return Err("提交文件路径无效".into());
+    }
+    let root = repository_root(repository_path)?;
+    let hash = resolve_commit(&root, commit.trim())?;
+    git_output_owned(&root, &["show".into(), format!("{hash}:{}", file_path.replace('\\', "/"))])
+}
+
 pub fn commit_repository(
     repository_path: &str,
     message: &str,
@@ -3909,6 +3981,13 @@ mod tests {
     #[test]
     fn commit_graph_retains_deeper_history_for_older_branches() {
         assert!(COMMIT_GRAPH_LIMIT >= 2_000);
+    }
+
+    #[test]
+    fn commit_graph_palette_has_twelve_distinct_lane_colors() {
+        let unique: HashSet<_> = LANE_COLORS.iter().copied().collect();
+        assert_eq!(LANE_COLORS.len(), 12);
+        assert_eq!(unique.len(), LANE_COLORS.len());
     }
 
     #[test]
@@ -4632,10 +4711,85 @@ mod tests {
             .is_some());
         set_repository_worktree_lock(&path, &worktree, false).expect("unlock linked worktree");
         assert!(remove_repository_worktree(&path, &path).is_err());
+        let source = test_repository();
+        git_output(
+            &worktree_path,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &source.0.to_string_lossy(),
+                "vendor/module",
+            ],
+        )
+        .expect("add initialized submodule to linked worktree");
+        fs::write(
+            worktree_path.join("vendor/module/README.md"),
+            "uncommitted submodule content\n",
+        )
+        .expect("modify submodule");
 
         remove_repository_worktree(&path, &worktree).expect("remove linked worktree");
         prune_repository_worktrees(&path).expect("prune linked worktrees");
         assert!(!worktree_path.exists());
+        assert!(!worktree_path.join("vendor/module").exists());
+    }
+
+    #[test]
+    fn load_commit_tree_files_reads_the_requested_tree() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        fs::create_dir_all(repository.0.join("src")).unwrap();
+        fs::create_dir_all(repository.0.join("config")).unwrap();
+        for (name, content) in [
+            ("src/keep.ts", "export {}"),
+            ("config/tool.toml", "enabled=true"),
+            ("Dockerfile", "FROM scratch"),
+            ("binary.png", "binary"),
+            ("src/空 格.ts", "export {}"),
+        ] {
+            fs::write(repository.0.join(name), content).unwrap();
+        }
+        git_output(&repository.0, &["add", "."]).unwrap();
+        git_output(&repository.0, &["commit", "-m", "tree fixture"]).unwrap();
+        let revision = resolve_commit(&repository.0, "HEAD").unwrap();
+        assert_eq!(
+            load_commit_file_content(&path, &revision, "src/空 格.ts").unwrap(),
+            "export {}"
+        );
+        assert!(load_commit_file_content(&path, &revision, "../outside.ts").is_err());
+        fs::remove_file(repository.0.join("src/keep.ts")).unwrap();
+        fs::write(repository.0.join("src/new.ts"), "new").unwrap();
+        let paths = load_commit_tree_files(&path, &revision).expect("read exact commit tree");
+        for expected in [
+            "src/keep.ts",
+            "config/tool.toml",
+            "Dockerfile",
+            "binary.png",
+            "src/空 格.ts",
+        ] {
+            assert!(paths.iter().any(|path| path == expected), "missing {expected}");
+        }
+        assert!(!paths.iter().any(|path| path == "src/new.ts"));
+        assert!(load_commit_tree_files(&path, "--all").is_err());
+    }
+
+    #[test]
+    fn repository_default_branch_uses_the_origin_head_symbolic_ref() {
+        let repository = test_repository();
+        git_output(
+            &repository.0,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/trunk",
+            ],
+        )
+        .expect("set origin default branch");
+        assert_eq!(repository_default_branch(&repository.0), Some("trunk".into()));
+        let snapshot = read_repository(&repository.0.to_string_lossy()).expect("read repository");
+        assert_eq!(snapshot.default_branch.as_deref(), Some("trunk"));
     }
 
     #[test]
@@ -5142,6 +5296,54 @@ mod tests {
             format!("160000 {right_gitlink} 0\tvendor/module"),
             "current branch gitlink must remain staged"
         );
+    }
+
+    #[test]
+    fn fast_forwards_fetched_branches_without_network_or_checkout() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let current = git_output(&repository.0, &["branch", "--show-current"])
+            .expect("current branch").trim().to_string();
+        let before = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("initial commit").trim().to_string();
+        for branch in ["sync", "diverged", "occupied", "untracked"] {
+            git_output(&repository.0, &["branch", branch]).expect("create branch");
+        }
+        git_output(&repository.0, &["remote", "add", "origin", "C:/nonexistent-branchline-remote"])
+            .expect("configure unavailable remote");
+        git_output(&repository.0, &["commit", "--allow-empty", "-m", "upstream update"])
+            .expect("upstream commit");
+        let upstream = git_output(&repository.0, &["rev-parse", "HEAD"])
+            .expect("upstream hash").trim().to_string();
+        git_output(&repository.0, &["update-ref", "refs/remotes/origin/main", &upstream])
+            .expect("simulate completed Fetch");
+        git_output(&repository.0, &["reset", "--hard", &before]).expect("restore current branch");
+        for branch in [current.as_str(), "sync", "diverged", "occupied"] {
+            git_output(&repository.0, &["branch", "--set-upstream-to", "origin/main", branch])
+                .expect("set upstream");
+        }
+        git_output(&repository.0, &["switch", "diverged"]).expect("switch diverged");
+        git_output(&repository.0, &["commit", "--allow-empty", "-m", "local update"])
+            .expect("local commit");
+        let diverged = git_output(&repository.0, &["rev-parse", "HEAD"]).expect("diverged hash");
+        git_output(&repository.0, &["switch", &current]).expect("restore checkout");
+        let worktree_path = repository.0.join("other-worktree").to_string_lossy().to_string();
+        git_output(&repository.0, &["worktree", "add", &worktree_path, "occupied"])
+            .expect("checkout occupied branch elsewhere");
+        fs::write(repository.0.join("README.md"), "local changes\n").expect("write local changes");
+        let status = git_output(&repository.0, &["status", "--porcelain"]).expect("initial status");
+
+        fast_forward_repository_branch(&path, "sync").expect("use fetched refs without network");
+        assert_eq!(git_output(&repository.0, &["rev-parse", "sync"]).unwrap().trim(), upstream);
+        fast_forward_repository_branch(&path, "sync").expect("up-to-date is safe");
+        for branch in [current.as_str(), "diverged", "occupied", "untracked", "missing"] {
+            assert!(fast_forward_repository_branch(&path, branch).is_err(), "must refuse {branch}");
+        }
+        assert_eq!(git_output(&repository.0, &["rev-parse", "HEAD"]).unwrap().trim(), before);
+        assert_eq!(git_output(&repository.0, &["rev-parse", "diverged"]).unwrap(), diverged);
+        assert_eq!(git_output(&repository.0, &["rev-parse", "occupied"]).unwrap().trim(), before);
+        assert_eq!(git_output(&repository.0, &["status", "--porcelain"]).unwrap(), status);
+        assert_eq!(fs::read_to_string(repository.0.join("README.md")).unwrap(), "local changes\n");
     }
 
     #[test]

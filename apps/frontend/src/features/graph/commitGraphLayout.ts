@@ -74,7 +74,10 @@ type SlotTransition = {
   toSlot: number
 }
 
-const GRAPH_COLORS = ['#36cfc9', '#9254de', '#fa8c16', '#52c41a', '#f759ab', '#597ef7', '#13c2c2', '#eb2f96']
+export const GRAPH_COLORS = [
+  '#36cfc9', '#9254de', '#fa8c16', '#52c41a', '#f759ab', '#597ef7',
+  '#13c2c2', '#eb2f96', '#d4b106', '#389e0d', '#2f54eb', '#cf1322',
+] as const
 
 function commitKey(commit: GraphCommit) {
   return commit.fullHash || commit.id

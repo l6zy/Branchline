@@ -274,6 +274,27 @@ pub async fn load_commit_files(
 }
 
 #[tauri::command]
+pub async fn load_commit_tree_files(
+    repository_path: String,
+    commit: String,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::load_commit_tree_files(&repository_path, &commit))
+        .await
+        .map_err(|error| task_error("读取提交文件树", error))?
+}
+
+#[tauri::command]
+pub async fn load_commit_file_content(
+    repository_path: String,
+    commit: String,
+    file_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || git::load_commit_file_content(&repository_path, &commit, &file_path))
+        .await
+        .map_err(|error| task_error("读取提交文件内容", error))?
+}
+
+#[tauri::command]
 pub async fn commit_repository(
     repository_path: String,
     message: String,
@@ -508,6 +529,19 @@ pub async fn pull_repository_branch(
     })
     .await
     .map_err(|error| task_error("拉取分支", error))?
+}
+
+#[tauri::command]
+pub async fn fast_forward_repository_branch(
+    repository_path: String,
+    branch: String,
+) -> Result<RepositorySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::fast_forward_repository_branch(&repository_path, &branch)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("自动快进分支", error))?
 }
 
 #[tauri::command]

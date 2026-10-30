@@ -177,6 +177,7 @@ export type RepositorySnapshot = {
   path: string
   superprojectPath?: string
   branch: string
+  defaultBranch?: string | null
   remote?: string
   ahead: number
   behind: number

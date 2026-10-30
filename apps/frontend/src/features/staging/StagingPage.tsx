@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Archive, ArrowDown, Check, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
+import { Archive, ArrowDown, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
@@ -24,7 +24,7 @@ import { DiffPanel } from '../diff/DiffPanel'
 import { useResizablePane } from '../../components/useResizablePane'
 import { initialCommitMessage, templateMessage } from './commitMessage'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
-import { stageSelectionKey, type StageSelection } from './stagingSelection'
+import { stageSelectionKey, visibleStagingSections, type StageSelection } from './stagingSelection'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
@@ -98,6 +98,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const conflictFiles = useMemo(() => files.filter((file) => conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const stagedFiles = useMemo(() => files.filter((file) => file.staged && !conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const unstagedFiles = useMemo(() => files.filter((file) => !conflictFilePaths.has(file.path) && (file.unstaged || (!file.staged && !file.unstaged))), [conflictFilePaths, files])
+  const visibleSections = visibleStagingSections(stagedFiles.length, unstagedFiles.length)
   const diffFileEntries = useMemo(() => [
     ...stagedFiles.map((file) => ({ file, scope: 'staged' as const })),
     ...unstagedFiles.map((file) => ({ file, scope: 'unstaged' as const })),
@@ -295,14 +296,14 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
             <div className="stage-section-header"><div className="stage-section-name"><span className="stage-section-marker"/><strong>冲突</strong><span className="stage-section-count">{conflictFiles.length}</span></div><span className="stage-section-hint">解决后可暂存</span></div>
             <div className="stage-section-files">{conflictFiles.map(conflictRow)}</div>
           </div>}
-          <div className={`stage-section staged-section ${sectionOpen.staged ? '' : 'collapsed'}`}>
+          {visibleSections.includes('staged') && <div className={`stage-section staged-section ${sectionOpen.staged ? '' : 'collapsed'}`}>
             <div className="stage-section-header"><button type="button" className="stage-section-toggle" onClick={() => setSectionOpen((value) => ({ ...value, staged: !value.staged }))} aria-expanded={sectionOpen.staged} title={sectionOpen.staged ? '收起已暂存文件' : '展开已暂存文件'}><ChevronDown size={14}/></button><div className="stage-section-name"><span className="stage-section-marker"/><strong>已暂存</strong><span className="stage-section-count">{stagedFiles.length}</span></div><div className="stage-section-actions"><button className="icon-tool-button" onClick={() => quickStash('staged', stagedFiles.length)} disabled={!stagedFiles.length || busy} title="快速 Stash 已暂存变更" aria-label="快速 Stash 已暂存变更"><Archive size={14}/></button><button className="icon-tool-button" onClick={() => unstage(stagedFiles.map((file) => file.path))} disabled={!stagedFiles.length || busy} title="全部取消暂存" aria-label="全部取消暂存"><Minus size={14}/></button></div></div>
-            {sectionOpen.staged && <div className="stage-section-files">{stagedFiles.length ? stagedFiles.map((file) => fileRow(file, () => unstage([file.path]), 'remove', 'staged')) : <div className="stage-empty">暂无已暂存文件</div>}</div>}
-          </div>
-          <div className={`stage-section unstaged-section ${sectionOpen.unstaged ? '' : 'collapsed'}`}>
+            {sectionOpen.staged && <div className="stage-section-files">{stagedFiles.map((file) => fileRow(file, () => unstage([file.path]), 'remove', 'staged'))}</div>}
+          </div>}
+          {visibleSections.includes('unstaged') && <div className={`stage-section unstaged-section ${sectionOpen.unstaged ? '' : 'collapsed'}`}>
             <div className="stage-section-header"><button type="button" className="stage-section-toggle" onClick={() => setSectionOpen((value) => ({ ...value, unstaged: !value.unstaged }))} aria-expanded={sectionOpen.unstaged} title={sectionOpen.unstaged ? '收起未暂存文件' : '展开未暂存文件'}><ChevronDown size={14}/></button><div className="stage-section-name"><span className="stage-section-marker"/><strong>未暂存</strong><span className="stage-section-count">{unstagedFiles.length}</span></div><div className="stage-section-actions"><Button variant="danger" className="icon-tool-button" onClick={() => void discard(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy} title="全部丢弃未暂存改动" aria-label="全部丢弃未暂存改动"><Trash2 size={14}/></Button><button className="icon-tool-button" onClick={() => quickStash('unstaged', unstagedFiles.length)} disabled={!unstagedFiles.length || busy} title="快速 Stash 未暂存变更" aria-label="快速 Stash 未暂存变更"><Archive size={14}/></button><button className="icon-tool-button" onClick={() => stage(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy} title="全部暂存" aria-label="全部暂存"><Plus size={14}/></button></div></div>
-            {sectionOpen.unstaged && <div className="stage-section-files">{unstagedFiles.length ? unstagedFiles.map((file) => fileRow(file, () => stage([file.path]), 'add', 'unstaged')) : <div className="stage-empty"><Check size={14}/> 工作区干净</div>}</div>}
-          </div>
+            {sectionOpen.unstaged && <div className="stage-section-files">{unstagedFiles.map((file) => fileRow(file, () => stage([file.path]), 'add', 'unstaged'))}</div>}
+          </div>}
         </div>
         <span className={`workspace-resizer workspace-resizer-row ${filesHeight.resizing ? 'active' : ''}`} role="separator" aria-label="拖动调整文件列表和提交面板高度" onPointerDown={filesHeight.beginResize}/>
         <div className="commit-compose"><div className="template-row"><span title={repository?.commitTemplate?.path}><FileText size={14}/> {repository?.commitTemplate ? `模板：${fileName(repository.commitTemplate.path)}` : '未配置 commit.template'}</span><div className="template-row-actions"><button type="button" className="template-icon-button" onClick={applyConfiguredTemplate} disabled={!repository?.commitTemplate} title="重新应用模板" aria-label="重新应用模板"><RefreshCw size={14}/></button><button type="button" className="template-icon-button" onClick={() => { setTemplateDraft(repository?.commitTemplate?.content ?? ''); setTemplateEditorOpen(true) }} title="编辑模板" aria-label="编辑模板"><Pencil size={14}/></button></div></div><textarea className="commit-full-message" value={fullMessage} onChange={(event) => setFullMessage(event.target.value)} aria-label="完整提交信息" placeholder="输入完整提交信息" spellCheck={false}/><div className="commit-options"><label><input type="checkbox" checked={amend} onChange={(event) => setAmend(event.target.checked)}/> Amend</label><label><input type="checkbox" checked={sign} onChange={(event) => setSign(event.target.checked)}/> 签名</label></div><Button variant="primary" onClick={commit} disabled={!stagedFiles.length || busy}><GitCommitHorizontal size={16}/> {busy ? '处理中…' : `提交 ${stagedFiles.length} 个文件`} <span>⌘↵</span></Button></div>

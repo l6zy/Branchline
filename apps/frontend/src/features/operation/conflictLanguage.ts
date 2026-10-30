@@ -1,0 +1,23 @@
+export type ConflictLanguage = 'typescript' | 'javascript' | 'rust' | 'css' | 'json' | 'markdown' | 'html' | 'python' | 'go' | 'java' | 'csharp' | 'cpp' | 'php' | 'sql' | 'yaml' | 'shell' | 'plain'
+
+export function conflictLanguageForPath(path: string): ConflictLanguage {
+  const fileName = path.toLowerCase().split(/[\\/]/).pop() ?? ''
+  const extension = fileName.split('.').pop() ?? ''
+  if (['ts', 'tsx'].includes(extension)) return 'typescript'
+  if (['js', 'jsx', 'mjs', 'cjs'].includes(extension)) return 'javascript'
+  if (extension === 'rs') return 'rust'
+  if (['css', 'scss', 'less'].includes(extension)) return 'css'
+  if (['json', 'jsonc'].includes(extension)) return 'json'
+  if (['md', 'mdx'].includes(extension)) return 'markdown'
+  if (['html', 'htm', 'vue', 'svelte'].includes(extension)) return 'html'
+  if (['py', 'pyw'].includes(extension)) return 'python'
+  if (extension === 'go') return 'go'
+  if (extension === 'java') return 'java'
+  if (['cs', 'fs', 'fsx', 'vb'].includes(extension)) return 'csharp'
+  if (['c', 'cc', 'cpp', 'cxx', 'h', 'hh', 'hpp', 'hxx'].includes(extension)) return 'cpp'
+  if (['php', 'phtml'].includes(extension)) return 'php'
+  if (['sql', 'mysql', 'pgsql'].includes(extension)) return 'sql'
+  if (['yaml', 'yml'].includes(extension)) return 'yaml'
+  if (['sh', 'bash', 'zsh'].includes(extension) || ['dockerfile', 'makefile'].includes(fileName)) return 'shell'
+  return 'plain'
+}

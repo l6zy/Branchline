@@ -1,17 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, Search, Save, X } from 'lucide-react'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { css } from '@codemirror/lang-css'
-import { html } from '@codemirror/lang-html'
-import { javascript } from '@codemirror/lang-javascript'
-import { json } from '@codemirror/lang-json'
-import { markdown } from '@codemirror/lang-markdown'
-import { rust } from '@codemirror/lang-rust'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state'
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
+import { Compartment, EditorState, StateEffect, StateField, type Extension } from '@codemirror/state'
 import { Decoration, EditorView, keymap, lineNumbers, WidgetType, type DecorationSet } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import { Button } from '../../components/Button'
+import { conflictLanguageForPath } from './conflictLanguage'
 
 export type ConflictBlockRange = {
   index: number
@@ -173,15 +168,29 @@ const conflictHighlightStyle = HighlightStyle.define([
   { tag: [tags.punctuation, tags.bracket], color: 'var(--muted)' },
 ])
 
-function languageForPath(path: string) {
-  const extension = path.toLowerCase().split('.').pop() ?? ''
-  if (['ts', 'tsx'].includes(extension)) return javascript({ jsx: extension === 'tsx', typescript: true })
-  if (['js', 'jsx', 'mjs', 'cjs'].includes(extension)) return javascript({ jsx: ['jsx'].includes(extension) })
-  if (extension === 'rs') return rust()
-  if (['css', 'scss', 'less'].includes(extension)) return css()
-  if (['json', 'jsonc'].includes(extension)) return json()
-  if (['md', 'mdx'].includes(extension)) return markdown()
-  if (['html', 'htm', 'vue', 'svelte'].includes(extension)) return html()
+async function languageForPath(path: string): Promise<Extension> {
+  const language = conflictLanguageForPath(path)
+  if (language === 'typescript' || language === 'javascript') {
+    const { javascript } = await import('@codemirror/lang-javascript')
+    return javascript({ jsx: path.toLowerCase().endsWith('.tsx') || path.toLowerCase().endsWith('.jsx'), typescript: language === 'typescript' })
+  }
+  if (language === 'rust') return (await import('@codemirror/lang-rust')).rust()
+  if (language === 'css') return (await import('@codemirror/lang-css')).css()
+  if (language === 'json') return (await import('@codemirror/lang-json')).json()
+  if (language === 'markdown') return (await import('@codemirror/lang-markdown')).markdown()
+  if (language === 'html') return (await import('@codemirror/lang-html')).html()
+  if (language === 'python') return (await import('@codemirror/lang-python')).python()
+  if (language === 'go') return (await import('@codemirror/lang-go')).go()
+  if (language === 'java') return (await import('@codemirror/lang-java')).java()
+  if (language === 'csharp') return (await import('@replit/codemirror-lang-csharp')).csharp()
+  if (language === 'cpp') return (await import('@codemirror/lang-cpp')).cpp()
+  if (language === 'php') return (await import('@codemirror/lang-php')).php()
+  if (language === 'sql') return (await import('@codemirror/lang-sql')).sql()
+  if (language === 'yaml') return (await import('@codemirror/lang-yaml')).yaml()
+  if (language === 'shell') {
+    const { shell } = await import('@codemirror/legacy-modes/mode/shell')
+    return StreamLanguage.define(shell)
+  }
   return []
 }
 
@@ -191,6 +200,7 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
   const onChangeRef = useRef(onChange)
   const onResolveRef = useRef(onResolveBlock)
   const languageCompartment = useRef(new Compartment())
+  const languageRequest = useRef(0)
   const editableCompartment = useRef(new Compartment())
   const previousResolvedRanges = useRef<Array<{ from: number; to: number }> | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -222,7 +232,7 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
           conflictEditorTheme,
           syntaxHighlighting(conflictHighlightStyle, { fallback: true }),
           conflictDecorationField,
-          languageCompartment.current.of(languageForPath(filePath)),
+          languageCompartment.current.of([]),
           editableCompartment.current.of(EditorView.editable.of(!disabled)),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
@@ -257,7 +267,13 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    view.dispatch({ effects: languageCompartment.current.reconfigure(languageForPath(filePath)) })
+    const request = ++languageRequest.current
+    void languageForPath(filePath).then((extension) => {
+      if (viewRef.current === view && languageRequest.current === request) {
+        view.dispatch({ effects: languageCompartment.current.reconfigure(extension) })
+      }
+    }).catch(() => undefined)
+    return () => { languageRequest.current += 1 }
   }, [filePath])
 
   useEffect(() => {

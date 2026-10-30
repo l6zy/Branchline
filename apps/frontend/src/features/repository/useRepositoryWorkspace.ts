@@ -62,11 +62,13 @@ export function useRepositoryWorkspace() {
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
   const [structureRepository, setStructureRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
+  const [restoringRepository, setRestoringRepository] = useState(() => selectStartupRepository(recentRepositories, readStartupRepositoryPath()))
   const [favoriteRepositories, setFavoriteRepositories] = useState(readFavoriteRepositories)
   const [openingRepository, setOpeningRepository] = useState(recentRepositories.length > 0)
   const [fetching, setFetching] = useState(false)
   const [repositoryNotice, setRepositoryNoticeState] = useState<string | null>(null)
   const [noticeVersion, setNoticeVersion] = useState(0)
+  const [fetchCompletion, setFetchCompletion] = useState<{ snapshot: RepositorySnapshot } | null>(null)
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null)
   const [autoFetchSettings, setAutoFetchSettings] = useState<AutoFetchSettings>(readAutoFetchSettings)
   const fetchInProgress = useRef(false)
@@ -213,6 +215,7 @@ export function useRepositoryWorkspace() {
         if (sequence !== navigationSequence.current) return
         setLastFetchAt(Date.now())
         applyRefreshedSnapshot(snapshot)
+        setFetchCompletion({ snapshot })
       })
       .catch(() => {
         navigationFetchedAt.current.delete(key)
@@ -299,7 +302,7 @@ export function useRepositoryWorkspace() {
   useEffect(() => {
     if (initialRestoreStarted.current) return
     initialRestoreStarted.current = true
-    const previousRepository = selectStartupRepository(recentRepositories, readStartupRepositoryPath())
+    const previousRepository = restoringRepository
     if (!previousRepository) {
       setOpeningRepository(false)
       return
@@ -314,8 +317,11 @@ export function useRepositoryWorkspace() {
         const message = error instanceof Error ? error.message : String(error)
         setRepositoryNotice(`无法重新打开上次仓库：${message}`)
       })
-      .finally(() => setOpeningRepository(false))
-  }, [applySnapshot, recentRepositories, rememberRepository, setRepositoryNotice])
+      .finally(() => {
+        setOpeningRepository(false)
+        setRestoringRepository(null)
+      })
+  }, [applySnapshot, restoringRepository, rememberRepository, setRepositoryNotice])
 
   const fetchNow = useCallback(async (quiet = false) => {
     if (!repository || fetchInProgress.current) return null
@@ -326,6 +332,7 @@ export function useRepositoryWorkspace() {
       navigationFetchedAt.current.set(repositoryCacheKey(snapshot.path), Date.now())
       applyRefreshedSnapshot(snapshot)
       setLastFetchAt(Date.now())
+      setFetchCompletion({ snapshot })
       if (!quiet) setRepositoryNotice('Fetch 完成，远程引用已更新')
       return snapshot
     } catch (error) {
@@ -417,11 +424,13 @@ export function useRepositoryWorkspace() {
     forgetRepository,
     registerRepository,
     openingRepository,
+    restoringRepository,
     fetching,
     repositoryNotice,
     pauseRepositoryNotice,
     resumeRepositoryNotice,
     lastFetchAt,
+    fetchCompletion,
     parentRepository,
     setRepositoryNotice,
     applySnapshot,

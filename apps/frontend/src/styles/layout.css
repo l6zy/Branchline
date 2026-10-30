@@ -1,6 +1,22 @@
 /* Layout: app shell, navigation, panes, drawers, and responsive rules. */
 
-.app-shell { width: 100%; height: 100%; display: flex; color: var(--text); background: var(--surface-raised); }
+.app-shell { position: relative; width: 100%; height: 100%; padding-top: 30px; display: flex; color: var(--text); background: var(--surface-raised); }
+
+.app-titlebar { position: absolute; inset: 0 0 auto; height: 30px; display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line); color: var(--text-secondary); background: var(--surface-chrome); z-index: 100; user-select: none; }
+
+.titlebar-brand { height: 100%; padding-left: 10px; display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; font-weight: 650; }
+
+.titlebar-brand img { width: 17px; height: 17px; }
+
+.titlebar-drag-region { height: 100%; }
+
+.window-controls { height: 100%; display: flex; }
+
+.window-controls button { width: 42px; height: 100%; display: grid; place-items: center; border: 0; color: var(--text-secondary); background: transparent; cursor: pointer; }
+
+.window-controls button:hover { color: var(--text); background: var(--surface-hover); }
+
+.window-controls .window-close:hover { color: #fff; background: #d64545; }
 
 .app-shell.panel-resizing, .app-shell.panel-resizing * { cursor: col-resize!important; user-select: none!important; }
 
@@ -184,6 +200,25 @@
 .operation-indicator strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 
 .operation-indicator span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.repository-startup-loading { min-width: 0; min-height: 0; padding: 40px 24px 64px; display: grid; place-items: center; overflow: auto; background: radial-gradient(ellipse at 50% 42%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 60%), var(--surface-base); }
+
+.repository-startup-content { width: min(360px, 100%); text-align: center; animation: fadeIn .25s ease-out; }
+.repository-startup-mark { width: 52px; height: 52px; border-radius: 13px; box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 18%, transparent); }
+.repository-startup-content h1 { margin: 15px 0 6px; color: var(--text-primary); font-size: 25px; line-height: 1.3; font-weight: 650; letter-spacing: -.6px; }
+.repository-startup-content > p { margin: 0; color: var(--text-tertiary); font-size: 12px; }
+.repository-startup-project { position: relative; margin-top: 30px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 11px; background: var(--surface-raised); box-shadow: 0 4px 18px color-mix(in srgb, var(--text-primary) 3%, transparent); }
+.repository-startup-project-info { min-width: 0; padding: 18px; display: flex; align-items: center; gap: 12px; text-align: left; }
+.repository-startup-folder { width: 38px; height: 38px; flex-shrink: 0; display: grid; place-items: center; border-radius: 9px; color: var(--accent-text); background: var(--accent-dim); }
+.repository-startup-project-info > div { min-width: 0; display: grid; gap: 5px; }
+.repository-startup-project-info strong, .repository-startup-project-info code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-startup-project-info strong { color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.repository-startup-project-info code { color: var(--text-tertiary); font-size: 10px; line-height: 1.5; }
+.repository-startup-progress { height: 2px; overflow: hidden; background: var(--accent-ring); }
+.repository-startup-progress > span { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--accent); animation: startupProgress 1.8s ease-in-out infinite; }
+.repository-startup-status { margin-top: 18px; display: flex; justify-content: center; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 11px; }
+@keyframes startupProgress { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+@media (prefers-reduced-motion: reduce) { .repository-startup-content, .repository-startup-status .spin { animation: none; } .repository-startup-progress > span { width: 100%; opacity: .5; animation: none; } }
 
 .repository-loading { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 72%, transparent); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
 

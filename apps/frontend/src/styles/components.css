@@ -412,8 +412,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .virtual-file-entry > button { height: 100%; }
 
-.virtual-file-entry.folder { border-bottom: 1px solid var(--line-soft); }
-
 .stats { display: flex; gap: 3px; font: 7px var(--font-code); }
 
 .line-no { padding: 4px 6px 0 0; color: var(--faint); text-align: right; border-right: 1px solid var(--line-soft); user-select: none; }
@@ -422,7 +420,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-panes { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: hidden; }
 
-.split-diff-pane { min-width: 0; min-height: 0; overflow: auto; background: var(--code-surface); }
+.split-diff-pane { min-width: 0; min-height: 0; overflow-x: scroll; overflow-y: auto; background: var(--code-surface); }
 
 .split-diff-pane + .split-diff-pane { border-left: 1px solid var(--code-border); }
 .split-diff-actions { min-width: 0; overflow: hidden; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
@@ -638,6 +636,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 .status-separator { width: 1px; height: 10px; margin: 0 3px; background: var(--line); }
 
 .drawer-backdrop { position: fixed; inset: 0; display: flex; justify-content: flex-end; background: rgba(3,7,10,.55); backdrop-filter: blur(2px); z-index: 20; animation: fadeIn .18s ease; }
+
+.history-drawer-backdrop { inset: 30px 0 0; }
 
 .staging-drawer { width: min(1180px, calc(100vw - 44px)); height: 100%; padding: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr); overflow: hidden; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -20px 0 60px rgba(0,0,0,.4); animation: slideIn .25s ease-out; }
 

@@ -17,7 +17,9 @@ describe('semantic style architecture', () => {
   })
 
   it('aligns the native title bar with the active theme and gives blame a wide code workspace', () => {
-    expect(app).toContain('getCurrentWindow().setTheme(theme)')
+    expect(app).toContain("window.matchMedia?.('(prefers-color-scheme: dark)')")
+    expect(app).toContain('getCurrentWindow().setTheme(resolvedTheme)')
+    expect(app).toContain("resolvedTheme === 'light' ? 'theme-light' : ''")
     expect(app).toContain('className="app-titlebar"')
     expect(readFileSync(new URL('../../desktop/tauri.conf.json', import.meta.url), 'utf8')).toContain('"decorations": false')
     expect(features.match(/\.history-drawer \{[^}]+\}/)?.[0]).toContain('96vw')

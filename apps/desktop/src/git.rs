@@ -663,12 +663,13 @@ fn porcelain_file_type(code: &str) -> &'static str {
 }
 
 fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
-    let mut stats: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut unstaged_stats: HashMap<String, (usize, usize)> = HashMap::new();
     collect_numstat(
         path,
         &["-c", "core.quotepath=false", "diff", "--numstat", "--"],
-        &mut stats,
+        &mut unstaged_stats,
     );
+    let mut staged_stats: HashMap<String, (usize, usize)> = HashMap::new();
     collect_numstat(
         path,
         &[
@@ -679,7 +680,7 @@ fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
             "--numstat",
             "--",
         ],
-        &mut stats,
+        &mut staged_stats,
     );
 
     let status = optional_git_output(
@@ -710,12 +711,17 @@ fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
             let bytes = code.as_bytes();
             let staged = code != "??" && bytes.first().is_some_and(|value| *value != b' ');
             let unstaged = code == "??" || bytes.get(1).is_some_and(|value| *value != b' ');
-            let (add, del) = stats.get(&file_path).copied().unwrap_or((0, 0));
+            let (staged_add, staged_del) = staged_stats.get(&file_path).copied().unwrap_or_default();
+            let (unstaged_add, unstaged_del) = unstaged_stats.get(&file_path).copied().unwrap_or_default();
             Some(RepositoryFile {
                 path: file_path,
                 r#type: file_type.into(),
-                add,
-                del,
+                add: staged_add + unstaged_add,
+                del: staged_del + unstaged_del,
+                staged_add,
+                staged_del,
+                unstaged_add,
+                unstaged_del,
                 staged,
                 unstaged,
                 incoming: false,
@@ -2523,6 +2529,10 @@ fn parse_repository_files(numstat: &str, status: &str) -> Vec<RepositoryFile> {
                 r#type: kind,
                 add,
                 del,
+                staged_add: 0,
+                staged_del: 0,
+                unstaged_add: 0,
+                unstaged_del: 0,
                 staged: false,
                 unstaged: false,
                 incoming: false,
@@ -2761,6 +2771,10 @@ fn files_from_diff_outputs(numstat: &str, status: &str) -> Vec<RepositoryFile> {
                 r#type: status.chars().next().unwrap_or('M').to_string(),
                 add,
                 del,
+                staged_add: 0,
+                staged_del: 0,
+                unstaged_add: 0,
+                unstaged_del: 0,
                 staged: false,
                 unstaged: false,
                 incoming: false,
@@ -4432,6 +4446,21 @@ mod tests {
         assert!(preview_branch_prefix(&path, "feat")
             .expect("preview deleted prefix")
             .is_empty());
+    }
+
+    #[test]
+    fn repository_file_stats_are_separated_by_staged_and_unstaged_diff() {
+        let repository = test_repository();
+        fs::write(repository.0.join("README.md"), "staged\n").expect("write staged version");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage file change");
+        fs::write(repository.0.join("README.md"), "staged\nunstaged\n")
+            .expect("write unstaged version");
+
+        let snapshot = read_repository(&repository.0.to_string_lossy()).expect("read repository");
+        let file = snapshot.files.iter().find(|file| file.path == "README.md").expect("changed file");
+
+        assert_eq!((file.staged_add, file.staged_del), (1, 1));
+        assert_eq!((file.unstaged_add, file.unstaged_del), (1, 0));
     }
 
     #[test]

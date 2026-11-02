@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
 import { CompactSelect } from './components/CompactSelect'
@@ -32,12 +32,13 @@ import { trackedRemoteReference, visibleCommitReferences, type BranchTrackingMap
 import { matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits, type HistorySearchMode, type HistorySearchSummary } from './features/history/historySearch'
 import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
 import { DEFAULT_HISTORY_LOAD_LIMIT, nextHistoryLoadLimit } from './features/history/historyDepth'
-import { buildCommitFileTree } from './features/history/commitFileTree'
+import { buildCommitFileTree, commitFileContentRows } from './features/history/commitFileTree'
 import { findParentCommit } from './features/history/parentNavigation'
 import { formatLocalDateTime } from './dateTime'
 import { isAutoPullBranchSettings, toggleAutoPullBranch as toggleConfiguredAutoPullBranch } from './features/repository/branchSwitch'
 import { useAutoFastForward } from './features/repository/useAutoFastForward'
 import { isBooleanRecord, usePersistentState } from './persistentState'
+import { isThemePreference, nextThemePreference, resolveTheme, type ThemePreference } from './themePreference'
 import { DEFAULT_HISTORY_COLUMN_WIDTHS, DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryColumnWidths, isHistoryVisibleColumns } from './features/history/historyColumns'
 import { committerInitials, committerName, isHistoryCommitVisibleOnSelectedBranches, matchesCommitterFilter, reachableHistoryCommitIds, toggleFilterValue, unloadedHistoryBranches } from './features/history/historyFilters'
 import { acquireOperationLock, releaseOperationLock } from './features/operation/operationLock'
@@ -77,6 +78,7 @@ import {
   MoreHorizontal,
   Maximize2,
   Minimize2,
+  Monitor,
   Minus,
   PanelRightOpen,
   PanelLeftClose,
@@ -128,11 +130,10 @@ type SearchSummary = HistorySearchSummary
 type HistoryTarget = { path: string; tab: 'history' | 'blame' | 'line'; line?: number; revision?: string }
 type ActiveOperation = { key: 'fetch' | 'pull' | 'push' | 'commit' | 'stash' | 'revert' | 'cherry-pick' | 'merge' | 'history'; label: string; detail: string }
 
-const isTheme = (value: unknown): value is 'dark' | 'light' => value === 'dark' || value === 'light'
 const isSidebarWidth = (value: unknown): value is number => typeof value === 'number' && value >= 200 && value <= 360
 const isInspectorWidth = (value: unknown): value is number => typeof value === 'number' && value >= 300 && value <= 520
 const isDetailsHeight = (value: unknown): value is number => typeof value === 'number' && value >= 230 && value <= 560
-const isFileMode = (value: unknown): value is 'list' | 'tree' => value === 'list' || value === 'tree'
+const isFileMode = (value: unknown): value is 'list' | 'tree' | 'all' => value === 'list' || value === 'tree' || value === 'all'
 
 const OperationPanel = lazy(async () => ({ default: (await import('./features/operation/OperationPanel')).OperationPanel }))
 
@@ -599,7 +600,7 @@ function CommitDetails({ commit, stashReference, onClose, onOpenParent }: { comm
 }
 
 function ChangedFilesPanel({ files, treePaths, treeError, loading, activeFile, onOpenFile, onOpenHistory }: { files: RepositoryFile[]; treePaths?: string[]; treeError?: string; loading?: boolean; activeFile: number | null; onOpenFile: (index: number | null, file: RepositoryFile) => void; onOpenHistory: (path: string, tab: HistoryTarget['tab']) => void }) {
-  const [fileMode, setFileMode] = useState<'list' | 'tree' | 'all'>('tree')
+  const [fileMode, setFileMode] = usePersistentState('branchline.changedFilesMode.v1', 'list', isFileMode)
   const allFilesTree = useMemo(() => fileMode === 'all' && treePaths ? buildCommitFileTree(treePaths, files, true) : null, [fileMode, treePaths, files])
   const displayFiles = fileMode === 'all' ? allFilesTree?.files ?? [] : files
   const changedPaths = useMemo(() => allFilesTree ? new Set(allFilesTree.files.filter((file) => file.changed).map((file) => file.path)) : undefined, [allFilesTree])
@@ -616,7 +617,7 @@ function ChangedFilesPanel({ files, treePaths, treeError, loading, activeFile, o
     return Array.from(folders)
   }, [displayFiles])
   return <section className={`changed-files-panel ${treeError ? 'has-tree-error' : ''}`}>
-    <div className="changed-files-heading"><div><FileDiff size={15}/><strong>{fileMode === 'all' ? '全部文件' : treePaths ? '提交文件' : '变更文件'}</strong><span>{loading ? '…' : displayFiles.length}</span></div><div className="changed-files-actions">{treePaths && <div className="file-tree-mode" role="group" aria-label="文件视图"><button type="button" className={fileMode === 'list' ? 'active' : ''} aria-pressed={fileMode === 'list'} onClick={() => setFileMode('list')} title="列表视图"><List size={13}/></button><button type="button" className={fileMode === 'tree' ? 'active' : ''} aria-pressed={fileMode === 'tree'} onClick={() => setFileMode('tree')} title="树形视图"><FolderTree size={13}/></button><button type="button" className={fileMode === 'all' ? 'active' : ''} aria-pressed={fileMode === 'all'} onClick={() => setFileMode('all')} title="显示全部文件"><Files size={13}/></button></div>}<Button variant="icon" disabled={loading || !displayFiles.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多文件操作"><MoreHorizontal size={15}/></Button></div></div>
+    <div className="changed-files-heading"><div><FileDiff size={15}/><strong>{fileMode === 'all' ? '全部文件' : treePaths ? '提交文件' : '变更文件'}</strong><span>{loading ? '…' : displayFiles.length}</span></div><div className="changed-files-actions">{treePaths && <div className="segmented compact-segmented icon-segmented" role="group" aria-label="文件视图"><button type="button" className={fileMode === 'list' ? 'active' : ''} aria-pressed={fileMode === 'list'} onClick={() => setFileMode('list')} title="列表视图" aria-label="列表视图"><List size={14}/></button><button type="button" className={fileMode === 'tree' ? 'active' : ''} aria-pressed={fileMode === 'tree'} onClick={() => setFileMode('tree')} title="树形视图" aria-label="树形视图"><FolderTree size={14}/></button><button type="button" className={fileMode === 'all' ? 'active' : ''} aria-pressed={fileMode === 'all'} onClick={() => setFileMode('all')} title="显示全部文件" aria-label="显示全部文件"><Files size={14}/></button></div>}<Button variant="icon" disabled={loading || !displayFiles.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} title="更多文件操作"><MoreHorizontal size={15}/></Button></div></div>
     {treeError && <div className="commit-tree-error" role="alert">文件树读取失败：{treeError}</div>}
     {loading ? <div className="changed-files-list"><div className="changed-files-empty"><RefreshCw className="spin" size={15}/><span>正在读取该提交的变更文件…</span></div></div> : !displayFiles.length ? <div className="changed-files-list"><div className="changed-files-empty"><FileDiff size={15}/><span>{fileMode === 'all' ? '该提交没有文件' : '该提交没有文件变更'}</span></div></div> : <DiffFileList files={displayFiles} activeFile={activeTreeFile ?? -1} mode={fileMode === 'list' ? 'list' : 'tree'} changedPaths={fileMode === 'all' ? changedPaths : undefined} onSelectFile={(index) => { const file = displayFiles[index]; if (file) onOpenFile(fileMode === 'all' ? allFilesTree?.files.find((item) => item.path === file.path)?.changeIndex ?? null : index, file) }} className="changed-files-list" fileRowHeight={44} folderRowHeight={25} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders} showOpenIndicator onFileContextMenu={(event, file) => { event.preventDefault(); setContextFile({ file, x: event.clientX, y: event.clientY }) }}/>}
     {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><FileDiff size={13}/><span>变更文件操作</span></div><button onClick={() => { setCollapsedFolders({}); setMoreMenu(null) }}><ChevronDown size={14}/><span>展开全部文件夹</span></button><button onClick={() => { setCollapsedFolders(Object.fromEntries(fileFolders.map((folder) => [folder, true]))); setMoreMenu(null) }}><ChevronRight size={14}/><span>收起全部文件夹</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(displayFiles.map((file) => file.path).join('\n')).catch(() => undefined); setMoreMenu(null) }}><Copy size={14}/><span>复制文件路径列表</span></button><button onClick={() => { navigator.clipboard?.writeText(files.map((file) => `${file.type} ${file.path} (+${file.add} -${file.del})`).join('\n')).catch(() => undefined); setMoreMenu(null) }}><FileText size={14}/><span>复制变更摘要</span></button></ContextMenu>}
@@ -679,20 +680,30 @@ export default function App() {
   const [wideDiff, setWideDiff] = useState(false)
   const [diffFile, setDiffFile] = useState<number | null>(null)
   const [inspectorCollapsed, setInspectorCollapsed] = usePersistentState('branchline.inspectorCollapsed.v2', true, (value): value is boolean => typeof value === 'boolean')
-  const [theme, setTheme] = usePersistentState('branchline.theme.v1', 'light', isTheme)
+  const [theme, setTheme] = usePersistentState<ThemePreference>('branchline.theme.v1', 'light', isThemePreference)
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+  const resolvedTheme = resolveTheme(theme, systemDark)
   const [windowMaximized, setWindowMaximized] = useState(false)
   const [autoPullBranchSettings, setAutoPullBranchSettings] = usePersistentState('branchline.autoPullBranches.v2', {}, isAutoPullBranchSettings)
   const autoPullBranches = repository ? autoPullBranchSettings[repository.path] ?? [] : []
   const [pullingBranches, setPullingBranches] = useState<string[]>([])
   const pullingBranchesRef = useRef(new Set<string>())
-  const [treeFileView, setTreeFileView] = useState<{ path: string; commit: string; content: string } | null>(null)
+  const [treeFileView, setTreeFileView] = useState<{ path: string; commit: string; file: RepositoryFile } | null>(null)
   useEffect(() => {
     try {
-      void getCurrentWindow().setTheme(theme).catch(() => undefined)
+      void getCurrentWindow().setTheme(resolvedTheme).catch(() => undefined)
     } catch {
       // The native window API is unavailable in the browser preview.
     }
-  }, [theme])
+  }, [resolvedTheme])
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!media) return
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches)
+    setSystemDark(media.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
   useEffect(() => {
     let unlisten: (() => void) | undefined
     try {
@@ -876,6 +887,7 @@ export default function App() {
   useEffect(() => {
     setDiffFile(null)
     setWideDiff(false)
+    setTreeFileView(null)
     setHistoryConflictPath(null)
     setOperationPath(null)
   }, [selectedStatsKey])
@@ -886,6 +898,9 @@ export default function App() {
       ? loadRepositoryStashFileDiff(repository.path, selectedStashReference, filePath, showWhitespace)
       : loadFileCommitDiff(repository.path, selectedStatsKey, filePath, showWhitespace)
   }, [repository?.path, selectedStashReference, selectedStatsKey, selectedWorkingTree])
+  const loadSelectedCommitFileContent = useCallback((filePath: string) => repository
+    ? loadRepositoryCommitFileContent(repository.path, selectedStatsKey, filePath).then(commitFileContentRows)
+    : Promise.resolve([]), [repository?.path, selectedStatsKey])
   const handleOpenSnapshot = (snapshot: RepositorySnapshot | null) => {
     if (!snapshot) return
     setRepositoryManagerOpen(false)
@@ -1384,7 +1399,7 @@ export default function App() {
           setRepositorySwitcherSignal((current) => current + 1)
         }
       }
-      if (modifier && event.key === '/') { event.preventDefault(); setTheme((value) => value === 'dark' ? 'light' : 'dark') }
+      if (modifier && event.key === '/') { event.preventDefault(); setTheme((value) => value === 'system' ? resolvedTheme === 'dark' ? 'light' : 'dark' : value === 'dark' ? 'light' : 'dark') }
       if (repositoryManagerOpen || !repository) {
         if (modifier && !event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); document.querySelector<HTMLInputElement>('.repository-catalog-search input')?.focus() }
         return
@@ -1399,18 +1414,20 @@ export default function App() {
         ;(nextView as HTMLButtonElement | null)?.click()
       }
       if (event.key === '?' && !modifier) { setShortcutOpen((value) => !value) }
-      if (event.key === 'Escape') { setShortcutOpen(false); setHistoryTarget(null); setHistoryConflictPath(null); setDiffFile(null); setWideDiff(false); setFilterMenu(null); setNotificationOpen(false) }
+      if (event.key === 'Escape') { setShortcutOpen(false); setHistoryTarget(null); setHistoryConflictPath(null); setDiffFile(null); setTreeFileView(null); setWideDiff(false); setFilterMenu(null); setNotificationOpen(false) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleFetch, repositoryManagerOpen, repository])
-  const inspectorVisible = workspaceView === 'history' && !inspectorCollapsed && !(wideDiff && diffFile !== null)
+  }, [handleFetch, repositoryManagerOpen, repository, resolvedTheme])
+  const inspectorVisible = workspaceView === 'history' && !inspectorCollapsed && !(wideDiff && (diffFile !== null || treeFileView !== null))
   const timeFilterLabels: Record<TimeFilter, string> = { all: '全部时间', day: '最近 24 小时', week: '最近 7 天', month: '最近 30 天' }
   const branchFilterLabel = branchFilter.length === 0 ? '全部分支' : branchFilter.length === 1 ? branchFilter[0] : `已选 ${branchFilter.length} 个分支`
   const minimizeWindow = () => { try { void getCurrentWindow().minimize().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const toggleWindowMaximize = () => { try { const appWindow = getCurrentWindow(); void appWindow.toggleMaximize().then(() => appWindow.isMaximized()).then(setWindowMaximized).catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const closeWindow = () => { try { void getCurrentWindow().close().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
-  return <main className={`app-shell ${theme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`}>
+  const themeTitle = theme === 'system' ? `跟随系统（当前${resolvedTheme === 'dark' ? '深色' : '浅色'}）` : `${theme === 'dark' ? '深色' : '浅色'}主题`
+  const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun
+  return <main className={`app-shell ${resolvedTheme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`}>
     <div className="app-titlebar" data-tauri-drag-region>
       <div className="titlebar-brand" data-tauri-drag-region><AppMark/><span>Branchline</span></div>
       <div className="titlebar-drag-region" data-tauri-drag-region/>
@@ -1435,7 +1452,7 @@ export default function App() {
             <Button variant="secondary" className="fetch-button sync-action" onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} title="获取远程更新"><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? '获取中…' : '获取'}</span></Button>
             <Button variant="secondary" className="fetch-button sync-action" onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.behind ? `拉取当前分支（${repository.behind} 个待拉取提交）` : '拉取当前分支'}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? '拉取中…' : '拉取'}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{repository!.behind}</small>}</Button>
             <Button variant="secondary" className="fetch-button sync-action" onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} title={repository?.operation ? '请先完成当前 Git 操作' : repository?.ahead ? `推送当前分支（${repository.ahead} 个待推送提交）` : '推送当前分支'}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? '推送中…' : '推送'}</span>{Boolean(repository?.ahead) && <small className="sync-count push-count">{repository!.ahead}</small>}</Button>
-            <Button variant="icon" onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</Button>
+            <Button variant="icon" onClick={() => setTheme(nextThemePreference)} title={`${themeTitle}，点击切换主题`} aria-label={`${themeTitle}，点击切换主题`}><ThemeIcon size={17}/></Button>
             <Button ref={notificationButtonRef} variant="icon" className="notification" active={notificationOpen} onClick={() => setNotificationOpen((value) => !value)} title="查看通知"><Bell size={17}/><span/></Button>
             {notificationOpen && <div ref={notificationPopoverRef} className="notification-popover">
               <div className="popover-heading"><strong>通知</strong><button onClick={() => setNotificationOpen(false)} title="关闭通知"><X size={13}/></button></div>
@@ -1450,10 +1467,11 @@ export default function App() {
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>按分支筛选（可多选）</span></div><div className="context-menu-options"><button className={branchFilter.length === 0 ? 'selected-option' : ''} onClick={() => { setBranchFilter([]); setFilterMenu(null) }}><Check size={14}/><span>全部分支</span></button>{availableBranches.map((branch) => <label className="history-filter-option" key={branch}><input type="checkbox" checked={branchFilter.includes(branch)} onChange={() => setBranchFilter((values) => toggleFilterValue(values, branch))}/><GitBranch size={14}/><span>{branch}</span></label>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>按提交时间筛选</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
-      <div className={`workspace-grid ${wideDiff && diffFile !== null ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
+      <div className={`workspace-grid ${wideDiff && (diffFile !== null || treeFileView !== null) ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
           <CommitList revealSignal={historyRevealSignal} key={repository.path} commits={activeCommits} selected={selected} onSelect={(id) => { setSelected(id); setInspectorCollapsed(false) }} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => { const remote = commit.branches?.find((reference) => repository.remoteBranches.includes(reference) || repository.remoteBranches.includes(reference.replace(/^refs\/remotes\//, ''))); const normalized = remote?.replace(/^refs\/remotes\//, ''); void handleMergeReference(remote ?? commit.fullHash ?? commit.id, remote ? `分支 ${normalized}` : `提交 ${commit.id}`) }} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRevertCommit={(commit) => void handleRevertCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit), mode === 'hash' ? `已复制${commit.status === 'stash' ? ' Stash' : '提交'} Hash：${commit.id}` : `已复制${commit.status === 'stash' ? ' Stash' : `提交 ${commit.id}`} 的完整信息`)} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
           {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} onActiveFileChange={setDiffFile} hideFileList loadRows={loadSelectedCommitDiff} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
+          {treeFileView && <div className="history-diff-overlay"><DiffPanel key={`commit-file:${treeFileView.commit}:${treeFileView.path}`} files={[treeFileView.file]} wide={wideDiff} onWideChange={setWideDiff} hideFileList fileContentOnly loadRows={(path) => loadSelectedCommitFileContent(path)} viewKey={treeFileView.commit} onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: treeFileView.commit })} onClose={() => { setTreeFileView(null); setWideDiff(false) }}/></div>}
           {historyConflictPath && repository.operation && <div className="history-diff-overlay history-operation-overlay"><Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>正在加载冲突编辑器</strong></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={historyConflictPath} onReturnToChanges={() => { setHistoryConflictPath(null); setOperationPath(null) }} onClose={() => { setHistoryConflictPath(null); setOperationPath(null) }}/></Suspense></div>}
         </section>}
         {workspaceView === 'compare' && <ComparePanel repository={repository} initialBase={compareBase ?? undefined} initialTarget={compareBase ? repository?.branch : undefined} onNotice={setRepositoryNotice}/>}
@@ -1499,9 +1517,12 @@ export default function App() {
           <span className={`panel-resizer inspector-vertical-resizer ${panelResizing === 'details' ? 'active' : ''}`} role="separator" aria-label="拖动调整提交信息和变更文件高度" onPointerDown={beginDetailsResize}/>
           <ChangedFilesPanel key={selectedTreeKey} files={selectedCommitFiles} treePaths={usesCommitTree ? selectedTree?.paths : undefined} treeError={selectedTree?.error} loading={selectedCommitFilesLoading || (usesCommitTree && !selectedTree)} activeFile={diffFile} onOpenFile={(index, file) => {
             if (index === null) {
-              void loadRepositoryCommitFileContent(repository.path, selectedStatsKey, file.path).then((content) => setTreeFileView({ path: file.path, commit: selectedStatsKey, content })).catch((error) => setRepositoryNotice(error instanceof Error ? error.message : String(error)))
+              setDiffFile(null)
+              setWideDiff(false)
+              setTreeFileView({ path: file.path, commit: selectedStatsKey, file })
               return
             }
+            setTreeFileView(null)
             const isConflict = selectedWorkingTree && Boolean(file) && (file.type.toUpperCase() === 'U' || repository.operation?.conflicts.includes(file.path))
             if (isConflict) {
               setOperationPath(file.path)
@@ -1517,11 +1538,10 @@ export default function App() {
       <footer className="statusbar">
         <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{repository.operation?.label ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
         <div ref={autoFetchRef} className="statusbar-secondary"><button className="status-command-log" onClick={() => setCommandLogOpen(true)} title="查看执行命令日志"><TerminalSquare size={12}/><span>命令日志</span></button><span className="status-separator"/><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置后台同步"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="后台同步配置"><div className="auto-fetch-heading"><div><strong>后台同步</strong><small>控制 Fetch、自动快进与本地状态采样</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>获取间隔</span><CompactSelect className="auto-fetch-interval-select" value={fetchIntervalMinutes} options={[1, 5, 10, 15, 30].map((minutes) => ({ value: minutes, label: `${minutes} 分钟` }))} onChange={setFetchIntervalMinutes} ariaLabel="选择自动 Fetch 间隔" disabled={!autoFetchEnabled}/></div><div className="local-polling-settings"><label className="auto-fetch-toggle"><span><strong>本地状态采样</strong><small>定期检测其他工具产生的仓库变更</small></span><input type="checkbox" checked={localPollingEnabled} onChange={(event) => setLocalPollingEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>采样间隔</span><CompactSelect className="auto-fetch-interval-select" value={localPollingIntervalSeconds} options={[2, 5, 10, 30].map((seconds) => ({ value: seconds, label: `${seconds} 秒` }))} onChange={setLocalPollingIntervalSeconds} ariaLabel="选择本地状态采样间隔" disabled={!localPollingEnabled}/></div></div><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</Button></div>}</div>
-      </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
+      </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} resolvedTheme={resolvedTheme} onToggleTheme={() => setTheme(nextThemePreference)} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
     </div>
     {openingRepository && repository && <div className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>正在加载仓库</strong><span>正在读取分支、提交图谱、Worktree 与 Submodule…</span></div></div>}
     <div className={`operation-indicator ${activeOperation ? 'visible' : ''} ${activeOperation?.key === 'cherry-pick' ? 'cherry-pick' : ''}`} role="status" aria-live="polite" aria-hidden={!activeOperation}>{activeOperation && <><RefreshCw className="spin" size={17}/><div><strong>{activeOperation.label}</strong><span>{activeOperation.detail}</span></div></>}</div>
-    {treeFileView && <div className="commit-file-backdrop" onClick={() => setTreeFileView(null)}><section className="commit-file-viewer" onClick={(event) => event.stopPropagation()}><header><div><FileText size={15}/><strong title={treeFileView.path}>{treeFileView.path}</strong><code>{treeFileView.commit.slice(0, 12)}</code></div><Button variant="icon" onClick={() => setTreeFileView(null)} title="关闭文件"><X size={16}/></Button></header><pre>{treeFileView.content || '（空文件）'}</pre></section></div>}
     <HistoryDrawer repositoryPath={repository?.path} filePath={historyTarget?.path ?? null} initialTab={historyTarget?.tab ?? 'history'} lineNumber={historyTarget?.line} revision={historyTarget?.revision} onClose={() => setHistoryTarget(null)}/>
     <CreateBranchDialog open={Boolean(branchDialog)} prefix={branchDialog?.prefix} currentBranch={repository?.branch ?? ''} onClose={() => setBranchDialog(null)} onCreate={handleCreateBranch}/>
     <RebaseDialog open={Boolean(rebaseDialog)} repository={repository} onto={rebaseDialog?.commit ?? null} targetLabel={rebaseDialog?.label ?? ''} onClose={() => setRebaseDialog(null)} onStart={startRebase}/>

@@ -266,9 +266,11 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     const Icon = icon === 'add' ? Plus : Minus
     const FileIcon = file.path.includes('.') ? FileCode2 : FileText
     const status = getFileStatus(file.type)
+    const additions = scope === 'staged' ? file.stagedAdd ?? file.add : file.unstagedAdd ?? file.add
+    const deletions = scope === 'staged' ? file.stagedDel ?? file.del : file.unstagedDel ?? file.del
     const selection = { path: file.path, scope }
     return <div className={`stage-file ${stageSelectionKey(selectedFile) === stageSelectionKey(selection) ? 'active' : ''}`} key={`${scope}-${file.path}`} onContextMenu={(event) => { event.preventDefault(); setSelectedFile(selection); setContextFile({ file, scope, x: event.clientX, y: event.clientY }) }}>
-      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedFile(selection); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><StageFilePath path={file.path}/>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{file.add}</small><small className="deletions">-{file.del}</small></span></button>
+      <button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedFile(selection); setWidePreview(false) }} title={`点击查看 ${file.path} 的变更，右键查看更多操作`}><FileIcon size={15}/><span className={`stage-file-status ${status.className}`} title={status.description}>{status.label}</span><StageFilePath path={file.path}/>{file.incoming && <span className="stage-file-incoming" title="远端待拉取提交也修改了此文件"><ArrowDown size={13}/></span>}<span className="stage-file-stats"><small className="additions">+{additions}</small><small className="deletions">-{deletions}</small></span></button>
       <div className="stage-file-actions">
         {scope === 'unstaged' && <Button variant="danger" className="stage-file-action" onClick={() => void discard([file.path])} disabled={busy} title="丢弃未暂存改动"><Trash2 size={13}/></Button>}
         <button className="stage-file-action" onClick={action} disabled={busy} title={icon === 'add' ? '暂存文件' : '取消暂存'}><Icon size={13}/></button>

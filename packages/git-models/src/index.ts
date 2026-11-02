@@ -56,6 +56,10 @@ export type RepositoryFile = {
   type: string
   add: number
   del: number
+  stagedAdd?: number
+  stagedDel?: number
+  unstagedAdd?: number
+  unstagedDel?: number
   staged?: boolean
   unstaged?: boolean
   incoming?: boolean

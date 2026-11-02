@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
-import { AlignJustify, ArrowDown, ArrowRight, ArrowUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, Undo2, ScanText, Search, X, Check, EyeOff } from 'lucide-react'
+import { AlignJustify, ArrowDown, ArrowRight, ArrowUp, ChevronDown, Columns2, Copy, FileCode2, FileText, FolderOpen, History, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, Undo2, ScanText, Search, X, Check, EyeOff } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile } from '../../repository'
@@ -360,6 +360,7 @@ type DiffPanelProps = {
   onActiveFileChange?: (index: number) => void
   onClose?: () => void
   hideFileList?: boolean
+  fileContentOnly?: boolean
   loadRows?: (filePath: string, fileIndex: number | undefined, showWhitespace: boolean) => Promise<RepositoryDiffLine[]>
   viewKey?: string
   reloadKey?: string
@@ -376,11 +377,12 @@ type DiffPanelProps = {
   fontSizeStorageKey?: string
 }
 
-export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onActiveFileChange, onClose, hideFileList = false, loadRows, viewKey = '', reloadKey = '', fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, onStagePatch, onRestorePatch, onUnstagePatch, actionScope, actionsBusy = false, allowStage = false, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
+export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFile = 0, onActiveFileChange, onClose, hideFileList = false, fileContentOnly = false, loadRows, viewKey = '', reloadKey = '', fallbackRows = EMPTY_FALLBACK_ROWS, fallbackChangeRows = EMPTY_DIFF_ROWS, onOpenLineHistory, onStagePatch, onRestorePatch, onUnstagePatch, actionScope, actionsBusy = false, allowStage = false, defaultFontSize = DEFAULT_DIFF_FONT_SIZE, fontSizeStorageKey = DIFF_FONT_SIZE_KEY }: DiffPanelProps) {
   const [activeFile, setActiveFile] = useState(initialFile)
   const [view, setView] = usePersistentState('branchline.diffView.v1', 'unified', isDiffView)
   const [showWhitespace, setShowWhitespace] = usePersistentState('branchline.diffShowWhitespace.v1', true, (value): value is boolean => typeof value === 'boolean')
   const [scope, setScope] = usePersistentState('branchline.diffScope.v1', 'changes', isDiffScope)
+  const activeScope = fileContentOnly ? 'file' : scope
   const [contextLineCount, setContextLineCount] = useState(3)
   const [expandedContext, setExpandedContext] = useState<Record<string, number>>({})
   const [fileMode, setFileMode] = usePersistentState('branchline.diffFileMode.v1', 'list', isFileMode)
@@ -496,13 +498,13 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       return steps ? expandDiffContextOmissionBySteps(sourceRows, entry, steps) : [entry]
     })
   }, [activeFileIdentity, contextEntries, contextLineCount, expandedContext, sourceRows])
-  const unifiedEntries = useMemo<DiffContextEntry[]>(() => scope === 'file'
+  const unifiedEntries = useMemo<DiffContextEntry[]>(() => activeScope === 'file'
     ? sourceRows.map((row, sourceIndex) => ({ kind: 'line', row, sourceIndex }))
-    : expandedContextEntries, [expandedContextEntries, scope, sourceRows])
+    : expandedContextEntries, [activeScope, expandedContextEntries, sourceRows])
   const sourceSplitRows = useMemo(() => buildSplitRows(sourceRows), [sourceRows])
-  const splitEntries = useMemo<SplitDiffEntry[]>(() => scope === 'file'
+  const splitEntries = useMemo<SplitDiffEntry[]>(() => activeScope === 'file'
     ? sourceSplitRows.map((row) => ({ kind: 'row', row }))
-    : buildSplitEntries(expandedContextEntries), [expandedContextEntries, scope, sourceSplitRows])
+    : buildSplitEntries(expandedContextEntries), [activeScope, expandedContextEntries, sourceSplitRows])
   const changeIndices = useMemo(() => {
     const targets: number[] = []
     if (view === 'unified') {
@@ -560,14 +562,14 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const virtualBottomHeight = Math.max(0, (visibleEntryCount - virtualEnd) * virtualRowHeight) + actionEdgeSpace
   const overviewEntries = useMemo<DiffOverviewEntry[]>(() => {
     if (view === 'unified') {
-      return [...(scope === 'changes' && !usesLoader ? [{ kind: 'same' as const, height: 24 }] : []), ...unifiedEntries.map((entry) => ({ kind: entry.kind === 'line' ? entry.row.kind : 'same' as const, height: virtualRowHeight })), ...(actionEdgeSpace ? [{ kind: 'same' as const, height: actionEdgeSpace }] : [])]
+      return [...(activeScope === 'changes' && !usesLoader ? [{ kind: 'same' as const, height: 24 }] : []), ...unifiedEntries.map((entry) => ({ kind: entry.kind === 'line' ? entry.row.kind : 'same' as const, height: virtualRowHeight })), ...(actionEdgeSpace ? [{ kind: 'same' as const, height: actionEdgeSpace }] : [])]
     }
     const entries: DiffOverviewEntry[] = splitEntries.map((entry) => entry.kind === 'row'
       ? { oldKind: entry.row.left?.kind ?? 'same', newKind: entry.row.right?.kind ?? 'same', height: virtualRowHeight }
       : { oldKind: 'same', newKind: 'same', height: virtualRowHeight })
     if (actionEdgeSpace) entries.push({ oldKind: 'same', newKind: 'same', height: actionEdgeSpace })
     return entries
-  }, [scope, splitEntries, unifiedEntries, usesLoader, view, virtualRowHeight, virtualized, actionEdgeSpace])
+  }, [activeScope, splitEntries, unifiedEntries, usesLoader, view, virtualRowHeight, virtualized, actionEdgeSpace])
   const overviewMarkers = useMemo(() => diffOverviewMarkers(overviewEntries, view), [overviewEntries, view])
   const searchMatches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -592,7 +594,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       writeSplitScrollTop('left', 0)
       writeSplitScrollTop('right', 0)
     })
-  }, [scope, view, contextLineCount])
+  }, [activeScope, view, contextLineCount])
   useEffect(() => {
     setVirtualScrollTop(0)
     splitScrollEcho.current = null
@@ -720,7 +722,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       for (const child of Array.from(pane.children)) observer.observe(child)
     }
     return () => observer.disconnect()
-  }, [activeFile, diffLoading, visibleEntryCount, view, virtualized, virtualStart, virtualEnd, diffFontSize, scope, showWhitespace, canRenderLoadedRows])
+  }, [activeFile, diffLoading, visibleEntryCount, view, virtualized, virtualStart, virtualEnd, diffFontSize, activeScope, showWhitespace, canRenderLoadedRows])
   const handleCodeDiffScroll = (event: UIEvent<HTMLDivElement>) => {
     queueVirtualScrollTop(event.currentTarget.scrollTop)
     updateOverviewViewport()
@@ -817,16 +819,16 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     setPendingJump(null)
   }, [activateFile, activeFile, activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, files.length, pendingJump])
   useEffect(() => {
-    if (scope !== 'file') {
+    if (activeScope !== 'file') {
       autoJumpIdentity.current = null
       return
     }
     if (diffLoading || !activeFileInfo || !activeFileIdentity || !changeIndices.length) return
     const identity = activeFileIdentity
-    if (!shouldJumpToFirstChange(scope, identity, autoJumpIdentity.current, Boolean(pendingJump), canRenderLoadedRows)) return
+    if (!shouldJumpToFirstChange(activeScope, identity, autoJumpIdentity.current, Boolean(pendingJump), canRenderLoadedRows)) return
     autoJumpIdentity.current = identity
     scrollToChange(changeIndices[0])
-  }, [activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, pendingJump, scope])
+  }, [activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, pendingJump, activeScope])
   const diffStyle = { '--diff-font-size': `${diffFontSize}px`, '--diff-line-number-width': `${Math.max(2, lineNumberDigits + 1.8)}ch` } as CSSProperties
   const applyPatch = (operation: 'stage' | 'restore' | 'unstage', rows: RepositoryDiffLine[], description: string) => {
     if (actionsDisabled || !activeFileInfo) return
@@ -858,12 +860,12 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     return <button type="button" disabled={actionsDisabled} className={'change-sign line-action-' + row.kind} onClick={(event) => { event.stopPropagation(); applyPatch(operation, changeLine(sourceRows, sourceIndex), '单行') }} title={label + '（替换行包含对应的旧/新行；右键查看更多操作）'} aria-label={label}>{sign}</button>
   }
   const renderUnifiedEntry = (entry: DiffContextEntry, index: number) => entry.kind === 'omitted'
-    ? <button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} key={`omitted-${index}`} onClick={() => expandOmission(entry)} aria-label={`展开 ${Math.min(20, entry.count)} 行未修改源码`} title="展开未修改源码">展开 {Math.min(20, entry.count)} 行未修改源码（剩余 {entry.count} 行）</button>
+    ? <button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} key={`omitted-${index}`} onClick={() => expandOmission(entry)} aria-label={`展开 ${Math.min(20, entry.count)} 行未修改源码`} title={`展开 ${Math.min(20, entry.count)} 行未修改源码（剩余 ${entry.count} 行）`}><ChevronDown size={14} aria-hidden="true"/></button>
     : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' ? changeBlock(sourceRows, entry.sourceIndex) : []; return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`code-row ${row.kind} ${searchMatches.includes(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={index} onContextMenu={(event) => openLineMenu(event, row, index, side, entry.sourceIndex)} title="右键查看该行历史">
       {renderStageActions(block, blockActionAnchors.get(index))}<span className="line-no">{row.old ?? row.next ?? ''}</span>{renderLineAction(row, entry.sourceIndex)}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/>
     </div> })()
   const renderSplitEntry = (entry: SplitDiffEntry, index: number, side: DiffLineSide) => entry.kind === 'omitted'
-    ? <button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} key={`omitted-${side}-${index}`} onClick={() => expandOmission(entry)} aria-label={`展开 ${Math.min(20, entry.count)} 行未修改源码`} title="展开未修改源码">展开 {Math.min(20, entry.count)} 行未修改源码（剩余 {entry.count} 行）</button>
+    ? <button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} key={`omitted-${side}-${index}`} onClick={() => expandOmission(entry)} aria-label={`展开 ${Math.min(20, entry.count)} 行未修改源码`} title={`展开 ${Math.min(20, entry.count)} 行未修改源码（剩余 ${entry.count} 行）`}><ChevronDown size={14} aria-hidden="true"/></button>
     : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceRows.indexOf(row) : -1; const action = renderLineAction(row, sourceIndex); return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatches.includes(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} key={`${side}-${index}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)} title={row ? '右键查看该行历史' : undefined}><span className="line-no">{side === 'old' ? row?.old ?? '' : row?.next ?? ''}</span>{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div> })()
   const renderSplitActions = (entry: SplitDiffEntry, index: number) => {
     if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: virtualRowHeight }} key={`actions-${index}`}/>
@@ -885,11 +887,11 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     <div className="diff-toolbar">
       <div className="diff-title"><FileCode2 size={16}/><strong>{hideFileList ? 'Diff' : '变更文件'}</strong>{!hideFileList && <span>{files.length}</span>}</div>
       {!hideFileList && <div className="segmented icon-segmented view-switch"><button className={fileMode === 'tree' ? 'active' : ''} onClick={() => setFileMode('tree')} title="树形视图" aria-label="树形视图"><FolderOpen size={14}/></button><button className={fileMode === 'list' ? 'active' : ''} onClick={() => setFileMode('list')} title="列表视图" aria-label="列表视图"><List size={14}/></button></div>}
-      <div className="segmented icon-segmented diff-scope"><button className={scope === 'file' ? 'active' : ''} onClick={() => setScope('file')} title="显示完整文件" aria-label="显示完整文件"><FileText size={14}/></button><button className={scope === 'changes' ? 'active' : ''} onClick={() => setScope('changes')} title="仅显示改动" aria-label="仅显示改动"><ScanText size={14}/></button></div>
-      {scope === 'changes' && <label className="diff-context-control" title="未修改行数"><span>上下文</span><input type="number" min={0} max={100} step={1} value={contextLineCount} aria-label="上下文行数" onChange={(event) => setContextLineCount(Math.trunc(Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0))))}/></label>}
-      <button type="button" className={`diff-whitespace-toggle ${showWhitespace ? 'active' : ''}`} onClick={() => setShowWhitespace((value) => !value)} title={showWhitespace ? '隐藏空白差异' : '显示空白差异'} aria-label="显示空白差异" aria-pressed={showWhitespace}>{showWhitespace ? <Check size={13}/> : <EyeOff size={13}/>}</button>
+      {!fileContentOnly && <div className="segmented icon-segmented diff-scope"><button className={activeScope === 'file' ? 'active' : ''} onClick={() => setScope('file')} title="显示完整文件" aria-label="显示完整文件"><FileText size={14}/></button><button className={activeScope === 'changes' ? 'active' : ''} onClick={() => setScope('changes')} title="仅显示改动" aria-label="仅显示改动"><ScanText size={14}/></button></div>}
+      {!fileContentOnly && activeScope === 'changes' && <label className="diff-context-control" title="未修改行数"><span>上下文</span><input type="number" min={0} max={100} step={1} value={contextLineCount} aria-label="上下文行数" onChange={(event) => setContextLineCount(Math.trunc(Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0))))}/></label>}
+      {!fileContentOnly && <button type="button" className={`diff-whitespace-toggle ${showWhitespace ? 'active' : ''}`} onClick={() => setShowWhitespace((value) => !value)} title={showWhitespace ? '隐藏空白差异' : '显示空白差异'} aria-label="显示空白差异" aria-pressed={showWhitespace}>{showWhitespace ? <Check size={13}/> : <EyeOff size={13}/>}</button>}
       <div className="segmented icon-segmented"><button className={view === 'unified' ? 'active' : ''} onClick={() => setView('unified')} title="统一 Diff" aria-label="统一 Diff"><AlignJustify size={14}/></button><button className={view === 'split' ? 'active' : ''} onClick={() => setView('split')} title="并排 Diff" aria-label="并排 Diff"><Columns2 size={14}/></button></div>
-      <div className="segmented icon-segmented diff-navigation"><button onClick={() => jumpToChange(-1)} disabled={!files.length || diffLoading} title="上一处改动（跨文件）" aria-label="上一处改动"><ArrowUp size={14}/></button><button onClick={() => jumpToChange(1)} disabled={!files.length || diffLoading} title="下一处改动（跨文件）" aria-label="下一处改动"><ArrowDown size={14}/></button></div>
+      {!fileContentOnly && <div className="segmented icon-segmented diff-navigation"><button onClick={() => jumpToChange(-1)} disabled={!files.length || diffLoading} title="上一处改动（跨文件）" aria-label="上一处改动"><ArrowUp size={14}/></button><button onClick={() => jumpToChange(1)} disabled={!files.length || diffLoading} title="下一处改动（跨文件）" aria-label="下一处改动"><ArrowDown size={14}/></button></div>}
       {searchOpen ? <div className="diff-search-bar" role="search"><Search size={14}/><input ref={searchInputRef} value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSearchIndex(0) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); jumpSearch(event.shiftKey ? -1 : 1) } if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) } }} placeholder="搜索 Diff" aria-label="搜索 Diff"/><span>{searchQuery ? (searchMatches.length ? `${searchIndex + 1} / ${searchMatches.length}` : '无匹配') : '输入关键词'}</span><button type="button" onClick={() => jumpSearch(-1)} disabled={!searchMatches.length} title="上一个匹配"><ArrowUp size={13}/></button><button type="button" onClick={() => jumpSearch(1)} disabled={!searchMatches.length} title="下一个匹配"><ArrowDown size={13}/></button><button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="关闭搜索" aria-label="关闭搜索"><X size={13}/></button></div> : <Button variant="icon" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }} title="搜索 Diff（Ctrl/Cmd+F）" aria-label="搜索 Diff"><Search size={15}/></Button>}
       <div className="diff-font-controls" title="Diff 字体大小 · Ctrl/⌘ + 或 -"><button onClick={() => setDiffFontSize((value) => Math.max(MIN_DIFF_FONT_SIZE, value - 1))} disabled={diffFontSize <= MIN_DIFF_FONT_SIZE} aria-label="缩小 Diff 字体"><Minus size={13}/></button><button className="diff-font-size" onClick={() => setDiffFontSize(defaultFontSize)} title="恢复默认字号 · Ctrl/⌘ 0">{diffFontSize}px</button><button onClick={() => setDiffFontSize((value) => Math.min(MAX_DIFF_FONT_SIZE, value + 1))} disabled={diffFontSize >= MAX_DIFF_FONT_SIZE} aria-label="放大 Diff 字体"><Plus size={13}/></button></div>
       <Button variant="icon" onClick={() => onWideChange(!wide)} title={wide ? '退出宽屏 Diff' : '宽屏查看 Diff'}>{wide ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</Button>
@@ -899,8 +901,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
       <div className="diff-viewer" ref={overviewRef}>
       <div className={`code-diff ${view}`}>
-        <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
-        {scope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
+        <div className="file-header"><div className="file-header-path" title={activeFileInfo?.path}><code title={activeFileInfo?.path}>{activeFileInfo?.path ?? '暂无变更文件'}</code></div>{activeFileInfo && !fileContentOnly && <span className="file-header-stats"><i>+{activeFileInfo.add}</i> <b>-{activeFileInfo.del}</b></span>}</div>
+        {activeScope === 'changes' && !usesLoader && <div className="hunk">@@ 完整改动 @@</div>}
         {diffLoading && !canRenderLoadedRows && <div className="diff-message">正在读取 Diff…</div>}
         {diffError && <div className="diff-message error">{diffError}</div>}
         {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">该文件没有可展示的文本差异</div>}

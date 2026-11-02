@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { buildCommitFileTree, compareCommitTreeEntries, visibleCommitTreeFiles } from './commitFileTree'
+import { buildCommitFileTree, commitFileContentRows, compareCommitTreeEntries, visibleCommitTreeFiles } from './commitFileTree'
+
+describe('commitFileContentRows', () => {
+  it('maps source content into numbered full-file rows without a trailing phantom line', () => {
+    expect(commitFileContentRows('first\r\nsecond\r\n')).toEqual([
+      { old: 1, next: 1, kind: 'same', code: 'first' },
+      { old: 2, next: 2, kind: 'same', code: 'second' },
+    ])
+  })
+
+  it('keeps a deliberate empty final line and handles empty files', () => {
+    expect(commitFileContentRows('first\n\n').map((row) => row.code)).toEqual(['first', ''])
+    expect(commitFileContentRows('')).toEqual([])
+  })
+})
 
 describe('commit source file tree', () => {
   it('includes common source/config paths and excludes assets', () => {

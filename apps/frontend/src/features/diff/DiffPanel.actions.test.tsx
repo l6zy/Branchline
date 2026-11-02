@@ -21,6 +21,22 @@ describe('diff patch actions', () => {
     expect(html).not.toContain('class="diff-overview-viewport"')
   })
 
+  it('renders read-only file content through the Diff code view without the scope switch', () => {
+    vi.stubGlobal('window', { localStorage: { getItem: () => null } })
+    const html = renderToStaticMarkup(<DiffPanel files={[{ path: 'src/app.ts', type: '', add: 0, del: 0 }]} wide={false} onWideChange={() => {}} hideFileList fileContentOnly fallbackRows={{ 'src/app.ts': [
+      { old: 1, next: 1, kind: 'same', code: 'const answer = 42' },
+      { old: 2, next: 2, kind: 'same', code: 'export default answer' },
+    ] }} />)
+    expect(html).toContain('aria-label="搜索 Diff"')
+    expect(html).not.toContain('aria-label="仅显示改动"')
+    expect(html).not.toContain('aria-label="上一处改动"')
+    expect(html).not.toContain('aria-label="显示空白差异"')
+    expect(html).not.toContain('class="file-header-stats"')
+    expect(html).toContain('class="code-row same')
+    expect(html).toContain('class="token keyword">const</span>')
+    expect(html).toContain('aria-label="统一 Diff"')
+  })
+
   for (const view of ['unified', 'split']) {
     it('renders expandable omissions with aligned row heights in ' + view, () => {
       vi.stubGlobal('window', { localStorage: { getItem: (key: string) => key === 'branchline.diffView.v1' ? JSON.stringify(view) : null } })
@@ -30,7 +46,9 @@ describe('diff patch actions', () => {
       const omissions = html.match(/<button[^>]*class="hunk diff-omitted"[^>]*>/g) ?? []
       expect(omissions).toHaveLength(view === 'unified' ? 2 : 4)
       omissions.forEach((button) => expect(button).toContain('height:39px'))
-      expect(html).toContain('展开 20 行未修改源码')
+      expect(html).toContain('aria-label="展开 20 行未修改源码"')
+      expect(html).toMatch(/aria-label="展开 20 行未修改源码"[^>]*title="展开 20 行未修改源码（剩余 \d+ 行）"><svg/)
+      expect(html).not.toContain('>展开 20 行未修改源码')
       if (view === 'split') expect(html).toMatch(/split-action-row" style="height:39px"/)
     })
 

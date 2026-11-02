@@ -18,8 +18,9 @@ describe('commit inspector controls', () => {
   })
 
   it('adds an all-files view while preserving the existing list and tree views', () => {
-    expect(files).toContain("useState<'list' | 'tree' | 'all'>('tree')")
+    expect(files).toContain("usePersistentState('branchline.changedFilesMode.v1', 'list', isFileMode)")
     expect(files).toContain('显示全部文件')
+    expect(files).toContain('segmented compact-segmented icon-segmented')
     expect(files).toContain('title="列表视图"')
     expect(files).toContain('title="树形视图"')
     expect(files).toContain("mode={fileMode === 'list' ? 'list' : 'tree'}")
@@ -29,6 +30,12 @@ describe('commit inspector controls', () => {
     expect(files).toContain('treeError')
     expect(files).toContain('activeFile === null ? -1')
     expect(app).toContain('loadRepositoryCommitFileContent')
+    expect(app).toContain('fileContentOnly loadRows={(path) => loadSelectedCommitFileContent(path)}')
+    expect(app).not.toContain('commit-file-viewer')
+  })
+
+  it('accepts persisted list, tree, and all-files modes', () => {
+    expect(app).toContain("const isFileMode = (value: unknown): value is 'list' | 'tree' | 'all' => value === 'list' || value === 'tree' || value === 'all'")
   })
 
   it('rechecks selection visibility after history filters are cleared', () => {

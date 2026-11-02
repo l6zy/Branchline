@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, ChevronRight, Clock3, CloudDownload, Code2, FolderGit2, FolderOpen, GitBranch, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Clock3, CloudDownload, Code2, FolderGit2, FolderOpen, GitBranch, Monitor, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from 'lucide-react'
 import { Button } from '../../components/Button'
 import { loadRepositoryDetails, openRepositoryInVscode, pickRepositoryDirectory, type RepositoryDetails } from '../../repository'
 import { AddRepositoryDialog } from './AddRepositoryDialog'
@@ -9,12 +9,13 @@ import { repositoryCacheKey, sameRepositoryPath } from './repositoryPaths'
 import type { RecentRepository } from './repositoryPersistence'
 import type { FavoriteRepository } from './repositorySwitcher'
 
-export function RepositoryManagerPage({ recent, favorites, current, opening, theme, onToggleTheme, onBack, onOpen, onRegister, onToggleFavorite, onForget, onNotice }: {
+export function RepositoryManagerPage({ recent, favorites, current, opening, theme, resolvedTheme, onToggleTheme, onBack, onOpen, onRegister, onToggleFavorite, onForget, onNotice }: {
   recent: RecentRepository[]
   favorites: FavoriteRepository[]
   current: Pick<RecentRepository, 'name' | 'path' | 'branch'> | null
   opening: boolean
-  theme: 'light' | 'dark'
+  theme: 'light' | 'dark' | 'system'
+  resolvedTheme: 'light' | 'dark'
   onToggleTheme: () => void
   onBack: () => void
   onOpen: (path: string) => void
@@ -60,7 +61,7 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
   return <section className="repository-manager" aria-label="仓库管理">
     {hasRepositories && <header className="repository-manager-heading">
       <div className="repository-manager-title">{current && <Button variant="icon" title="返回工作区" onClick={onBack}><ArrowLeft size={18}/></Button>}<FolderGit2 size={23}/><div><h1>仓库管理</h1><p>收藏常用项目，快速回到最近的工作。</p></div></div>
-      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}选择本地仓库</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>克隆仓库</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>初始化仓库</Button></>}<Button variant="icon" title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} onClick={onToggleTheme}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</Button></div>
+      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}选择本地仓库</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>克隆仓库</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>初始化仓库</Button></>}<Button variant="icon" title={`${theme === 'system' ? `跟随系统（当前${resolvedTheme === 'dark' ? '深色' : '浅色'}）` : `${theme === 'dark' ? '深色' : '浅色'}主题`}，点击切换主题`} aria-label="切换主题" onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button></div>
     </header>}
     {hasRepositories ? <div className="repository-manager-body">
       <div className="repository-catalog">
@@ -76,7 +77,7 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
       </div>
       {selected ? <RepositoryDetailsPanel key={repositoryCacheKey(selected.path)} item={selected} opening={opening} onOpen={(path) => selected.current ? onBack() : onOpen(path)} onVscode={(path) => void openVscode(path)} onToggleFavorite={onToggleFavorite}/> : <div className="repository-manager-empty"><span><FolderGit2 size={38}/></span><h2>{query ? '没有匹配的仓库' : '让每个项目触手可及'}</h2><p>{query ? '修改搜索条件以查看其他仓库。' : '添加本地仓库，或从克隆、初始化开始。选择仓库后，可以在这里查看分支、Submodule、远程和 README。'}</p>{!query && <Button onClick={() => void browse()} disabled={adding}><FolderOpen size={15}/>添加第一个仓库</Button>}</div>}
       </div> : <div className="repository-manager-welcome">
-      <Button className="repository-welcome-theme" variant="icon" title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} onClick={onToggleTheme}>{theme === 'dark' ? <Sun size={17}/> : <Moon size={17}/>}</Button>
+      <Button className="repository-welcome-theme" variant="icon" title="切换主题" aria-label="切换主题" onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button>
       <div className="repository-welcome-hero">
         <div className="repository-welcome-brand"><img src="/app-icon.svg" alt="Branchline"/><span>BRANCHLINE</span></div>
         <p className="repository-welcome-kicker">准备好开始了吗？</p>

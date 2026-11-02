@@ -313,7 +313,7 @@
 
 .hunk { width: max-content; min-width: 100%; height: 24px; padding: 5px 11px; color: var(--code-hunk-text); background: var(--code-hunk); font-size: 10px; }
 
-.diff-omitted { min-height: 24px; display: flex; align-items: center; border: 0; color: var(--text-secondary); letter-spacing: 0; text-align: left; cursor: pointer; }
+.diff-omitted { min-height: 24px; display: flex; align-items: center; justify-content: center; border: 0; color: var(--text-secondary); letter-spacing: 0; text-align: center; cursor: pointer; }
 
 .diff-omitted:hover, .diff-omitted:focus-visible { color: var(--text); background: color-mix(in srgb, var(--code-hunk) 75%, var(--surface-hover)); }
 

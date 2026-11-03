@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Archive, ArrowDown, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
+import { Archive, ArrowDown, CheckCircle2, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
@@ -24,7 +24,7 @@ import { DiffPanel } from '../diff/DiffPanel'
 import { useResizablePane } from '../../components/useResizablePane'
 import { initialCommitMessage, templateMessage } from './commitMessage'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
-import { stageSelectionKey, visibleStagingSections, type StageSelection } from './stagingSelection'
+import { hasStagingChanges, stageSelectionKey, visibleStagingSections, type StageSelection } from './stagingSelection'
 
 type StagingPageProps = {
   repository: RepositorySnapshot | null
@@ -99,6 +99,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
   const stagedFiles = useMemo(() => files.filter((file) => file.staged && !conflictFilePaths.has(file.path)), [conflictFilePaths, files])
   const unstagedFiles = useMemo(() => files.filter((file) => !conflictFilePaths.has(file.path) && (file.unstaged || (!file.staged && !file.unstaged))), [conflictFilePaths, files])
   const visibleSections = visibleStagingSections(stagedFiles.length, unstagedFiles.length)
+  const hasChanges = hasStagingChanges(stagedFiles.length, unstagedFiles.length, conflictFiles.length)
   const diffFileEntries = useMemo(() => [
     ...stagedFiles.map((file) => ({ file, scope: 'staged' as const })),
     ...unstagedFiles.map((file) => ({ file, scope: 'unstaged' as const })),
@@ -294,6 +295,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
     <div className={`staging-workspace ${widePreview ? 'preview-wide' : ''}`} style={workspaceStyle}>
       <div className="staging-control-pane" style={{ gridTemplateRows: `${filesHeight.value}px 1px minmax(230px, 1fr)` }}>
         <div className="staging-file-sections">
+          {repository && !hasChanges && <div className="stage-clean-empty"><CheckCircle2 size={23}/><strong>工作区干净</strong><span>当前没有待暂存或已暂存的文件。</span></div>}
           {conflictFiles.length > 0 && <div className="stage-section conflict-section">
             <div className="stage-section-header"><div className="stage-section-name"><span className="stage-section-marker"/><strong>冲突</strong><span className="stage-section-count">{conflictFiles.length}</span></div><span className="stage-section-hint">解决后可暂存</span></div>
             <div className="stage-section-files">{conflictFiles.map(conflictRow)}</div>

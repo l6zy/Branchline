@@ -15,3 +15,7 @@ export function visibleStagingSections(stagedCount: number, unstagedCount: numbe
   if (unstagedCount > 0) sections.push('unstaged')
   return sections
 }
+
+export function hasStagingChanges(stagedCount: number, unstagedCount: number, conflictCount: number) {
+  return stagedCount > 0 || unstagedCount > 0 || conflictCount > 0
+}

@@ -9,6 +9,13 @@ export function compareCommitTreeEntries(left: { kind: 'folder' | 'file'; name: 
 export function visibleCommitTreeFiles(files: readonly CommitTreeFile[], changedOnly: boolean) {
   return changedOnly ? files.filter((file) => file.changed) : [...files]
 }
+export function filterCommitFilesByPath<T extends { path: string }>(files: readonly T[], query: string): T[] {
+  const needle = query.trim().toLowerCase()
+  return needle ? files.filter((file) => file.path.toLowerCase().includes(needle)) : [...files]
+}
+export function activeCommitFileIndex(files: readonly { path: string }[], activePath: string | null) {
+  return activePath === null ? -1 : files.findIndex((file) => file.path === activePath)
+}
 const sourceExtensions = new Set('ts tsx js jsx mjs cjs mts cts vue svelte astro html htm css scss sass less rs go py pyw pyi java kt kts c h cc cpp cxx hpp hxx cs fs fsx vb csproj fsproj vbproj sln props targets swift m mm rb php phtml scala sc sh bash zsh fish ps1 psm1 psd1 bat cmd lua r R dart ex exs erl hrl clj cljs cljc edn elm hs lhs ml mli sql graphql gql proto cmake make mk json jsonc json5 yaml yml toml ini cfg conf config properties xml xaml gradle tf tfvars hcl nix dockerfile ipynb md mdx rst txt lock'.toLowerCase().split(' '))
 const sourceNames = new Set(['dockerfile', 'containerfile', 'makefile', 'gnumakefile', 'cmakelists.txt', 'jenkinsfile', 'gemfile', 'rakefile', 'procfile', 'vagrantfile', 'justfile', 'go.mod', 'go.sum', '.gitignore', '.gitattributes', '.gitmodules', '.editorconfig', '.npmrc', '.nvmrc', '.prettierrc', '.eslintrc', '.babelrc', '.dockerignore', '.env'])
 const normalizedPath = (path: string) => path.replace(/\\/g, '/')

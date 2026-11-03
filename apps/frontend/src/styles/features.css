@@ -16,6 +16,9 @@
 
 .repository-tree-row { padding-top: 0; padding-bottom: 0; }
 .repository-tree-row .tree-expander { width: 18px; height: 26px; flex: 0 0 18px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; color: currentColor; background: transparent; cursor: pointer; }
+.tree-expander-spacer { width: 18px; height: 26px; flex: 0 0 18px; }
+.repository-tree-row .tree-spacer { flex: 0 0 13px; }
+.repository-tree-section .repository-tree-icon { width: 16px; height: 16px; flex: 0 0 16px; display: grid; place-items: center; }
 .repository-tree-row .tree-expander:hover { color: var(--text); background: var(--panel-3); }
 .repository-tree-row .tree-node-content { min-width: 0; flex: 1 1 auto; height: 30px; padding: 0; display: flex; align-items: center; gap: 7px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .repository-tree-row .tree-node-content > span:not(.count) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -98,7 +101,7 @@
 .commit-parent-links { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 8px; color: var(--text-secondary); font-size: 11px; }
 .commit-parent-links button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--accent-text); background: var(--surface-control); cursor: pointer; }
 .commit-parent-links button:hover { background: var(--surface-hover); }
-.changed-files-panel.has-tree-error { grid-template-rows: 40px auto minmax(0, 1fr); }
+.changed-files-panel.has-tree-error { grid-template-rows: auto auto minmax(0, 1fr); }
 .commit-tree-error { padding: 7px 10px; color: var(--danger); font-size: 11px; overflow-wrap: anywhere; }
 .changed-files-list .file-tree-folder.changed { color: var(--accent-text); }
 .changed-files-list .file-tree-folder.changed::after { content: '●'; color: var(--accent); font-size: 7px; }
@@ -135,19 +138,31 @@
 
 .commit-text-panel textarea::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 10px; background: var(--scroll-thumb); background-clip: content-box; }
 
-.changed-files-panel { min-height: 0; display: grid; grid-template-rows: 40px 1fr; background: var(--surface-raised); }
+.changed-files-panel { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--surface-raised); }
 
-.changed-files-heading { padding: 0 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line-soft); }
+.changed-files-heading { min-width: 0; padding: 7px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 28px 28px; align-content: start; gap: 5px 8px; border-bottom: 1px solid var(--line-soft); }
 
-.changed-files-heading > div { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.changed-files-heading .changed-files-title { min-width: 0; display: flex; align-items: center; gap: 6px; color: var(--text); }
 
-.changed-files-heading > div > svg { color: var(--accent); }
+.changed-files-title > svg { flex: 0 0 auto; color: var(--accent); }
 
 .changed-files-heading strong { font-size: 10px; }
 
-.changed-files-heading span { min-width: 17px; height: 16px; padding: 0 4px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); background: var(--panel-3); font-size: 10px; }
+.changed-files-title > span { min-width: 17px; height: 16px; padding: 0 4px; display: grid; place-items: center; border-radius: 4px; color: var(--muted); background: var(--panel-3); font-size: 10px; }
 
-.changed-files-actions { display: flex; align-items: center; gap: 4px; }
+.changed-files-actions { min-width: 0; display: flex; align-items: center; gap: 4px; }
+
+.changed-files-search { grid-column: 1 / -1; min-width: 0; height: 28px; padding: 0 7px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--panel); }
+
+.changed-files-search > svg { flex: 0 0 auto; color: var(--faint); }
+
+.changed-files-search input { width: 100%; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 11px; }
+
+.changed-files-search input::placeholder { color: var(--faint); }
+
+.changed-files-search button { width: 20px; height: 20px; flex: 0 0 20px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+
+.changed-files-search button:hover { color: var(--text); background: var(--panel-3); }
 
 .changed-files-list { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #595959 transparent; }
 
@@ -1266,6 +1281,14 @@
 .stage-file button:disabled, .stage-section-actions button:disabled, .template-row button:disabled, .commit-compose .button-primary:disabled { opacity: .45; cursor: not-allowed; }
 
 .stage-empty { min-height: 38px; padding: 0 7px; display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 10px; }
+
+.stage-clean-empty { min-height: 100%; padding: 24px 16px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--faint); text-align: center; }
+
+.stage-clean-empty svg { flex: 0 0 auto; color: var(--success); }
+
+.stage-clean-empty strong { color: var(--text); font-size: 13px; }
+
+.stage-clean-empty span { max-width: 280px; font-size: 11px; line-height: 1.5; }
 
 .commit-compose { min-height: 0; margin-top: 8px; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
 

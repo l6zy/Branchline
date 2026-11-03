@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCommitFileTree, commitFileContentRows, compareCommitTreeEntries, visibleCommitTreeFiles } from './commitFileTree'
+import { activeCommitFileIndex, buildCommitFileTree, commitFileContentRows, compareCommitTreeEntries, filterCommitFilesByPath, visibleCommitTreeFiles } from './commitFileTree'
 
 describe('commitFileContentRows', () => {
   it('maps source content into numbered full-file rows without a trailing phantom line', () => {
@@ -16,6 +16,27 @@ describe('commitFileContentRows', () => {
 })
 
 describe('commit source file tree', () => {
+  it('filters by filename or directory without changing file identity and diff indices', () => {
+    const files = [
+      { path: 'src/Editor.tsx', changeIndex: 3 },
+      { path: 'docs/guide.md', changeIndex: 1 },
+      { path: 'src/theme.css', changeIndex: 5 },
+    ]
+    expect(filterCommitFilesByPath(files, ' EDITOR ')).toEqual([files[0]])
+    expect(filterCommitFilesByPath(files, 'src/')).toEqual([files[0], files[2]])
+    expect(filterCommitFilesByPath(files, 'missing')).toEqual([])
+    expect(filterCommitFilesByPath(files, ' ')).toEqual(files)
+    expect(filterCommitFilesByPath(files, 'src/')[1]).toBe(files[2])
+  })
+
+  it('maps the active path to its filtered row and clears selection when hidden', () => {
+    const files = [{ path: 'docs/guide.md' }, { path: 'src/app.ts' }, { path: 'src/theme.css' }]
+    const filtered = filterCommitFilesByPath(files, 'src/')
+    expect(activeCommitFileIndex(filtered, 'src/theme.css')).toBe(1)
+    expect(activeCommitFileIndex(filtered, 'docs/guide.md')).toBe(-1)
+    expect(activeCommitFileIndex(filtered, null)).toBe(-1)
+  })
+
   it('includes common source/config paths and excludes assets', () => {
     const tree = buildCommitFileTree(['src/main.ts', 'src/lib.rs', 'config/tool.toml', 'src/Branchline.csproj', 'Branchline.sln', 'Directory.Build.props', 'Dockerfile', '.gitignore', 'image.png', 'font.woff2'], [])
     expect(tree.files.map((file) => file.path)).toEqual(['.gitignore', 'Branchline.sln', 'config/tool.toml', 'Directory.Build.props', 'Dockerfile', 'src/Branchline.csproj', 'src/lib.rs', 'src/main.ts'])

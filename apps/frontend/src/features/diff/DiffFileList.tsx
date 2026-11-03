@@ -1,5 +1,7 @@
+import { Tooltip } from '../../components/tooltip'
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen } from 'lucide-react'
+import { useAppTranslation } from '../../i18n/useAppTranslation'
 import type { RepositoryFile } from '../../repository'
 import { compareCommitTreeEntries } from '../history/commitFileTree'
 
@@ -60,6 +62,8 @@ function entryAtOffset(offsets: number[], offset: number) {
 }
 
 export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode, onSelectFile, className = 'file-list', fileRowHeight = FILE_ROW_HEIGHT, folderRowHeight = FOLDER_ROW_HEIGHT, collapsedFolders: controlledCollapsedFolders, onCollapsedFoldersChange, onFileContextMenu, showOpenIndicator = false, changedPaths }: DiffFileListProps) {
+  const { i18n } = useAppTranslation()
+  const numbers = new Intl.NumberFormat(i18n.resolvedLanguage)
   const [internalCollapsedFolders, setInternalCollapsedFolders] = useState<Record<string, boolean>>({})
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 600 })
   const containerRef = useRef<HTMLDivElement>(null)
@@ -192,16 +196,16 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
         if (entry.kind === 'folder') {
           const collapsed = Boolean(collapsedFolders[entry.folder])
           return <div className="virtual-file-entry folder" key={entry.key} style={style}>
-            <button className={`file-tree-folder${changedPaths && [...changedPaths].some((path) => path.startsWith(`${entry.folder}/`)) ? ' changed' : ''}`} onClick={() => toggleFolder(entry.folder)} title={entry.folder}>
-              {collapsed ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}<FolderOpen size={13}/><span>{entry.name}</span><small>{entry.count}</small>
-            </button>
+            <Tooltip content={entry.folder}><button className={`file-tree-folder${changedPaths && [...changedPaths].some((path) => path.startsWith(`${entry.folder}/`)) ? ' changed' : ''}`} onClick={() => toggleFolder(entry.folder)}>
+              {collapsed ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}<FolderOpen size={13}/><span>{entry.name}</span><small>{numbers.format(entry.count)}</small>
+            </button></Tooltip>
           </div>
         }
         const { file, index, folder, name } = entry.item
         return <div className="virtual-file-entry" key={entry.key} style={style}>
-          <button className={`${activeFile === index ? 'active' : ''} ${entry.nested ? 'nested-file' : ''} ${changedPaths?.has(file.path) ? 'changed' : ''} ${changedPaths && !changedPaths.has(file.path) ? 'unchanged' : ''}`} onClick={() => onSelectFile(index)} onContextMenu={(event) => onFileContextMenu?.(event, file)} title={entry.item.name}>
-            <span className={`file-state ${file.type.toLowerCase()}`}>{file.type || '·'}</span><div><strong>{name}</strong><span>{folder ? `${folder}/` : ''}</span></div>{(!changedPaths || changedPaths.has(file.path)) && <span className="stats"><i>+{file.add}</i><b>-{file.del}</b></span>}{showOpenIndicator && <ChevronRight size={13}/>}
-          </button>
+          <Tooltip content={entry.item.name}><button className={`${activeFile === index ? 'active' : ''} ${entry.nested ? 'nested-file' : ''} ${changedPaths?.has(file.path) ? 'changed' : ''} ${changedPaths && !changedPaths.has(file.path) ? 'unchanged' : ''}`} onClick={() => onSelectFile(index)} onContextMenu={(event) => onFileContextMenu?.(event, file)}>
+            <span className={`file-state ${file.type.toLowerCase()}`}>{file.type || '·'}</span><div><strong>{name}</strong><span>{folder ? `${folder}/` : ''}</span></div>{(!changedPaths || changedPaths.has(file.path)) && <span className="stats"><i>+{numbers.format(file.add)}</i><b>-{numbers.format(file.del)}</b></span>}{showOpenIndicator && <ChevronRight size={13}/>}
+          </button></Tooltip>
         </div>
       })}
     </div>

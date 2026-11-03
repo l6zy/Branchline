@@ -5,13 +5,14 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppI18n } from './index'
 import { LocaleProvider } from './LocaleProvider'
+import { TooltipProvider } from '../components/tooltip'
 import { LanguageSelect } from '../components/LanguageSelect'
 
 beforeEach(() => { vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN']) })
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks() })
 async function mount() {
   const i18n = await createAppI18n('zh-CN')
-  render(<I18nextProvider i18n={i18n}><LocaleProvider><LanguageSelect/><input aria-label="draft" defaultValue="keep my draft"/></LocaleProvider></I18nextProvider>)
+  render(<I18nextProvider i18n={i18n}><LocaleProvider><TooltipProvider><LanguageSelect/><input aria-label="draft" defaultValue="keep my draft"/></TooltipProvider></LocaleProvider></I18nextProvider>)
   return i18n
 }
 describe('language selector', () => {

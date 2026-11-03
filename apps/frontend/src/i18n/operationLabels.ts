@@ -1,5 +1,6 @@
 import type { RepositoryOperationState, ConflictFileContent } from '../repository'
 import type { AppTranslator } from './useAppTranslation'
+import { message } from './messages'
 const operationKeys = {
   merge: 'operations:kind.merge', rebase: 'operations:kind.rebase',
   'cherry-pick': 'operations:kind.cherry-pick', conflict: 'operations:kind.conflict',
@@ -9,4 +10,5 @@ const sideKeys = {
   'incoming-branch': 'operations:side.incoming-branch', 'applied-commit': 'operations:side.applied-commit',
 } as const
 export function operationLabel(kind: RepositoryOperationState['kind'], t: AppTranslator) { return t(operationKeys[kind]) }
+export function operationMessage(kind: RepositoryOperationState['kind']) { return message(operationKeys[kind]) }
 export function conflictSideLabel(side: ConflictFileContent['currentSide'] | ConflictFileContent['incomingSide'], t: AppTranslator) { return t(sideKeys[side]) }

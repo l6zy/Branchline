@@ -1,4 +1,5 @@
-import { operationLabel } from '../../i18n/operationLabels'
+import { Tooltip } from '../../components/tooltip'
+import { message, errorMessage, type MessageContent } from '../../i18n/messages'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useState } from 'react'
 import { Archive, Check, CornerDownLeft, GitCommitHorizontal, Plus, Trash2 } from 'lucide-react'
@@ -12,23 +13,23 @@ import { formatLocalDateTime } from '../../dateTime'
 import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
 
-export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSelectStash: (reference: string) => void; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
-  const { t } = useAppTranslation()
-  const [message, setMessage] = useState('')
+export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSelectStash: (reference: string) => void; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: MessageContent) => void }) {
+  const { t, i18n } = useAppTranslation()
+  const [stashMessage, setMessage] = useState('')
   const [includeUntracked, setIncludeUntracked] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const { confirm, confirmDialog } = useConfirmDialog()
-  const run = async (key: string, operation: () => Promise<RepositorySnapshot>, notice: string) => {
-    if (!repository) return onNotice('Stash 需要先打开本地仓库')
+  const run = async (key: string, operation: () => Promise<RepositorySnapshot>, notice: MessageContent) => {
+    if (!repository) return onNotice(message('operations:stash.openRequired'))
     setBusy(key)
     try {
       const snapshot = await operation()
       onSnapshot(snapshot)
       onNotice(snapshot.operation
-        ? `${operationLabel(snapshot.operation.kind, t)}：请处理 ${snapshot.operation.conflicts.length} 个冲突文件`
+        ? message('operations:stash.conflicts', { operation: message(`operations:kind.${snapshot.operation.kind}`), count: snapshot.operation.conflicts.length })
         : notice)
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : String(error))
+      onNotice(errorMessage(error))
     } finally {
       setBusy(null)
     }
@@ -37,25 +38,25 @@ export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: {
     onSelectStash(reference)
   }
   const dropStash = async (reference: string) => {
-    if (!await confirm({ title: '删除 Stash', message: `确定删除 ${reference}？`, confirmLabel: '删除', variant: 'danger' })) return
-    await run(`drop-${reference}`, () => dropRepositoryStash(repository!.path, reference), `已删除 ${reference}`)
+    if (!await confirm({ title: message('operations:stash.deleteTitle'), message: message('operations:stash.deleteConfirm', { reference }), confirmLabel: message('operations:stash.delete'), variant: 'danger' })) return
+    await run(`drop-${reference}`, () => dropRepositoryStash(repository!.path, reference), message('operations:stash.deleted', { reference }))
   }
 
   return <section className="workspace-page stash-page">
     <div className="stash-workspace stash-manager">
       <div className="stash-control-pane">
-        <div className="stash-compose"><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="可选：输入 Stash 说明"/><label><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)}/>包含未跟踪文件</label><Button variant="primary" disabled={!repository || busy !== null} onClick={() => void run('create', () => createRepositoryStash(repository!.path, message, includeUntracked), '已保存工作区到 Stash')}><Plus size={14}/>{busy === 'create' ? '正在保存…' : '创建 Stash'}</Button></div>
-        <div className="stash-list-heading"><strong>已保存的工作区</strong><span>{repository?.stashes.length ?? 0}</span></div>
+        <div className="stash-compose"><input value={stashMessage} onChange={(event) => setMessage(event.target.value)} placeholder={t('operations:stash.placeholder')}/><label><input type="checkbox" checked={includeUntracked} onChange={(event) => setIncludeUntracked(event.target.checked)}/>{t('operations:stash.includeUntracked')}</label><Button variant="primary" disabled={!repository || busy !== null} onClick={() => void run('create', () => createRepositoryStash(repository!.path, stashMessage, includeUntracked), message('operations:stash.saved'))}><Plus size={14}/>{busy === 'create' ? t('operations:stash.saving') : t('operations:stash.create')}</Button></div>
+        <div className="stash-list-heading"><strong>{t('operations:stash.savedWorktrees')}</strong><span>{new Intl.NumberFormat(i18n.resolvedLanguage).format(repository?.stashes.length ?? 0)}</span></div>
         <div className="stash-list">{repository?.stashes.map((stash) => <article key={stash.reference}>
-          <button className="stash-select" onClick={() => selectStash(stash.reference)} title="在提交图谱中查看"><span className="stash-icon"><Archive size={15}/></span><span><strong>{stash.message}</strong><small>{stash.reference} · {stash.author} · {formatLocalDateTime(stash.time)}</small></span></button>
-          <div className="stash-actions"><Button variant="icon" disabled={busy !== null} title="应用并保留" onClick={() => void run(`apply-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, false), `已应用 ${stash.reference}`)}><Check size={13}/></Button><Button variant="icon" disabled={busy !== null} title="弹出并删除" onClick={() => void run(`pop-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, true), `已弹出 ${stash.reference}`)}><CornerDownLeft size={13}/></Button><Button variant="danger" disabled={busy !== null} title="删除" onClick={() => void dropStash(stash.reference)}><Trash2 size={13}/></Button></div>
+          <Tooltip content={t('operations:stash.viewGraph')}><button className="stash-select" aria-label={t('operations:stash.viewGraph')} onClick={() => selectStash(stash.reference)} ><span className="stash-icon"><Archive size={15}/></span><span><strong>{stash.message}</strong><small>{stash.reference} · {stash.author} · {formatLocalDateTime(stash.time, true, i18n.resolvedLanguage === 'en-US' ? 'en-US' : 'zh-CN')}</small></span></button></Tooltip>
+          <div className="stash-actions"><Button variant="icon" disabled={busy !== null} tooltip={t('operations:stash.apply')} aria-label={t('operations:stash.apply')} onClick={() => void run(`apply-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, false), message('operations:stash.applied', { reference: stash.reference }))}><Check size={13}/></Button><Button variant="icon" disabled={busy !== null} tooltip={t('operations:stash.pop')} aria-label={t('operations:stash.pop')} onClick={() => void run(`pop-${stash.reference}`, () => applyRepositoryStash(repository.path, stash.reference, true), message('operations:stash.popped', { reference: stash.reference }))}><CornerDownLeft size={13}/></Button><Button variant="danger" disabled={busy !== null} tooltip={t('operations:stash.delete')} aria-label={t('operations:stash.delete')} onClick={() => void dropStash(stash.reference)}><Trash2 size={13}/></Button></div>
         </article>)}
-          {repository && repository.stashes.length === 0 && <div className="workspace-hint"><Archive size={26}/><strong>暂无 Stash</strong><span>保存当前工作区后会显示在这里。</span></div>}
-          {!repository && <div className="workspace-hint"><Archive size={26}/><strong>请先打开本地仓库</strong></div>}
+          {repository && repository.stashes.length === 0 && <div className="workspace-hint"><Archive size={26}/><strong>{t('operations:stash.empty')}</strong><span>{t('operations:stash.emptyHint')}</span></div>}
+          {!repository && <div className="workspace-hint"><Archive size={26}/><strong>{t('operations:stash.openRepository')}</strong></div>}
         </div>
       </div>
       <div className="stash-graph-handoff">
-        <GitCommitHorizontal size={32}/><strong>Stash 已并入提交图谱</strong><span>选择左侧任意 Stash，会回到对应图谱节点；文件列表和 Diff 都在统一的右侧详情中查看。</span>
+        <GitCommitHorizontal size={32}/><strong>{t('operations:stash.graphTitle')}</strong><span>{t('operations:stash.graphHint')}</span>
       </div>
       {confirmDialog}
     </div>

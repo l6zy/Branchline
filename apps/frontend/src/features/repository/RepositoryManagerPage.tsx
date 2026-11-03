@@ -1,3 +1,7 @@
+import { Tooltip } from '../../components/tooltip'
+import { errorMessage, message, type MessageContent } from '../../i18n/messages'
+import { useLocale } from '../../i18n/LocaleProvider'
+import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useMemo, useState } from 'react'
 import { ArrowLeft, ChevronRight, Clock3, CloudDownload, Code2, FolderGit2, FolderOpen, GitBranch, Monitor, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from 'lucide-react'
 import { Button } from '../../components/Button'
@@ -22,8 +26,11 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
   onRegister: (repository: RepositoryDetails) => void
   onToggleFavorite: (repository: FavoriteRepository) => void
   onForget: (path: string) => void
-  onNotice: (message: string) => void
+  onNotice: (message: MessageContent) => void
 }) {
+  const { t } = useAppTranslation()
+  const { locale } = useLocale()
+  const formatNumber = new Intl.NumberFormat(locale).format
   const [query, setQuery] = useState('')
   const [selectedPath, setSelectedPath] = useState(current?.path ?? recent[0]?.path ?? favorites[0]?.path ?? '')
   const [adding, setAdding] = useState(false)
@@ -32,9 +39,9 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
   const filtered = catalog.filter((item) => `${item.name}\n${item.path}`.replace(/\\/g, '/').toLocaleLowerCase().includes(query.trim().replace(/\\/g, '/').toLocaleLowerCase()))
   const selected = filtered.find((item) => sameRepositoryPath(item.path, selectedPath)) ?? filtered[0]
   const groups = [
-    { label: '当前仓库', icon: FolderGit2, entries: filtered.filter((item) => item.current) },
-    { label: '收藏', icon: Star, entries: filtered.filter((item) => item.favorite && !item.current) },
-    { label: '最近打开', icon: Clock3, entries: filtered.filter((item) => !item.favorite && !item.current).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)) },
+    { id: 'current', label: t('repository:manager.current'), icon: FolderGit2, entries: filtered.filter((item) => item.current) },
+    { id: 'favorites', label: t('repository:manager.favorites'), icon: Star, entries: filtered.filter((item) => item.favorite && !item.current) },
+    { id: 'recent', label: t('repository:manager.recent'), icon: Clock3, entries: filtered.filter((item) => !item.favorite && !item.current).sort((a, b) => (b.openedAt ?? 0) - (a.openedAt ?? 0)) },
   ]
   const register = (repository: RepositoryDetails) => {
     onRegister(repository)
@@ -46,56 +53,56 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
     if (adding) return
     setAdding(true)
     try {
-      const path = await pickRepositoryDirectory('添加已有本地 Git 仓库')
+      const path = await pickRepositoryDirectory(t('repository:manager.addPicker'))
       if (path) register(await loadRepositoryDetails(path))
-    } catch (error) { onNotice(String(error)) }
+    } catch (error) { onNotice(errorMessage(error)) }
     finally { setAdding(false) }
   }
   const openVscode = async (path: string) => {
     try { await openRepositoryInVscode(path) }
-    catch (error) { onNotice(String(error)) }
+    catch (error) { onNotice(errorMessage(error)) }
   }
   const initialParent = (selected?.path ?? current?.path ?? '').replace(/[\\/][^\\/]+[\\/]*$/, '')
   const hasRepositories = catalog.length > 0
 
-  return <section className="repository-manager" aria-label="仓库管理">
+  return <section className="repository-manager" aria-label={t('repository:manager.title')}>
     {hasRepositories && <header className="repository-manager-heading">
-      <div className="repository-manager-title">{current && <Button variant="icon" title="返回工作区" onClick={onBack}><ArrowLeft size={18}/></Button>}<FolderGit2 size={23}/><div><h1>仓库管理</h1><p>收藏常用项目，快速回到最近的工作。</p></div></div>
-      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}选择本地仓库</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>克隆仓库</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>初始化仓库</Button></>}<Button variant="icon" title={`${theme === 'system' ? `跟随系统（当前${resolvedTheme === 'dark' ? '深色' : '浅色'}）` : `${theme === 'dark' ? '深色' : '浅色'}主题`}，点击切换主题`} aria-label="切换主题" onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button></div>
+      <div className="repository-manager-title">{current && <Button variant="icon" tooltip={t('repository:manager.back')} aria-label={t('repository:manager.back')} onClick={onBack}><ArrowLeft size={18}/></Button>}<FolderGit2 size={23}/><div><h1>{t('repository:manager.title')}</h1><p>{t('repository:manager.description')}</p></div></div>
+      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}{t('repository:manager.selectLocal')}</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>{t('repository:add.clone')}</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>{t('repository:add.initialize')}</Button></>}<Button variant="icon" tooltip={t(theme === 'system' ? 'repository:manager.systemThemeHint' : 'repository:manager.themeHint', { theme: t(resolvedTheme === 'dark' ? 'repository:manager.dark' : 'repository:manager.light') })} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button></div>
     </header>}
     {hasRepositories ? <div className="repository-manager-body">
       <div className="repository-catalog">
-        <div className="repository-catalog-search"><Search size={15}/><input aria-label="搜索仓库" placeholder="搜索仓库名称或路径…" value={query} onChange={(event) => setQuery(event.target.value)}/>{query && <Button variant="icon" title="清除仓库搜索" onClick={() => setQuery('')}><X size={13}/></Button>}<span>{filtered.length}</span></div>
+        <div className="repository-catalog-search"><Search size={15}/><input aria-label={t('repository:manager.search')} placeholder={t('repository:manager.searchPlaceholder')} value={query} onChange={(event) => setQuery(event.target.value)}/>{query && <Button variant="icon" tooltip={t('repository:manager.clearSearch')} aria-label={t('repository:manager.clearSearch')} onClick={() => setQuery('')}><X size={13}/></Button>}<span>{formatNumber(filtered.length)}</span></div>
         <div className="repository-catalog-list">
-          {groups.filter(({ entries }) => entries.length > 0 || (query && filtered.length === 0)).map(({ label, icon: Icon, entries }) => <section className="repository-catalog-group" key={label} aria-label={label}><h2><Icon size={13}/>{label}<small>{entries.length}</small></h2>{entries.map((item) => <div className={`repository-catalog-row ${selected && sameRepositoryPath(item.path, selected.path) ? 'selected' : ''}`} key={repositoryCacheKey(item.path)}>
-            <button className="repository-catalog-select" aria-pressed={Boolean(selected && sameRepositoryPath(item.path, selected.path))} onClick={() => setSelectedPath(item.path)} onDoubleClick={() => { if (!opening) onOpen(item.path) }}><span className="repository-catalog-icon"><FolderGit2 size={18}/></span><span><strong><span className="repository-catalog-name" title={item.name}>{item.name}</span>{item.current && <small>使用中</small>}</strong><span className="repository-catalog-path" title={item.path}>{item.path}</span><span className="repository-catalog-meta">{item.branch && <span><GitBranch size={11}/><span className="repository-catalog-branch" title={item.branch}>{item.branch}</span></span>}{item.openedAt && <time dateTime={new Date(item.openedAt).toISOString()}>{new Date(item.openedAt).toLocaleDateString('zh-CN')}</time>}</span></span></button>
-            <div className="repository-catalog-actions"><Button variant="icon" title={`${item.favorite ? '取消收藏' : '收藏'} ${item.name}`} aria-pressed={item.favorite} onClick={() => onToggleFavorite(item)}><Star size={14} fill={item.favorite ? 'currentColor' : 'none'}/></Button><Button variant="icon" title={`在 VS Code 中打开 ${item.name}`} onClick={() => void openVscode(item.path)}><Code2 size={14}/></Button><Button variant="icon" title={`移除 ${item.name} 的记录（保留本地文件）`} onClick={() => { onForget(item.path); onNotice('已移除仓库记录，本地文件已保留') }}><Trash2 size={14}/></Button><Button variant="icon" title={`打开 ${item.name}`} disabled={opening} onClick={() => onOpen(item.path)}><ChevronRight size={15}/></Button></div>
-          </div>)}{entries.length === 0 && <p className="repository-group-empty">{label === '当前仓库' ? '尚未打开仓库' : label === '收藏' ? '点击星标收藏常用仓库' : '暂无最近打开的仓库'}</p>}</section>)}
-          {query && filtered.length === 0 && <p className="repository-search-empty">没有匹配的仓库，请尝试其他名称或路径。</p>}
+          {groups.filter(({ entries }) => entries.length > 0 || (query && filtered.length === 0)).map(({ id, label, icon: Icon, entries }) => <section className="repository-catalog-group" key={id} aria-label={label}><h2><Icon size={13}/>{label}<small>{formatNumber(entries.length)}</small></h2>{entries.map((item) => <div className={`repository-catalog-row ${selected && sameRepositoryPath(item.path, selected.path) ? 'selected' : ''}`} key={repositoryCacheKey(item.path)}>
+            <button className="repository-catalog-select" aria-pressed={Boolean(selected && sameRepositoryPath(item.path, selected.path))} onClick={() => setSelectedPath(item.path)} onDoubleClick={() => { if (!opening) onOpen(item.path) }}><span className="repository-catalog-icon"><FolderGit2 size={18}/></span><span><strong><Tooltip content={item.name}><span className="repository-catalog-name">{item.name}</span></Tooltip>{item.current && <small>{t('repository:manager.inUse')}</small>}</strong><Tooltip content={item.path}><span className="repository-catalog-path">{item.path}</span></Tooltip><span className="repository-catalog-meta">{item.branch && <span><GitBranch size={11}/><Tooltip content={item.branch}><span className="repository-catalog-branch">{item.branch}</span></Tooltip></span>}{item.openedAt && <time dateTime={new Date(item.openedAt).toISOString()}>{new Intl.DateTimeFormat(locale).format(new Date(item.openedAt))}</time>}</span></span></button>
+            <div className="repository-catalog-actions"><Button variant="icon" tooltip={t(item.favorite ? 'repository:manager.unfavoriteName' : 'repository:manager.favoriteName', { name: item.name })} aria-label={t(item.favorite ? 'repository:manager.unfavoriteName' : 'repository:manager.favoriteName', { name: item.name })} aria-pressed={item.favorite} onClick={() => onToggleFavorite(item)}><Star size={14} fill={item.favorite ? 'currentColor' : 'none'}/></Button><Button variant="icon" tooltip={t('repository:manager.vscodeName', { name: item.name })} aria-label={t('repository:manager.vscodeName', { name: item.name })} onClick={() => void openVscode(item.path)}><Code2 size={14}/></Button><Button variant="icon" tooltip={t('repository:manager.forgetName', { name: item.name })} aria-label={t('repository:manager.forgetName', { name: item.name })} onClick={() => { onForget(item.path); onNotice(message('repository:manager.recordRemoved')) }}><Trash2 size={14}/></Button><Button variant="icon" tooltip={t('repository:manager.openName', { name: item.name })} aria-label={t('repository:manager.openName', { name: item.name })} disabled={opening} onClick={() => onOpen(item.path)}><ChevronRight size={15}/></Button></div>
+          </div>)}{entries.length === 0 && <p className="repository-group-empty">{id === 'current' ? t('repository:manager.notOpened') : id === 'favorites' ? t('repository:manager.favoriteHint') : t('repository:manager.noRecent')}</p>}</section>)}
+          {query && filtered.length === 0 && <p className="repository-search-empty">{t('repository:manager.noMatchHint')}</p>}
         </div>
-        <footer className="repository-catalog-footer">移除记录会保留本地仓库文件。</footer>
+        <footer className="repository-catalog-footer">{t('repository:manager.keepFiles')}</footer>
       </div>
-      {selected ? <RepositoryDetailsPanel key={repositoryCacheKey(selected.path)} item={selected} opening={opening} onOpen={(path) => selected.current ? onBack() : onOpen(path)} onVscode={(path) => void openVscode(path)} onToggleFavorite={onToggleFavorite}/> : <div className="repository-manager-empty"><span><FolderGit2 size={38}/></span><h2>{query ? '没有匹配的仓库' : '让每个项目触手可及'}</h2><p>{query ? '修改搜索条件以查看其他仓库。' : '添加本地仓库，或从克隆、初始化开始。选择仓库后，可以在这里查看分支、Submodule、远程和 README。'}</p>{!query && <Button onClick={() => void browse()} disabled={adding}><FolderOpen size={15}/>添加第一个仓库</Button>}</div>}
+      {selected ? <RepositoryDetailsPanel key={repositoryCacheKey(selected.path)} item={selected} opening={opening} onOpen={(path) => selected.current ? onBack() : onOpen(path)} onVscode={(path) => void openVscode(path)} onToggleFavorite={onToggleFavorite}/> : <div className="repository-manager-empty"><span><FolderGit2 size={38}/></span><h2>{query ? t('repository:manager.noMatch') : t('repository:manager.emptyTitle')}</h2><p>{query ? t('repository:manager.changeSearch') : t('repository:manager.emptyHint')}</p>{!query && <Button onClick={() => void browse()} disabled={adding}><FolderOpen size={15}/>{t('repository:manager.addFirst')}</Button>}</div>}
       </div> : <div className="repository-manager-welcome">
-      <Button className="repository-welcome-theme" variant="icon" title="切换主题" aria-label="切换主题" onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button>
+      <Button className="repository-welcome-theme" variant="icon" tooltip={t('repository:manager.toggleTheme')} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button>
       <div className="repository-welcome-hero">
         <div className="repository-welcome-brand"><img src="/app-icon.svg" alt="Branchline"/><span>BRANCHLINE</span></div>
-        <p className="repository-welcome-kicker">准备好开始了吗？</p>
-        <h2>从一个仓库开始</h2>
-        <p className="repository-welcome-copy">把常用项目集中在这里。打开仓库后即可查看分支、提交图谱、差异和 README。</p>
+        <p className="repository-welcome-kicker">{t('repository:welcome.ready')}</p>
+        <h2>{t('repository:welcome.title')}</h2>
+        <p className="repository-welcome-copy">{t('repository:welcome.description')}</p>
       </div>
-      <div className="repository-start-actions" aria-label="开始使用仓库管理">
+      <div className="repository-start-actions" aria-label={t('repository:welcome.actions')}>
         <button className="repository-start-action primary" onClick={() => void browse()} disabled={adding || opening}>
-          <span className="repository-start-icon"><FolderOpen size={20}/></span><span><strong>打开本地仓库</strong><small>选择已有的 Git 项目</small></span><ChevronRight size={17}/>
+          <span className="repository-start-icon"><FolderOpen size={20}/></span><span><strong>{t('repository:welcome.openLocal')}</strong><small>{t('repository:welcome.localHint')}</small></span><ChevronRight size={17}/>
         </button>
         <button className="repository-start-action" onClick={() => setDialog('clone')} disabled={adding || opening}>
-          <span className="repository-start-icon"><CloudDownload size={20}/></span><span><strong>克隆远程仓库</strong><small>从 URL 下载一个新项目</small></span><ChevronRight size={17}/>
+          <span className="repository-start-icon"><CloudDownload size={20}/></span><span><strong>{t('repository:welcome.clone')}</strong><small>{t('repository:welcome.cloneHint')}</small></span><ChevronRight size={17}/>
         </button>
         <button className="repository-start-action" onClick={() => setDialog('init')} disabled={adding || opening}>
-          <span className="repository-start-icon"><Plus size={20}/></span><span><strong>初始化新仓库</strong><small>从一个空文件夹开始</small></span><ChevronRight size={17}/>
+          <span className="repository-start-icon"><Plus size={20}/></span><span><strong>{t('repository:welcome.initialize')}</strong><small>{t('repository:welcome.initializeHint')}</small></span><ChevronRight size={17}/>
         </button>
       </div>
-      <div className="repository-welcome-hint"><span>添加后可收藏仓库，之后从最近打开中一键继续。</span><kbd>Ctrl P</kbd><span>搜索仓库</span></div>
+      <div className="repository-welcome-hint"><span>{t('repository:welcome.favoriteHint')}</span><kbd>Ctrl P</kbd><span>{t('repository:manager.search')}</span></div>
     </div>}
     {dialog && <AddRepositoryDialog mode={dialog} initialParent={initialParent} onClose={() => setDialog(null)} onCreated={register}/>}
   </section>

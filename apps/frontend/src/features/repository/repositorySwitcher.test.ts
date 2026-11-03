@@ -10,7 +10,7 @@ const repository = {
     { path: 'E:\\code\\Branchline-feature', branch: 'feat/search' },
   ],
   submodules: [
-    { path: 'vendor/ui-kit', status: '已初始化' },
+    { path: 'vendor/ui-kit', status: 'ok' },
   ],
 }
 
@@ -21,6 +21,11 @@ const recent = [
 ]
 
 describe('repository switch targets', () => {
+  it('uses language-neutral kinds and keeps raw branch and status values separately', () => {
+    const targets = buildRepositorySwitchTargets(repository, recent, [])
+    expect(targets[0]).toMatchObject({ kind: 'current', branch: 'master' })
+    expect(targets.find((target) => target.source === 'submodule')).toMatchObject({ kind: 'submodule', status: 'ok' })
+  })
   it('deduplicates normalized paths while preserving structure priority and pin state', () => {
     const targets = buildRepositorySwitchTargets(repository, recent, [
       { name: 'Feature', path: 'e:/code/Branchline-feature/' },

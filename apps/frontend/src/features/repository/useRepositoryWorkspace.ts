@@ -1,3 +1,4 @@
+import { errorMessage, message, type MessageContent } from '../../i18n/messages'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -61,6 +62,8 @@ function readAutoFetchSettings(): AutoFetchSettings {
 
 export function useRepositoryWorkspace() {
   const { t } = useAppTranslation()
+  const currentTranslation = useRef(t)
+  currentTranslation.current = t
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
   const [structureRepository, setStructureRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
@@ -68,7 +71,7 @@ export function useRepositoryWorkspace() {
   const [favoriteRepositories, setFavoriteRepositories] = useState(readFavoriteRepositories)
   const [openingRepository, setOpeningRepository] = useState(recentRepositories.length > 0)
   const [fetching, setFetching] = useState(false)
-  const [repositoryNotice, setRepositoryNoticeState] = useState<string | null>(null)
+  const [repositoryNotice, setRepositoryNoticeState] = useState<MessageContent | null>(null)
   const [noticeVersion, setNoticeVersion] = useState(0)
   const [fetchCompletion, setFetchCompletion] = useState<{ snapshot: RepositorySnapshot } | null>(null)
   const [lastFetchAt, setLastFetchAt] = useState<number | null>(null)
@@ -100,7 +103,7 @@ export function useRepositoryWorkspace() {
       setRepositoryNoticeState(null)
     }, duration)
   }, [stopNoticeTimer])
-  const setRepositoryNotice = useCallback((notice: string | null) => {
+  const setRepositoryNotice = useCallback((notice: MessageContent | null) => {
     stopNoticeTimer()
     noticeRemaining.current = NOTICE_DURATION
     if (!notice) noticePaused.current = false
@@ -178,7 +181,7 @@ export function useRepositoryWorkspace() {
     }
   }, [])
 
-  const applySnapshot = useCallback((snapshot: RepositorySnapshot, notice?: string) => {
+  const applySnapshot = useCallback((snapshot: RepositorySnapshot, notice?: MessageContent) => {
     cacheSnapshot(snapshot)
     setRepository(snapshot)
     setStructureRepository((current) => {
@@ -229,7 +232,7 @@ export function useRepositoryWorkspace() {
     return true
   }, [applyRefreshedSnapshot])
 
-  const navigateToRepository = useCallback(async (path: string, notice: (snapshot: RepositorySnapshot) => string) => {
+  const navigateToRepository = useCallback(async (path: string, notice: (snapshot: RepositorySnapshot) => MessageContent) => {
     const sequence = ++navigationSequence.current
     const key = repositoryCacheKey(path)
     const cached = snapshotCache.current.get(key)
@@ -255,7 +258,7 @@ export function useRepositoryWorkspace() {
       startBackgroundFetch(snapshot.path)
       return snapshot
     } catch (error) {
-      setRepositoryNotice(error instanceof Error ? error.message : String(error))
+      setRepositoryNotice(errorMessage(error))
       return null
     } finally {
       setOpeningRepository(false)
@@ -263,13 +266,13 @@ export function useRepositoryWorkspace() {
   }, [applyRefreshedSnapshot, applySnapshot, setRepositoryNotice, startBackgroundFetch])
 
   const openRepositoryPath = useCallback(async (path: string) => {
-    const snapshot = await navigateToRepository(path, (loaded) => `已打开仓库：${loaded.name}`)
+    const snapshot = await navigateToRepository(path, (loaded) => message('repository:workspace.opened', { name: loaded.name }))
     if (snapshot) rememberRepository(snapshot)
     return snapshot
   }, [navigateToRepository, rememberRepository])
 
   const openSubmodulePath = useCallback(
-    (path: string) => navigateToRepository(path, (snapshot) => `已进入 Submodule：${snapshot.name}`),
+    (path: string) => navigateToRepository(path, (snapshot) => message('repository:workspace.enteredSubmodule', { name: snapshot.name })),
     [navigateToRepository],
   )
 
@@ -279,22 +282,22 @@ export function useRepositoryWorkspace() {
 
   const returnToParentRepository = useCallback(async () => {
     if (!parentRepository) return null
-    return navigateToRepository(parentRepository.path, (snapshot) => `已返回父仓库：${snapshot.name}`)
+    return navigateToRepository(parentRepository.path, (snapshot) => message('repository:workspace.returnedParent', { name: snapshot.name }))
   }, [navigateToRepository, parentRepository])
 
   const openRepository = useCallback(async () => {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await pickAndLoadRepository(t('repository:open.dialogTitle'))
+      const snapshot = await pickAndLoadRepository(currentTranslation.current('repository:open.dialogTitle'))
       if (!snapshot) return null
       navigationSequence.current += 1
-      applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)
+      applySnapshot(snapshot, message('repository:workspace.opened', { name: snapshot.name }))
       rememberRepository(snapshot)
       startBackgroundFetch(snapshot.path)
       return snapshot
     } catch (error) {
-      setRepositoryNotice(error instanceof Error ? error.message : String(error))
+      setRepositoryNotice(errorMessage(error))
       return null
     } finally {
       setOpeningRepository(false)
@@ -316,8 +319,7 @@ export function useRepositoryWorkspace() {
         rememberRepository(snapshot)
       })
       .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error)
-        setRepositoryNotice(`无法重新打开上次仓库：${message}`)
+        setRepositoryNotice(message('repository:workspace.restoreFailed', { error: errorMessage(error) }))
       })
       .finally(() => {
         setOpeningRepository(false)
@@ -335,10 +337,10 @@ export function useRepositoryWorkspace() {
       applyRefreshedSnapshot(snapshot)
       setLastFetchAt(Date.now())
       setFetchCompletion({ snapshot })
-      if (!quiet) setRepositoryNotice('Fetch 完成，远程引用已更新')
+      if (!quiet) setRepositoryNotice(message('repository:workspace.fetched'))
       return snapshot
     } catch (error) {
-      if (!quiet) setRepositoryNotice(error instanceof Error ? error.message : String(error))
+      if (!quiet) setRepositoryNotice(errorMessage(error))
       return null
     } finally {
       fetchInProgress.current = false

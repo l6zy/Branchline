@@ -2,6 +2,8 @@
   "appName": "Branchline",
   "cancel": "Cancel",
   "confirm": "Confirm",
+  "confirmTitle": "Please confirm",
+  "confirmDangerTitle": "Confirm action",
   "select": "Select",
   "fileCount_one": "{{count}} file",
   "fileCount_other": "{{count}} files"

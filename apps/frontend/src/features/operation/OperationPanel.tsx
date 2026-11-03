@@ -1,3 +1,5 @@
+import { Tooltip } from '../../components/tooltip'
+import { message, errorMessage, type MessageContent, type TranslationKey } from '../../i18n/messages'
 import { operationLabel } from '../../i18n/operationLabels'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -11,7 +13,7 @@ import { acquireOperationLock, releaseOperationLock } from './operationLock'
 type OperationPanelProps = {
   repository: RepositorySnapshot
   onSnapshot: (snapshot: RepositorySnapshot) => void
-  onNotice: (message: string) => void
+  onNotice: (message: MessageContent) => void
   initialPath?: string | null
   onReturnToChanges: () => void
   onClose?: () => void
@@ -29,10 +31,10 @@ type ConflictBlock = {
 
 type ResolutionStrategy = 'current' | 'incoming' | 'both'
 
-const resolutionLabels: Record<ResolutionStrategy, string> = {
-  current: '采用当前更改',
-  incoming: '采用传入的更改',
-  both: '保留双方更改',
+const resolutionKeys: Record<ResolutionStrategy, TranslationKey> = {
+  current: 'operations:resolution.current',
+  incoming: 'operations:resolution.incoming',
+  both: 'operations:resolution.both',
 }
 
 function parseConflictBlocks(value: string): ConflictBlock[] {
@@ -105,7 +107,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
         }
       })
       .catch((error) => {
-        if (!cancelled) onNotice(error instanceof Error ? error.message : String(error))
+        if (!cancelled) onNotice(errorMessage(error))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -113,17 +115,17 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
     return () => { cancelled = true }
   }, [onNotice, reloadToken, repository.path, selectedPath])
 
-  const runOperation = async (action: () => Promise<RepositorySnapshot>, success: string) => {
+  const runOperation = async (action: () => Promise<RepositorySnapshot>, success: MessageContent) => {
     if (!acquireOperationLock(operationLock)) return false
     setLoading(true)
     try {
       const snapshot = await action()
       onSnapshot(snapshot)
       setReloadToken((value) => value + 1)
-      onNotice(snapshot.operation ? `${operationLabel(snapshot.operation.kind, t)}：${snapshot.operation.conflicts.length ? `还有 ${snapshot.operation.conflicts.length} 个冲突` : '可以继续操作'}` : success)
+      onNotice(snapshot.operation ? message(snapshot.operation.conflicts.length ? 'operations:panel.remainingConflicts' : 'operations:panel.canContinue', { operation: message(`operations:kind.${snapshot.operation.kind}`), count: snapshot.operation.conflicts.length }) : success)
       return true
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : String(error))
+      onNotice(errorMessage(error))
       return false
     } finally {
       releaseOperationLock(operationLock)
@@ -135,7 +137,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
     if (!selectedPath) return
     void runOperation(
       () => resolveConflictFile(repository.path, selectedPath, strategy, strategy === 'result' ? draft : undefined),
-      `已解决 ${selectedPath}`,
+      message('operations:panel.fileResolved', { path: selectedPath }),
     ).then((resolved) => { if (resolved) onReturnToChanges() })
   }
   const blocks = useMemo(() => parseConflictBlocks(draft), [draft])
@@ -165,9 +167,9 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
         setActiveBlock(nextIndex)
         setLastResolution({ block: blockIndex, strategy, from: focusOffset, to: resolvedTo })
         setResolvedRanges([...mappedRanges, { from: focusOffset, to: resolvedTo }])
-        onNotice(`已应用第 ${blockIndex + 1} 个冲突块：${resolutionLabels[strategy]}`)
+        onNotice(message('operations:panel.blockResolved', { block: blockIndex + 1, strategy: message(resolutionKeys[strategy]) }))
       })
-      .catch((error) => onNotice(error instanceof Error ? error.message : String(error)))
+      .catch((error) => onNotice(errorMessage(error)))
       .finally(() => setLoading(false))
   }
 
@@ -188,37 +190,37 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
   const totalSteps = operation?.totalSteps ?? 0
   const completedSteps = useMemo(() => operation?.steps.filter((step) => step.status === 'applied').length ?? 0, [operation?.steps])
 
-  if (!operation) return <section className="workspace-empty"><Check size={36}/><strong>没有待处理的 Git 操作</strong><span>合并、变基或 Cherry-pick 产生冲突后，会在这里逐文件处理。</span></section>
+  if (!operation) return <section className="workspace-empty"><Check size={36}/><strong>{t('operations:panel.empty')}</strong><span>{t('operations:panel.emptyHint')}</span></section>
 
   return <section className={`operation-page workspace-page ${loading ? 'operation-busy' : ''}`} aria-busy={loading}>
     <div className="operation-heading operation-statusbar">
       <div className="operation-heading-title">
         <span className={`operation-kind operation-kind-${operation.kind}`}>{operation.kind === 'rebase' ? <GitPullRequest size={15}/> : operation.kind === 'merge' ? <GitMerge size={15}/> : <CircleAlert size={15}/>}</span>
         <strong>{operationLabel(operation.kind, t)}</strong>
-        <span className="operation-status-meta">{operation.kind === 'rebase' ? `${completedSteps} / ${operation.steps.length || totalSteps} 个提交` : `${conflicts.length} 个冲突文件`}</span>
+        <span className="operation-status-meta">{operation.kind === 'rebase' ? t('operations:panel.commitProgress', { completed: completedSteps, total: operation.steps.length || totalSteps }) : t('operations:panel.conflictCount', { count: conflicts.length })}</span>
       </div>
       <div className="operation-actions">
-        <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), '操作已继续')} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}>{loading ? <RefreshCw className="spin" size={14}/> : <ChevronRight size={14}/>} {loading ? '正在继续…' : operation.kind === 'rebase' ? '继续变基' : '继续操作'}</Button>
-        {(operation.kind === 'rebase' || operation.kind === 'cherry-pick') && <Button variant="secondary" onClick={() => void runOperation(() => skipRepositoryOperation(repository.path), '已跳过当前提交')} disabled={loading}><SkipForward size={14}/>跳过提交</Button>}
-        <Button variant="danger" onClick={() => void (async () => { if (await confirm({ title: '中止 Git 操作', message: '确定中止当前 Git 操作？未完成的合并或变基将被撤销。', confirmLabel: '中止', variant: 'danger' })) await runOperation(() => abortRepositoryOperation(repository.path), '已中止 Git 操作') })()} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>中止</Button>
-        {onClose && <Button variant="icon" onClick={onClose} disabled={loading} title="返回提交图谱"><X size={15}/></Button>}
+        <Button variant="secondary" onClick={() => void runOperation(() => continueRepositoryOperation(repository.path), message('operations:panel.continued'))} disabled={loading || conflicts.length > 0 || operation.kind === 'conflict'}>{loading ? <RefreshCw className="spin" size={14}/> : <ChevronRight size={14}/>} {loading ? t('operations:panel.continuing') : operation.kind === 'rebase' ? t('operations:panel.continueRebase') : t('operations:panel.continue')}</Button>
+        {(operation.kind === 'rebase' || operation.kind === 'cherry-pick') && <Button variant="secondary" onClick={() => void runOperation(() => skipRepositoryOperation(repository.path), message('operations:panel.skipped'))} disabled={loading}><SkipForward size={14}/>{t('operations:panel.skip')}</Button>}
+        <Button variant="danger" onClick={() => void (async () => { if (await confirm({ title: message('operations:panel.abortTitle'), message: message('operations:panel.abortConfirm'), confirmLabel: message('operations:panel.abort'), variant: 'danger' })) await runOperation(() => abortRepositoryOperation(repository.path), message('operations:panel.aborted')) })()} disabled={loading || operation.kind === 'conflict'}><Square size={13}/>{t('operations:panel.abort')}</Button>
+        {onClose && <Button variant="icon" onClick={onClose} disabled={loading} tooltip={t('operations:panel.backToGraph')} aria-label={t('operations:panel.backToGraph')}><X size={15}/></Button>}
       </div>
     </div>
 
-    {operation.kind === 'rebase' && operation.steps.length > 0 && <details className="rebase-route"><summary><GitBranch size={13}/>变基线路 <span>{currentStep && totalSteps ? `第 ${currentStep} / ${totalSteps} 步` : '准备中'}</span></summary><div className="rebase-steps">{operation.steps.map((step) => <div className={`rebase-step ${step.status}`} key={step.hash}><span className="rebase-step-line"/><span className="rebase-step-dot"/><div><strong>{step.title}</strong><small>{step.shortHash} · {step.author}</small></div><span className="rebase-step-status">{step.status === 'applied' ? '已完成' : step.status === 'current' ? '当前冲突' : '待处理'}</span></div>)}</div></details>}
+    {operation.kind === 'rebase' && operation.steps.length > 0 && <details className="rebase-route"><summary><GitBranch size={13}/>{t('operations:panel.route')} <span>{currentStep && totalSteps ? t('operations:panel.step', { current: currentStep, total: totalSteps }) : t('operations:panel.preparing')}</span></summary><div className="rebase-steps">{operation.steps.map((step) => <div className={`rebase-step ${step.status}`} key={step.hash}><span className="rebase-step-line"/><span className="rebase-step-dot"/><div><strong>{step.title}</strong><small>{step.shortHash} · {step.author}</small></div><span className="rebase-step-status">{step.status === 'applied' ? t('operations:panel.applied') : step.status === 'current' ? t('operations:panel.currentConflict') : t('operations:panel.pending')}</span></div>)}</div></details>}
 
     <div className="conflict-workspace">
       <div className="conflict-editor inline-resolution">
-        <div className="conflict-editor-toolbar"><strong>{file?.path ?? '没有待处理的冲突文件'}</strong><div className="conflict-navigation"><button onClick={() => jumpFile(-1)} disabled={!conflicts.length} title="上一个冲突文件"><ChevronLeft size={14}/></button><span>{conflicts.length ? `${Math.max(0, conflicts.indexOf(selectedPath ?? conflicts[0]) + 1)} / ${conflicts.length}` : '0 / 0'}</span><button onClick={() => jumpFile(1)} disabled={!conflicts.length} title="下一个冲突文件"><ChevronRight size={14}/></button></div><div className="conflict-navigation"><button onClick={() => jumpBlock(-1)} disabled={!blocks.length} title="上一处冲突"><ChevronLeft size={14}/></button><span>{blocks.length ? `${activeBlock + 1} / ${blocks.length}` : '0 / 0'}</span><button onClick={() => jumpBlock(1)} disabled={!blocks.length} title="下一处冲突"><ChevronRight size={14}/></button></div><button className="icon-tool-button" onClick={() => { if (file) void runOperation(() => launchConflictMergetool(repository.path, file.path), '外部合并工具已完成') }} disabled={!file || loading} title="使用已配置的 Git 外部合并工具"><ExternalLink size={14}/></button></div>
-        {!file && <div className="conflict-editor-empty"><AlertTriangle size={30}/><strong>{conflicts.length ? '请从工作区变更的“冲突”分组打开文件' : '所有冲突已解决'}</strong><span>{conflicts.length ? '也可使用上方按钮在冲突文件之间切换。' : '点击“继续”让 Git 进入下一步。'}</span></div>}
-        {file?.binary && <div className="conflict-binary"><AlertTriangle size={28}/><strong>{file.gitlink ? '此文件是 Gitlink / Submodule 引用' : '此文件包含二进制内容'}</strong><span>无法进行文本编辑，请选择一侧、删除文件或使用外部合并工具。</span><div><Button variant="secondary" onClick={() => resolveFile('current')} disabled={loading || file.current == null}><RotateCcw size={13}/>采用当前</Button><Button variant="secondary" onClick={() => resolveFile('incoming')} disabled={loading || file.incoming == null}><GitPullRequest size={13}/>采用对方</Button><Button variant="danger" onClick={() => resolveFile('delete')} disabled={loading}><Trash2 size={13}/>删除文件</Button></div></div>}
+        <div className="conflict-editor-toolbar"><strong>{file?.path ?? t('operations:panel.noConflictFile')}</strong><div className="conflict-navigation"><Tooltip content={t('operations:panel.previousFile')}><button onClick={() => jumpFile(-1)} disabled={!conflicts.length} aria-label={t('operations:panel.previousFile')}><ChevronLeft size={14}/></button></Tooltip><span>{conflicts.length ? `${Math.max(0, conflicts.indexOf(selectedPath ?? conflicts[0]) + 1)} / ${conflicts.length}` : '0 / 0'}</span><Tooltip content={t('operations:panel.nextFile')}><button onClick={() => jumpFile(1)} disabled={!conflicts.length} aria-label={t('operations:panel.nextFile')}><ChevronRight size={14}/></button></Tooltip></div><div className="conflict-navigation"><Tooltip content={t('operations:panel.previousBlock')}><button onClick={() => jumpBlock(-1)} disabled={!blocks.length} aria-label={t('operations:panel.previousBlock')}><ChevronLeft size={14}/></button></Tooltip><span>{blocks.length ? `${activeBlock + 1} / ${blocks.length}` : '0 / 0'}</span><Tooltip content={t('operations:panel.nextBlock')}><button onClick={() => jumpBlock(1)} disabled={!blocks.length} aria-label={t('operations:panel.nextBlock')}><ChevronRight size={14}/></button></Tooltip></div><Tooltip content={t('operations:panel.mergetoolHint')}><button className="icon-tool-button" onClick={() => { if (file) void runOperation(() => launchConflictMergetool(repository.path, file.path), message('operations:panel.mergetoolDone')) }} disabled={!file || loading} aria-label={t('operations:panel.mergetoolHint')}><ExternalLink size={14}/></button></Tooltip></div>
+        {!file && <div className="conflict-editor-empty"><AlertTriangle size={30}/><strong>{conflicts.length ? t('operations:panel.selectConflict') : t('operations:panel.resolvedAll')}</strong><span>{conflicts.length ? t('operations:panel.navigateHint') : t('operations:panel.continueHint')}</span></div>}
+        {file?.binary && <div className="conflict-binary"><AlertTriangle size={28}/><strong>{file.gitlink ? t('operations:panel.gitlink') : t('operations:panel.binary')}</strong><span>{t('operations:panel.binaryHint')}</span><div><Button variant="secondary" onClick={() => resolveFile('current')} disabled={loading || file.current == null}><RotateCcw size={13}/>{t('operations:panel.acceptCurrent')}</Button><Button variant="secondary" onClick={() => resolveFile('incoming')} disabled={loading || file.incoming == null}><GitPullRequest size={13}/>{t('operations:panel.acceptIncoming')}</Button><Button variant="danger" onClick={() => resolveFile('delete')} disabled={loading}><Trash2 size={13}/>{t('operations:panel.deleteFile')}</Button></div></div>}
         {file && !file.binary && <div className="conflict-result">
             <div className="conflict-result-heading">
-              <div><strong>合并结果</strong><span>{lastResolution ? `刚刚已应用第 ${lastResolution.block + 1} 个冲突块：${resolutionLabels[lastResolution.strategy]}` : blocks.length ? `第 ${Math.min(activeBlock + 1, blocks.length)} / ${blocks.length} 个冲突块` : '没有未处理的冲突标记'}</span></div>
-              <div className="conflict-navigation"><button onClick={() => jumpBlock(-1)} disabled={!blocks.length} title="上一处冲突"><ChevronLeft size={14}/></button><span>{blocks.length ? `${activeBlock + 1} / ${blocks.length}` : '0 / 0'}</span><button onClick={() => jumpBlock(1)} disabled={!blocks.length} title="下一处冲突"><ChevronRight size={14}/></button></div>
-              {blocks.length > 0 && <div className="conflict-active-actions"><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'current')} disabled={loading}>采用当前更改</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'incoming')} disabled={loading}>采用传入的更改</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'both')} disabled={loading}>保留双方更改</Button></div>}
+              <div><strong>{t('operations:panel.result')}</strong><span>{lastResolution ? t('operations:panel.lastResolution', { block: lastResolution.block + 1, strategy: t(resolutionKeys[lastResolution.strategy]) }) : blocks.length ? t('operations:panel.blockProgress', { current: Math.min(activeBlock + 1, blocks.length), total: blocks.length }) : t('operations:panel.noMarkers')}</span></div>
+              <div className="conflict-navigation"><Tooltip content={t('operations:panel.previousBlock')}><button onClick={() => jumpBlock(-1)} disabled={!blocks.length} aria-label={t('operations:panel.previousBlock')}><ChevronLeft size={14}/></button></Tooltip><span>{blocks.length ? `${activeBlock + 1} / ${blocks.length}` : '0 / 0'}</span><Tooltip content={t('operations:panel.nextBlock')}><button onClick={() => jumpBlock(1)} disabled={!blocks.length} aria-label={t('operations:panel.nextBlock')}><ChevronRight size={14}/></button></Tooltip></div>
+              {blocks.length > 0 && <div className="conflict-active-actions"><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'current')} disabled={loading}>{t('operations:resolution.current')}</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'incoming')} disabled={loading}>{t('operations:resolution.incoming')}</Button><Button variant="secondary" onClick={() => resolveBlock(activeBlock, 'both')} disabled={loading}>{t('operations:resolution.both')}</Button></div>}
             </div>
-            <ConflictCodeEditor ref={editorRef} value={draft} filePath={file.path} blocks={blocks} activeBlock={activeBlock} resolvedRanges={resolvedRanges} disabled={loading} onChange={(value) => { setDraft(value); if (value !== draft) setLastResolution(null) }} onResolveBlock={resolveBlock} onSave={() => resolveFile('result')} saveLabel={blocks.length ? '保存结果' : '标记已解决'}/>
+            <ConflictCodeEditor ref={editorRef} value={draft} filePath={file.path} blocks={blocks} activeBlock={activeBlock} resolvedRanges={resolvedRanges} disabled={loading} onChange={(value) => { setDraft(value); if (value !== draft) setLastResolution(null) }} onResolveBlock={resolveBlock} onSave={() => resolveFile('result')} saveLabel={blocks.length ? t('operations:panel.save') : t('operations:panel.markResolved')}/>
           </div>}
       </div>
     </div>

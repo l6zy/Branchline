@@ -376,7 +376,7 @@
 
 .diff-block-actions { position: absolute; left: 50%; transform: translate(-50%, -50%); z-index: 3; display: flex; flex-direction: column; align-items: center; overflow: hidden; border-radius: 3px; color: var(--code-text); background: color-mix(in srgb, var(--accent) 16%, var(--code-surface)); }
 
-.diff-block-actions > button { position: static; width: 24px; height: 20px; flex-shrink: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; color: inherit; background: transparent; cursor: pointer; transition: background .12s, color .12s; }
+.diff-block-actions > button, .diff-block-action-anchor > button { position: static; width: 24px; height: 20px; flex-shrink: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; color: inherit; background: transparent; cursor: pointer; transition: background .12s, color .12s; }
 
 .diff-block-actions > button:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
@@ -384,7 +384,7 @@
 
 .diff-block-actions > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; background: var(--accent-dim); }
 
-.diff-block-actions > button:disabled { opacity: .4; cursor: wait; }
+.diff-block-actions > button:disabled, .diff-block-action-anchor > button:disabled { opacity: .4; cursor: wait; }
 
 .syntax { min-width: max-content; color: inherit; }
 
@@ -1228,9 +1228,9 @@
 
 .stage-file.active { background: var(--accent-dim); box-shadow: inset 2px 0 var(--accent); }
 
-.stage-file-open { min-width: 0; height: 28px; padding: 0 7px; display: grid; grid-template-columns: 17px 38px minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 0; color: var(--text); text-align: left; background: transparent; cursor: pointer; }
+.stage-file-open { min-width: 0; height: 28px; padding: 0 7px; display: grid; grid-template-columns: 17px max-content minmax(0, 1fr) auto; align-items: center; gap: 6px; border: 0; color: var(--text); text-align: left; background: transparent; cursor: pointer; }
 
-.stage-file-open.has-incoming { grid-template-columns: 17px 38px minmax(0, 1fr) 20px auto; }
+.stage-file-open.has-incoming { grid-template-columns: 17px max-content minmax(0, 1fr) 20px auto; }
 
 .stage-file-open svg { color: var(--muted); }
 
@@ -1244,7 +1244,7 @@
 
 .stage-file-name { min-width: 6ch; flex: 0 1 auto; max-width: 100%; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 
-.stage-file-status { width: 38px; height: 19px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 19px; white-space: nowrap; }
+.stage-file-status { min-width: 38px; width: max-content; padding: 0 5px; flex-shrink: 0; height: 19px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 10px; font-weight: 600; line-height: 19px; white-space: nowrap; }
 
 .stage-file-status.added { color: #95de64; background: #162312; }
 
@@ -1470,6 +1470,9 @@
 
 .conflict-save-floating:disabled { opacity: .55; }
 
+.conflict-save-floating-anchor { position: absolute; z-index: 6; right: 22px; bottom: 13px; }
+.conflict-save-floating-anchor > .conflict-save-floating { position: static; }
+
 .stage-section-header { min-height: 28px; padding: 0 6px; gap: 6px; }
 
 .stage-section-name { gap: 7px; }
@@ -1484,7 +1487,7 @@
 
 .conflict-section .stage-section-count { color: #faad14; background: color-mix(in srgb, #faad14 14%, transparent); }
 
-.conflict-file .stage-file-open { grid-template-columns: 17px 38px minmax(0, 1fr) auto; }
+.conflict-file .stage-file-open { grid-template-columns: 17px max-content minmax(0, 1fr) auto; }
 
 .conflict-file .stage-file-action.force-stage { color: #faad14; }
 
@@ -1498,7 +1501,7 @@
 
 .operation-page .conflict-navigation button:hover:not(:disabled) { color: var(--accent); border-color: transparent; background: var(--accent-dim); }
 
-.operation-page .conflict-navigation span { min-width: 32px; padding: 0 4px; color: var(--muted); font: 10px/1 var(--font-code); text-align: center; }
+.operation-page .conflict-navigation > span:not(.tooltip-disabled-anchor) { min-width: 32px; padding: 0 4px; color: var(--muted); font: 10px/1 var(--font-code); text-align: center; }
 
 .operation-page .conflict-editor-toolbar .icon-tool-button { width: 24px; height: 24px; border-color: var(--line); border-radius: 5px; color: var(--muted); background: var(--panel-2); }
 

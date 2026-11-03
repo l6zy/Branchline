@@ -1,1 +1,118 @@
-{}
+{
+  "panel": {
+    "title": "Diff",
+    "changedFiles": "变更文件",
+    "noFiles": "暂无变更文件",
+    "fullChange": "@@ 完整改动 @@",
+    "loading": "正在读取 Diff…",
+    "noTextDiff": "该文件没有可展示的文本差异"
+  },
+  "view": {
+    "tree": "树形视图",
+    "list": "列表视图",
+    "fullFile": "显示完整文件",
+    "changes": "仅显示改动",
+    "unified": "统一 Diff",
+    "split": "并排 Diff",
+    "exitWide": "退出宽屏 Diff",
+    "enterWide": "宽屏查看 Diff",
+    "close": "关闭 Diff"
+  },
+  "context": {
+    "label": "上下文",
+    "lines": "上下文行数",
+    "hint": "未修改行数",
+    "expand": "展开 {{count}} 行未修改源码",
+    "expand_one": "展开 {{count}} 行未修改源码",
+    "expand_other": "展开 {{count}} 行未修改源码",
+    "expandHint_one": "展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
+    "expandHint_other": "展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）"
+  },
+  "whitespace": {
+    "hide": "隐藏空白差异",
+    "show": "显示空白差异"
+  },
+  "navigation": {
+    "previousHint": "上一处改动（跨文件）",
+    "previous": "上一处改动",
+    "nextHint": "下一处改动（跨文件）",
+    "next": "下一处改动"
+  },
+  "search": {
+    "label": "搜索 Diff",
+    "hint": "搜索 Diff（Ctrl/Cmd+F）",
+    "noMatches": "无匹配",
+    "prompt": "输入关键词",
+    "previous": "上一个匹配",
+    "next": "下一个匹配",
+    "close": "关闭搜索",
+    "position": "{{current}} / {{total}}"
+  },
+  "font": {
+    "hint": "Diff 字体大小 · Ctrl/⌘ + 或 -",
+    "smaller": "缩小 Diff 字体",
+    "larger": "放大 Diff 字体",
+    "reset": "恢复默认字号 · Ctrl/⌘ 0",
+    "size": "{{size}}px"
+  },
+  "actions": {
+    "block": "修改块操作",
+    "restoreBlock": "还原此修改块",
+    "stageBlock": "暂存此修改块",
+    "unstageBlock": "取消暂存此修改块",
+    "stageLine": "暂存此行",
+    "restoreLine": "还原此行",
+    "unstageLine": "取消暂存此行",
+    "lineHint": "{{action}}（替换行包含对应的旧/新行；右键查看更多操作）",
+    "lineHistoryHint": "右键查看该行历史",
+    "lineHistory": "查看第 {{line}} 行历史",
+    "copyLine": "复制本行内容",
+    "label": "差异操作"
+  },
+  "scope": {
+    "block": "修改块",
+    "line": "单行"
+  },
+  "code": {
+    "old": "旧版本代码",
+    "new": "新版本代码",
+    "oldVersion": "旧版本",
+    "newVersion": "新版本"
+  },
+  "overview": {
+    "hint": "点击或拖拽跳转到对应差异位置",
+    "label": "Diff 差异位置"
+  },
+  "compare": {
+    "kind": {
+      "local": "本地",
+      "remote": "远程",
+      "commit": "提交"
+    },
+    "select": "请选择引用",
+    "search": "搜索分支或输入提交 Hash",
+    "useReference": "使用 “{{reference}}”",
+    "commitReference": "提交引用",
+    "noBranches": "没有匹配的分支",
+    "repositoryRequired": "Diff 比较需要先打开本地仓库",
+    "referencesRequired": "请选择用于比较的两个分支或提交",
+    "emptyTitle": "比较分支或提交",
+    "emptyDescription": "打开本地仓库后，可选择两个引用并查看完整 Diff。",
+    "eyebrow": "Diff 比较",
+    "title": "比较两个分支或提交",
+    "description": "直接比较两端提交快照，显示目标引用相对基础引用的全部变化。",
+    "loading": "正在比较…",
+    "start": "开始比较",
+    "base": "基础引用",
+    "target": "目标引用",
+    "swap": "交换比较方向",
+    "hintTitle": "选择引用后开始比较",
+    "hintDescription": "支持本地分支、远程分支以及仓库中的提交引用。",
+    "changedFiles": "变更文件",
+    "ahead": "领先提交",
+    "behind": "落后提交",
+    "identicalTitle": "两个引用没有文件差异",
+    "identicalSnapshot": "两端可能指向同一个提交或相同的文件快照。",
+    "identicalContent": "提交历史不同，但最终文件内容一致。"
+  }
+}

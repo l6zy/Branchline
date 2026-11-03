@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CircleHelp } from 'lucide-react'
 import { Button, type ButtonVariant } from './Button'
+import { renderMessage, type MessageContent } from '../i18n/messages'
+import { useAppTranslation } from '../i18n/useAppTranslation'
 
 export type ConfirmDialogOptions = {
-  title?: string
-  message: string
-  confirmLabel?: string
-  cancelLabel?: string
+  title?: MessageContent
+  message: MessageContent
+  confirmLabel?: MessageContent
+  cancelLabel?: MessageContent
   variant?: Exclude<ButtonVariant, 'icon'>
 }
 
 type ConfirmRequest = ConfirmDialogOptions & { id: number }
 
 export function ConfirmDialog({ request, onResolve }: { request: ConfirmRequest | null; onResolve: (result: boolean) => void }) {
+  const { t } = useAppTranslation()
   useEffect(() => {
     if (!request) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -30,12 +33,12 @@ export function ConfirmDialog({ request, onResolve }: { request: ConfirmRequest 
     <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={`confirm-dialog-title-${request.id}`} onPointerDown={(event) => event.stopPropagation()}>
       <div className={`confirm-dialog-icon ${destructive ? 'danger' : ''}`}>{destructive ? <AlertTriangle size={19}/> : <CircleHelp size={19}/>}</div>
       <div className="confirm-dialog-content">
-        <h2 id={`confirm-dialog-title-${request.id}`}>{request.title ?? (destructive ? '确认操作' : '请确认')}</h2>
-        <p>{request.message}</p>
+        <h2 id={`confirm-dialog-title-${request.id}`}>{request.title ? renderMessage(request.title, t) : t(destructive ? 'common:confirmDangerTitle' : 'common:confirmTitle')}</h2>
+        <p>{renderMessage(request.message, t)}</p>
       </div>
       <div className="confirm-dialog-actions">
-        <Button variant="secondary" onClick={() => onResolve(false)}>{request.cancelLabel ?? '取消'}</Button>
-        <Button variant={request.variant ?? 'primary'} onClick={() => onResolve(true)}>{request.confirmLabel ?? '确认'}</Button>
+        <Button variant="secondary" onClick={() => onResolve(false)}>{request.cancelLabel ? renderMessage(request.cancelLabel, t) : t('common:cancel')}</Button>
+        <Button variant={request.variant ?? 'primary'} onClick={() => onResolve(true)}>{request.confirmLabel ? renderMessage(request.confirmLabel, t) : t('common:confirm')}</Button>
       </div>
     </section>
   </div>

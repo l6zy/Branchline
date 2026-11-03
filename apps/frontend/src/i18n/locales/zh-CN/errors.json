@@ -106,8 +106,9 @@
     "resultRequired": "缺少待保存的合并结果",
     "strategyInvalid": "未知的冲突解决方式",
     "mergetoolRequired": "尚未配置 merge.tool，请先在 Git 配置中选择外部合并工具",
-    "remaining": "仍有 {{count}} 个文件未解决冲突",
-    "abortUnsupported": "当前冲突不是由可中止的 Git 操作产生"
+    "abortUnsupported": "当前冲突不是由可中止的 Git 操作产生",
+    "remaining_one": "仍有 {{count, number}} 个文件未解决冲突",
+    "remaining_other": "仍有 {{count, number}} 个文件未解决冲突"
   },
   "operation": {
     "mainlineRequired": "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号",

@@ -1,1 +1,118 @@
-{}
+{
+  "panel": {
+    "title": "Diff",
+    "changedFiles": "Changed files",
+    "noFiles": "No changed files",
+    "fullChange": "@@ Full changes @@",
+    "loading": "Loading diff…",
+    "noTextDiff": "This file has no text differences to display"
+  },
+  "view": {
+    "tree": "Tree view",
+    "list": "List view",
+    "fullFile": "Show full file",
+    "changes": "Show changes only",
+    "unified": "Unified diff",
+    "split": "Side-by-side diff",
+    "exitWide": "Exit wide diff",
+    "enterWide": "View wide diff",
+    "close": "Close diff"
+  },
+  "context": {
+    "label": "Context",
+    "lines": "Context lines",
+    "hint": "Unchanged context lines",
+    "expand": "Expand {{count}} unchanged line",
+    "expand_one": "Expand {{count}} unchanged line",
+    "expand_other": "Expand {{count}} unchanged lines",
+    "expandHint_one": "Expand {{count}} unchanged line ({{remaining}} remaining)",
+    "expandHint_other": "Expand {{count}} unchanged lines ({{remaining}} remaining)"
+  },
+  "whitespace": {
+    "hide": "Hide whitespace differences",
+    "show": "Show whitespace differences"
+  },
+  "navigation": {
+    "previousHint": "Previous change (across files)",
+    "previous": "Previous change",
+    "nextHint": "Next change (across files)",
+    "next": "Next change"
+  },
+  "search": {
+    "label": "Search diff",
+    "hint": "Search diff (Ctrl/Cmd+F)",
+    "noMatches": "No matches",
+    "prompt": "Enter a keyword",
+    "previous": "Previous match",
+    "next": "Next match",
+    "close": "Close search",
+    "position": "{{current}} / {{total}}"
+  },
+  "font": {
+    "hint": "Diff font size · Ctrl/⌘ + or -",
+    "smaller": "Decrease diff font size",
+    "larger": "Increase diff font size",
+    "reset": "Reset font size · Ctrl/⌘ 0",
+    "size": "{{size}}px"
+  },
+  "actions": {
+    "block": "Change block actions",
+    "restoreBlock": "Restore this change block",
+    "stageBlock": "Stage this change block",
+    "unstageBlock": "Unstage this change block",
+    "stageLine": "Stage this line",
+    "restoreLine": "Restore this line",
+    "unstageLine": "Unstage this line",
+    "lineHint": "{{action}} (replacements include the corresponding old/new line; right-click for more actions)",
+    "lineHistoryHint": "Right-click to view line history",
+    "lineHistory": "View history for line {{line}}",
+    "copyLine": "Copy line content",
+    "label": "Diff actions"
+  },
+  "scope": {
+    "block": "change block",
+    "line": "line"
+  },
+  "code": {
+    "old": "Old version code",
+    "new": "New version code",
+    "oldVersion": "Old version",
+    "newVersion": "New version"
+  },
+  "overview": {
+    "hint": "Click or drag to jump to a difference",
+    "label": "Diff change locations"
+  },
+  "compare": {
+    "kind": {
+      "local": "Local",
+      "remote": "Remote",
+      "commit": "Commit"
+    },
+    "select": "Select a reference",
+    "search": "Search branches or enter a commit hash",
+    "useReference": "Use “{{reference}}”",
+    "commitReference": "Commit reference",
+    "noBranches": "No matching branches",
+    "repositoryRequired": "Open a local repository to compare changes",
+    "referencesRequired": "Select two branches or commits to compare",
+    "emptyTitle": "Compare branches or commits",
+    "emptyDescription": "Open a local repository to select two references and view their full diff.",
+    "eyebrow": "Diff comparison",
+    "title": "Compare two branches or commits",
+    "description": "Compare commit snapshots to see all changes in the target reference relative to the base.",
+    "loading": "Comparing…",
+    "start": "Start comparison",
+    "base": "Base reference",
+    "target": "Target reference",
+    "swap": "Swap comparison direction",
+    "hintTitle": "Select references to start comparing",
+    "hintDescription": "Supports local branches, remote branches, and commit references in this repository.",
+    "changedFiles": "Changed files",
+    "ahead": "Commits ahead",
+    "behind": "Commits behind",
+    "identicalTitle": "No file differences between these references",
+    "identicalSnapshot": "Both references may point to the same commit or file snapshot.",
+    "identicalContent": "The commit histories differ, but the final file contents are identical."
+  }
+}

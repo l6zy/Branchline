@@ -1,17 +1,18 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown } from 'lucide-react'
+import { Tooltip } from './tooltip'
 
 type CompactSelectValue = string | number
 export type CompactSelectOption<T extends CompactSelectValue> = { value: T; label: string }
 type CompactSelectProps<T extends CompactSelectValue> = {
   value: T; options: CompactSelectOption<T>[]; onChange: (value: T) => void
-  ariaLabel: string; className?: string; disabled?: boolean; title?: string
+  ariaLabel: string; className?: string; disabled?: boolean; tooltip?: string
 }
 export function compactSelectOptionClassName(selected: boolean) {
   return ['compact-select-option', selected && 'selected'].filter(Boolean).join(' ')
 }
-export function CompactSelect<T extends CompactSelectValue>({ value, options, onChange, ariaLabel, className, disabled = false, title }: CompactSelectProps<T>) {
+export function CompactSelect<T extends CompactSelectValue>({ value, options, onChange, ariaLabel, className, disabled = false, tooltip }: CompactSelectProps<T>) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
@@ -30,7 +31,7 @@ export function CompactSelect<T extends CompactSelectValue>({ value, options, on
     return () => document.removeEventListener('pointerdown', outside)
   }, [open])
   useEffect(() => { if (disabled) setOpen(false) }, [disabled])
-  return <div ref={rootRef} className={['compact-select', open && 'open', className].filter(Boolean).join(' ')} onKeyDown={(event) => {
+  return <div ref={rootRef} className={['compact-select', open && 'open', className].filter(Boolean).join(' ')} data-tooltip-escape-delegate={open ? '' : undefined} onKeyDown={(event) => {
     if (disabled) return
     if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); close() }
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
@@ -40,15 +41,15 @@ export function CompactSelect<T extends CompactSelectValue>({ value, options, on
     }
     if (event.key === 'Tab') setOpen(false)
   }}>
-    <button ref={triggerRef} type="button" className="compact-select-trigger" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-label={ariaLabel} disabled={disabled} title={title ?? selected?.label} onClick={() => open ? close() : begin()}>
+    <Tooltip content={tooltip ?? selected?.label} disabledAnchorStyle={{ width: '100%' }}><button ref={triggerRef} type="button" className="compact-select-trigger" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} aria-label={ariaLabel} disabled={disabled} onClick={() => open ? close() : begin()}>
       <span>{selected?.label ?? t('select')}</span><ChevronDown size={14}/>
-    </button>
+    </button></Tooltip>
     {open && <div id={listId} className="compact-select-popover" role="listbox" aria-label={ariaLabel}>
       {options.map((option, index) => {
         const isSelected = option.value === value
-        return <button ref={element => { optionRefs.current[index] = element }} tabIndex={-1} type="button" key={String(option.value)} role="option" aria-selected={isSelected} className={compactSelectOptionClassName(isSelected)} title={option.label} onClick={() => { onChange(option.value); close() }}>
+        return <Tooltip content={option.label} key={String(option.value)}><button ref={element => { optionRefs.current[index] = element }} tabIndex={-1} type="button" role="option" aria-selected={isSelected} className={compactSelectOptionClassName(isSelected)} onClick={() => { onChange(option.value); close() }}>
           <span>{option.label}</span>{isSelected && <Check size={14}/>}
-        </button>
+        </button></Tooltip>
       })}
     </div>}
   </div>

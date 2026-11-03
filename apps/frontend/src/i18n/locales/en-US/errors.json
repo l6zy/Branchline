@@ -106,8 +106,9 @@
     "resultRequired": "A merge result is required",
     "strategyInvalid": "Unknown conflict resolution strategy",
     "mergetoolRequired": "Choose an external merge tool in Git settings first (merge.tool)",
-    "remaining": "{{count}} files still have unresolved conflicts",
-    "abortUnsupported": "These conflicts were not created by an abortable Git operation"
+    "abortUnsupported": "These conflicts were not created by an abortable Git operation",
+    "remaining_one": "{{count, number}} file still has conflicts",
+    "remaining_other": "{{count, number}} files still have conflicts"
   },
   "operation": {
     "mainlineRequired": "Select a mainline parent (-m) between 1 and the number of parents",

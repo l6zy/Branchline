@@ -116,7 +116,7 @@ describe('semantic style architecture', () => {
     expect(components).toContain('.diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: var(--diff-line-number-width, 5ch) 26px')
     expect(features).toContain('.diff-block-actions { position: absolute;')
     expect(features).toContain('flex-direction: column; align-items: center; overflow: hidden;')
-    expect(features).toContain('.diff-block-actions > button { position: static; width: 24px; height: 20px;')
+    expect(features).toContain('.diff-block-actions > button, .diff-block-action-anchor > button { position: static; width: 24px; height: 20px;')
     expect(diffPanel).toContain('className={`split-code-side')
     expect(diffPanel).toContain('style={{ height: virtualRowHeight }}')
     expect(components).toContain('.line-action-add:hover, .line-action-add:focus-visible')
@@ -124,13 +124,13 @@ describe('semantic style architecture', () => {
   })
 
   it('allows committer and branch filters to select multiple values', () => {
-    expect(app).toContain('提交人（可多选）')
-    expect(app).toContain('按分支筛选（可多选）')
+    expect(app).toContain('history:app.columns.filterCommitters')
+    expect(app).toContain('history:app.filters.branchHeading')
     expect(app).toContain('committerName(commit)')
     expect(app).toContain('checked={branchFilter.includes(branch)}')
     expect(app).toContain('committerColumnVisible ? `${widths.author}px` : \'\'')
     expect(app).toMatch(/message-label[^\n]*\{committerFilterButton\}/)
-    expect(app).toMatch(/const committerFilterButton = .*aria-label="筛选提交人"/)
+    expect(app).toMatch(/const committerFilterButton = .*aria-label=\{t\('history:app.columns.filterCommitter'\)\}/)
   })
 
   it('places the diff close control at the far end of the toolbar', () => {

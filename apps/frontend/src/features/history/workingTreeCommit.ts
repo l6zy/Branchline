@@ -36,17 +36,17 @@ export function resolveWorkingTreeParent(repository: WorkingTreeRepository) {
 export function createWorkingTreeCommit(files: RepositoryFile[], headHash: string | undefined, operation: RepositoryOperationState | undefined, t: AppTranslator): WorkingTreeCommit | null {
   if (!files.length && !operation) return null
   const title = operation
-    ? `${operationLabel(operation.kind, t)}：${operation.conflicts.length ? '冲突待处理' : '待处理'}`
-    : '未提交的修改'
-  const author = operation ? 'Git 操作' : '工作区'
+    ? t('history:workingTree.operationTitle', { operation: operationLabel(operation.kind, t), status: operation.conflicts.length ? t('history:workingTree.conflicts') : t('history:workingTree.pending') })
+    : t('history:workingTree.title')
+  const author = operation ? t('history:workingTree.operationAuthor') : t('history:workingTree.author')
   return {
     id: WORKING_TREE_COMMIT_ID,
     lane: 0,
     color: '#faad14',
     title,
     message: operation
-      ? `${operationLabel(operation.kind, t)}仍在进行中，请在操作面板中继续、跳过或中止。`
-      : `当前工作区有 ${files.length} 个未提交文件，这些修改尚未写入 Git 历史。`,
+      ? t('history:workingTree.operationDescription', { operation: operationLabel(operation.kind, t) })
+      : t('history:workingTree.description', { count: files.length }),
     author,
     avatar: operation ? 'OP' : 'WT',
     time: new Date().toISOString(),

@@ -5,7 +5,9 @@ export type RepositorySwitchTarget = {
   id: string
   label: string
   path: string
-  kind: string
+  kind: RepositorySwitchSource
+  branch?: string
+  status?: string
   source: RepositorySwitchSource
   navigation: RepositorySwitchNavigation
   pinned: boolean
@@ -69,15 +71,15 @@ export function buildRepositorySwitchTargets(
   }
 
   if (repository) {
-    add({ label: repository.name, path: repository.path, kind: `当前仓库 · ${repository.branch}`, source: 'current', navigation: 'current' })
-    repository.submodules.forEach((submodule) => add({ label: submodule.path, path: joinedRepositoryPath(repository.path, submodule.path), kind: `Submodule · ${submodule.status}`, source: 'submodule', navigation: 'submodule' }))
+    add({ label: repository.name, path: repository.path, kind: 'current', branch: repository.branch, source: 'current', navigation: 'current' })
+    repository.submodules.forEach((submodule) => add({ label: submodule.path, path: joinedRepositoryPath(repository.path, submodule.path), kind: 'submodule', status: submodule.status, source: 'submodule', navigation: 'submodule' }))
     repository.worktrees
       .filter((worktree) => normalizedRepositoryTargetPath(worktree.path) !== normalizedRepositoryTargetPath(repository.path))
-      .forEach((worktree) => add({ label: pathLabel(worktree.path), path: worktree.path, kind: `Worktree · ${worktree.branch ?? 'Detached'}`, source: 'worktree', navigation: 'worktree' }))
+      .forEach((worktree) => add({ label: pathLabel(worktree.path), path: worktree.path, kind: 'worktree', branch: worktree.branch, source: 'worktree', navigation: 'worktree' }))
   }
 
-  favorites.forEach((favorite) => add({ label: favorite.name, path: favorite.path, kind: '收藏仓库', source: 'pinned', navigation: 'repository' }))
-  recentRepositories.forEach((recent) => add({ label: recent.name, path: recent.path, kind: `最近仓库 · ${recent.branch}`, source: 'recent', navigation: 'repository' }))
+  favorites.forEach((favorite) => add({ label: favorite.name, path: favorite.path, kind: 'pinned', source: 'pinned', navigation: 'repository' }))
+  recentRepositories.forEach((recent) => add({ label: recent.name, path: recent.path, kind: 'recent', branch: recent.branch, source: 'recent', navigation: 'repository' }))
   return targets
 }
 
@@ -94,7 +96,7 @@ export function filterRepositoryTargets(targets: RepositorySwitchTarget[], query
   const tokens = searchableRepositoryText(query).split(' ').filter(Boolean)
   if (!tokens.length) return targets
   return targets.filter((target) => {
-    const searchable = searchableRepositoryText(`${target.label} ${target.path} ${target.kind}`)
+    const searchable = searchableRepositoryText(`${target.label} ${target.path} ${target.kind} ${target.branch ?? ''} ${target.status ?? ''}`)
     return tokens.every((token) => searchable.includes(token))
   })
 }

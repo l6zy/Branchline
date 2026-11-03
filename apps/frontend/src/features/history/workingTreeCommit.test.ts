@@ -9,6 +9,17 @@ const translator = (await createAppI18n('zh-CN')).t
 const createWorkingTreeCommit = (files: RepositoryFile[], head?: string, operation?: RepositoryOperationState) => workingTree.createWorkingTreeCommit(files, head, operation, translator)
 
 describe('working tree history commit', () => {
+  it('localizes synthetic node descriptions and plural file counts without changing identity', async () => {
+    const en = await createAppI18n('en-US')
+    const commit = workingTree.createWorkingTreeCommit([{ path: '中文.txt', type: 'M', add: 1, del: 0 }], 'raw-head', undefined, en.t)
+    expect(commit).toMatchObject({ id: WORKING_TREE_COMMIT_ID, parent: 'raw-head', title: 'Uncommitted changes', author: 'Working tree', message: 'The working tree has 1 uncommitted file. These changes are not yet in Git history.' })
+  })
+
+  it('formats large synthetic file counts through Intl', async () => {
+    const en = await createAppI18n('en-US')
+    const files = Array.from({ length: 1000 }, (_, index) => ({ path: `${index}.txt`, type: 'M', add: 1, del: 0 }))
+    expect(workingTree.createWorkingTreeCommit(files, 'raw-head', undefined, en.t)?.message).toBe('The working tree has 1,000 uncommitted files. These changes are not yet in Git history.')
+  })
   it('does not create a history node for a clean working tree', () => {
     expect(createWorkingTreeCommit([], 'abc1234')).toBeNull()
   })

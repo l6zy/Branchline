@@ -14,22 +14,22 @@ describe('commit inspector controls', () => {
 
   it('renders parent hashes as navigation buttons', () => {
     expect(details).toContain('onOpenParent(parent)')
-    expect(details).toContain('跳转到父提交')
+    expect(details).toContain('history:app.details.jumpParent')
   })
 
   it('adds an all-files view while preserving the existing list and tree views', () => {
     expect(files).toContain("usePersistentState('branchline.changedFilesMode.v1', 'list', isFileMode)")
-    expect(files).toContain('显示全部文件')
+    expect(files).toContain('history:app.files.showAll')
     expect(files).toContain('segmented compact-segmented icon-segmented')
-    expect(files).toContain('title="列表视图"')
-    expect(files).toContain('title="树形视图"')
+    expect(files).toContain("content={t('history:app.files.list')}")
+    expect(files).toContain("content={t('history:app.files.tree')}")
     expect(files).toContain("mode={fileMode === 'list' ? 'list' : 'tree'}")
     expect(files).toContain("changedPaths={fileMode === 'all' ? changedPaths : undefined}")
     expect(files).toContain('buildCommitFileTree(treePaths, files, true)')
     expect(files).toContain('changeIndex')
     expect(files).toContain('treeError')
     expect(files).toContain('filterCommitFilesByPath(displayFiles, fileQuery)')
-    expect(files).toContain('aria-label="筛选提交文件"')
+    expect(files).toContain("aria-label={t('history:app.files.filter')}")
     expect(files).toContain('activeCommitFileIndex(filteredFiles, activeFilePath)')
     expect(files).toContain('files={filteredFiles} activeFile={activeFilteredFile}')
     expect(files).toContain('files.indexOf(file)')

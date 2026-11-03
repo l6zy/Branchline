@@ -1,3 +1,5 @@
+import { Tooltip } from '../../components/tooltip'
+import { useAppTranslation, type AppTranslator } from '../../i18n/useAppTranslation'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, Search, Save, X } from 'lucide-react'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -47,6 +49,7 @@ type ConflictDecorationPayload = {
   onResolve: (index: number, strategy: ResolutionStrategy) => void
   searchMatches: SearchMatch[]
   activeSearchMatch: number
+  t: AppTranslator
 }
 
 const setConflictDecorations = StateEffect.define<ConflictDecorationPayload>()
@@ -57,19 +60,20 @@ class ConflictActionsWidget extends WidgetType {
     private readonly active: boolean,
     private readonly disabled: boolean,
     private readonly onResolve: (index: number, strategy: ResolutionStrategy) => void,
+    private readonly t: AppTranslator,
   ) { super() }
 
   eq(other: ConflictActionsWidget) {
-    return this.index === other.index && this.active === other.active && this.disabled === other.disabled
+    return this.index === other.index && this.active === other.active && this.disabled === other.disabled && this.t === other.t
   }
 
   toDOM() {
     const root = document.createElement('div')
     root.className = `cm-conflict-actions${this.active ? ' active' : ''}`
     const actions: Array<[ResolutionStrategy, string]> = [
-      ['current', '采用当前更改'],
-      ['incoming', '采用传入的更改'],
-      ['both', '保留双方更改'],
+      ['current', this.t('operations:resolution.current')],
+      ['incoming', this.t('operations:resolution.incoming')],
+      ['both', this.t('operations:resolution.both')],
     ]
     for (const [strategy, label] of actions) {
       const button = document.createElement('button')
@@ -107,7 +111,7 @@ function conflictDecorations(doc: EditorState['doc'], payload: ConflictDecoratio
       return Array.from({ length: last - first + 1 }, (_, index) => Decoration.line({ class: className }).range(doc.line(first + index).from))
     }
     return [
-      Decoration.widget({ widget: new ConflictActionsWidget(block.index, active, payload.disabled, payload.onResolve), block: true, side: -1 }).range(from),
+      Decoration.widget({ widget: new ConflictActionsWidget(block.index, active, payload.disabled, payload.onResolve, payload.t), block: true, side: -1 }).range(from),
       ...lineRanges(from, separatorStart, `cm-conflict-current${active ? ' cm-conflict-active' : ''}`),
       ...lineRanges(separatorStart, separatorEnd, 'cm-conflict-separator'),
       ...lineRanges(separatorEnd, to, `cm-conflict-incoming${active ? ' cm-conflict-active' : ''}`),
@@ -195,6 +199,7 @@ async function languageForPath(path: string): Promise<Extension> {
 }
 
 export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictCodeEditorProps>(function ConflictCodeEditor({ value, filePath, blocks, activeBlock, resolvedRanges = [], disabled = false, onChange, onResolveBlock, onSave, saveLabel }, ref) {
+  const { t } = useAppTranslation()
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
@@ -202,6 +207,7 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
   const languageCompartment = useRef(new Compartment())
   const languageRequest = useRef(0)
   const editableCompartment = useRef(new Compartment())
+  const localeCompartment = useRef(new Compartment())
   const previousResolvedRanges = useRef<Array<{ from: number; to: number }> | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -234,6 +240,7 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
           conflictDecorationField,
           languageCompartment.current.of([]),
           editableCompartment.current.of(EditorView.editable.of(!disabled)),
+          localeCompartment.current.of([]),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) onChangeRef.current(update.state.doc.toString())
           }),
@@ -282,6 +289,17 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
     view.dispatch({ effects: editableCompartment.current.reconfigure(EditorView.editable.of(!disabled)) })
   }, [disabled])
 
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: localeCompartment.current.reconfigure([
+      EditorView.contentAttributes.of({ 'aria-label': t('operations:editor.content') }),
+      EditorState.phrases.of({
+        'Control character': t('operations:editor.controlCharacter'),
+        'Selection deleted': t('operations:editor.selectionDeleted'),
+        close: t('operations:close'),
+      }),
+    ]) })
+  }, [t])
+
   const searchMatches = useMemo<SearchMatch[]>(() => {
     const query = searchQuery
     if (!query) return []
@@ -318,11 +336,11 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
     if (!view) return
     const shouldScrollToResolved = previousResolvedRanges.current !== resolvedRanges && resolvedRanges.length > 0
     previousResolvedRanges.current = resolvedRanges
-    const decorationEffect = setConflictDecorations.of({ blocks, activeBlock, resolvedRanges, disabled, searchMatches, activeSearchMatch, onResolve: (index, strategy) => onResolveRef.current(index, strategy) })
+    const decorationEffect = setConflictDecorations.of({ blocks, activeBlock, resolvedRanges, disabled, searchMatches, activeSearchMatch, t, onResolve: (index, strategy) => onResolveRef.current(index, strategy) })
     view.dispatch({ effects: shouldScrollToResolved
       ? [decorationEffect, EditorView.scrollIntoView(Math.min(resolvedRanges[resolvedRanges.length - 1].from, view.state.doc.length), { y: 'nearest', yMargin: 52 })]
       : decorationEffect })
-  }, [activeBlock, blocks, disabled, resolvedRanges, searchMatches, activeSearchMatch])
+  }, [activeBlock, blocks, disabled, resolvedRanges, searchMatches, activeSearchMatch, t])
 
   const jumpSearch = (direction: -1 | 1) => {
     if (!searchMatches.length) return
@@ -364,12 +382,12 @@ export const ConflictCodeEditor = forwardRef<ConflictCodeEditorHandle, ConflictC
 
   return <div className="conflict-code-editor">
     <div className="conflict-code-editor-host" ref={hostRef}/>
-    {searchOpen && <div className="conflict-search-bar" role="search"><Search size={14}/><input ref={searchInputRef} value={searchQuery} onChange={(event) => updateSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); jumpSearch(event.shiftKey ? -1 : 1) } if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) } }} placeholder="搜索当前文件" aria-label="搜索当前冲突文件"/><span className="conflict-search-count">{searchQuery ? (searchMatches.length ? `${activeSearchMatch + 1} / ${searchMatches.length}` : '无匹配') : '输入关键词'}</span><button type="button" onClick={() => jumpSearch(-1)} disabled={!searchMatches.length} title="上一个匹配"><ChevronUp size={14}/></button><button type="button" onClick={() => jumpSearch(1)} disabled={!searchMatches.length} title="下一个匹配"><ChevronDown size={14}/></button><button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }} title="关闭搜索" aria-label="关闭搜索"><X size={14}/></button></div>}
-    {!searchOpen && <button type="button" className="conflict-search-trigger" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }} title="搜索当前文件（Ctrl/Cmd+F）" aria-label="搜索当前文件"><Search size={15}/></button>}
-    <div className="conflict-overview" onPointerDown={beginOverviewDrag} onPointerMove={moveOverviewDrag} onPointerUp={endOverviewDrag} onPointerCancel={endOverviewDrag} title="点击或拖拽跳转到对应位置">
+    {searchOpen && <div className="conflict-search-bar" role="search"><Search size={14}/><input ref={searchInputRef} value={searchQuery} onChange={(event) => updateSearchQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); jumpSearch(event.shiftKey ? -1 : 1) } if (event.key === 'Escape') { event.preventDefault(); setSearchOpen(false) } }} placeholder={t('operations:editor.searchPlaceholder')} aria-label={t('operations:editor.searchLabel')}/><span className="conflict-search-count">{searchQuery ? (searchMatches.length ? `${activeSearchMatch + 1} / ${searchMatches.length}` : t('operations:editor.noMatch')) : t('operations:editor.enterQuery')}</span><Tooltip content={t('operations:editor.previousMatch')}><button type="button" onClick={() => jumpSearch(-1)} disabled={!searchMatches.length} aria-label={t('operations:editor.previousMatch')}><ChevronUp size={14}/></button></Tooltip><Tooltip content={t('operations:editor.nextMatch')}><button type="button" onClick={() => jumpSearch(1)} disabled={!searchMatches.length} aria-label={t('operations:editor.nextMatch')}><ChevronDown size={14}/></button></Tooltip><Tooltip content={t('operations:editor.closeSearch')}><button type="button" onClick={() => { setSearchOpen(false); setSearchQuery('') }}  aria-label={t('operations:editor.closeSearch')}><X size={14}/></button></Tooltip></div>}
+    {!searchOpen && <Tooltip content={t('operations:editor.searchHint')}><button type="button" className="conflict-search-trigger" onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }}  aria-label={t('operations:editor.searchPlaceholder')}><Search size={15}/></button></Tooltip>}
+    <Tooltip content={t('operations:editor.overviewHint')}><div className="conflict-overview" onPointerDown={beginOverviewDrag} onPointerMove={moveOverviewDrag} onPointerUp={endOverviewDrag} onPointerCancel={endOverviewDrag} >
       {blocks.map((block) => <span className={`current${block.index === activeBlock ? ' active' : ''}`} key={`current-${block.index}`} style={overviewStyle(block.offset, block.currentEnd)}/>)}
       {blocks.map((block) => <span className={`incoming${block.index === activeBlock ? ' active' : ''}`} key={`incoming-${block.index}`} style={overviewStyle(block.separatorEnd, block.endOffset)}/>)}
-    </div>
-    <Button variant="primary" className="conflict-save-floating" type="button" onClick={onSave} disabled={disabled} title="保存合并结果"><Save size={14}/>{saveLabel}</Button>
+    </div></Tooltip>
+    <Button variant="primary" className="conflict-save-floating" disabledAnchorClassName="conflict-save-floating-anchor" type="button" onClick={onSave} disabled={disabled} tooltip={t('operations:editor.saveHint')}><Save size={14}/>{saveLabel}</Button>
   </div>
 })

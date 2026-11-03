@@ -2,6 +2,8 @@
   "appName": "Branchline",
   "cancel": "取消",
   "confirm": "确认",
+  "confirmTitle": "请确认",
+  "confirmDangerTitle": "确认操作",
   "select": "请选择",
   "fileCount_one": "{{count}} 个文件",
   "fileCount_other": "{{count}} 个文件"

@@ -1,6 +1,12 @@
-import { renderToStaticMarkup } from 'react-dom/server'
+import { renderToStaticMarkup as renderMarkup } from 'react-dom/server'
+import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createAppI18n } from '../../i18n'
 import { DiffPanel } from './DiffPanel'
+import { TooltipProvider } from '../../components/tooltip'
+
+await createAppI18n('zh-CN')
+const renderToStaticMarkup = (ui: ReactElement) => renderMarkup(<TooltipProvider>{ui}</TooltipProvider>)
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -47,7 +53,8 @@ describe('diff patch actions', () => {
       expect(omissions).toHaveLength(view === 'unified' ? 2 : 4)
       omissions.forEach((button) => expect(button).toContain('height:39px'))
       expect(html).toContain('aria-label="展开 20 行未修改源码"')
-      expect(html).toMatch(/aria-label="展开 20 行未修改源码"[^>]*title="展开 20 行未修改源码（剩余 \d+ 行）"><svg/)
+      expect(omissions.every((button) => button.includes('data-tooltip-trigger='))).toBe(true)
+      expect(html).not.toMatch(/\btitle=/)
       expect(html).not.toContain('>展开 20 行未修改源码')
       if (view === 'split') expect(html).toMatch(/split-action-row" style="height:39px"/)
     })

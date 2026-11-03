@@ -1,0 +1,21 @@
+.tooltip-disabled-anchor { display: inline-flex; min-width: 0; vertical-align: middle; }
+.tooltip-disabled-anchor > :disabled { pointer-events: none; }
+.tooltip-positioner { z-index: 1400; width: max-content; max-width: min(320px, calc(100vw - 16px)); }
+.branchline-tooltip {
+  box-sizing: border-box;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #242424;
+  color: #fff;
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 0 3px 12px #0004;
+}
+@media (prefers-reduced-motion: reduce) {
+  .branchline-tooltip { transition: none !important; }
+}

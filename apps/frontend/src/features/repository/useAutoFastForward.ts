@@ -1,3 +1,4 @@
+import { errorMessage, message, type MessageContent } from '../../i18n/messages'
 import { useEffect, useRef, useState } from 'react'
 import { fastForwardRepositoryBranch, type RepositorySnapshot } from '../../repository'
 import { getAutoFastForwardBranches } from './branchSwitch'
@@ -9,7 +10,7 @@ type Options = {
   fetchCompletion: { snapshot: RepositorySnapshot } | null
   busy: boolean
   onSnapshot: (snapshot: RepositorySnapshot) => void
-  onNotice: (message: string) => void
+  onNotice: (message: MessageContent) => void
   onBranchPulling: (branch: string, pulling: boolean) => void
   onRunningChange: (branch: string | null) => void
 }
@@ -62,7 +63,7 @@ export function useAutoFastForward(options: Options) {
             snapshot = updated
             latest.current.onSnapshot(updated)
           } catch (error) {
-            if (stillActive()) current.onNotice(`自动快进 ${branch} 失败：${error instanceof Error ? error.message : String(error)}`)
+            if (stillActive()) current.onNotice(message('repository:workspace.autoFastForwardFailed', { branch, error: errorMessage(error) }))
           } finally {
             current.onBranchPulling(branch, false)
           }

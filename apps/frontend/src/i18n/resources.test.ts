@@ -15,7 +15,7 @@ describe('bundled resources', () => {
       const en = leaves(resources['en-US'][namespace as keyof typeof resources['en-US']])
       expect(Object.keys(en).sort(), namespace).toEqual(Object.keys(zh).sort())
       for (const key of Object.keys(zh)) {
-        const params = (text: string) => [...text.matchAll(/{{\s*([\w]+)\s*}}/g)].map(match => match[1]).sort()
+        const params = (text: string) => [...text.matchAll(/{{\s*([\w]+)(?:\s*,[^}]+)?\s*}}/g)].map(match => match[1]).sort()
         expect(params(en[key]), namespace + ':' + key).toEqual(params(zh[key]))
         expect(en[key].trim()).not.toBe('')
       }

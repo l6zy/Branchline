@@ -1,28 +1,29 @@
+use crate::errors::ApplicationError;
 use crate::models::{
-    BlameLine, CommandLogEntry, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig, MergeCandidate,
-    MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommit,
+    BlameLine, CommandLogEntry, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig,
+    MergeCandidate, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommit,
     RepositoryCommitStats, RepositoryCommitTemplate, RepositoryComparison, RepositoryFile,
     RepositoryOperationState, RepositoryOperationStep, RepositorySnapshot, RepositoryStash,
     RepositorySubmodule, RepositoryWorktree,
 };
+use std::sync::{Mutex, OnceLock};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     fs,
     hash::{Hash, Hasher},
-    path::{Path, PathBuf},
     io::Write,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use std::sync::{Mutex, OnceLock};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 const LANE_COLORS: [&str; 12] = [
-    "#36cfc9", "#9254de", "#fa8c16", "#52c41a", "#f759ab", "#597ef7", "#13c2c2", "#eb2f96", "#d4b106",
-    "#389e0d", "#2f54eb", "#cf1322",
+    "#36cfc9", "#9254de", "#fa8c16", "#52c41a", "#f759ab", "#597ef7", "#13c2c2", "#eb2f96",
+    "#d4b106", "#389e0d", "#2f54eb", "#cf1322",
 ];
 
 static COMMAND_LOGS: OnceLock<Mutex<Vec<CommandLogEntry>>> = OnceLock::new();
@@ -33,7 +34,10 @@ fn command_logs() -> &'static Mutex<Vec<CommandLogEntry>> {
 }
 
 fn next_command_log_id() -> u64 {
-    let mut id = COMMAND_LOG_ID.get_or_init(|| Mutex::new(0)).lock().expect("command log id lock");
+    let mut id = COMMAND_LOG_ID
+        .get_or_init(|| Mutex::new(0))
+        .lock()
+        .expect("command log id lock");
     *id += 1;
     *id
 }
@@ -44,10 +48,15 @@ fn redact_log_urls(value: &str) -> String {
     while let Some(scheme_end) = remaining.find("://") {
         let authority_start = scheme_end + 3;
         let url_end = remaining[authority_start..]
-            .find(|character: char| character.is_whitespace() || matches!(character, '\'' | '"' | '<' | '>'))
-            .map(|index| authority_start + index).unwrap_or(remaining.len());
-        let authority_end = remaining[authority_start..url_end].find(['/', '?', '#'])
-            .map(|index| authority_start + index).unwrap_or(url_end);
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, '\'' | '"' | '<' | '>')
+            })
+            .map(|index| authority_start + index)
+            .unwrap_or(remaining.len());
+        let authority_end = remaining[authority_start..url_end]
+            .find(['/', '?', '#'])
+            .map(|index| authority_start + index)
+            .unwrap_or(url_end);
         result.push_str(&remaining[..authority_start]);
         let authority = &remaining[authority_start..authority_end];
         if let Some(at) = authority.rfind('@') {
@@ -71,21 +80,37 @@ fn redact_log_urls(value: &str) -> String {
 
 fn sanitize_command(args: &[String]) -> String {
     let mut redact_next = false;
-    args.iter().map(|part| {
-        let value = if redact_next { "[redacted]".to_string() } else {
-            let safe = redact_log_urls(part);
-            let shortened: String = safe.chars().take(180).collect();
-            if shortened.chars().count() < safe.chars().count() { format!("{shortened}…") } else { shortened }
-        };
-        redact_next = matches!(part.as_str(), "-m" | "--message" | "user.email" | "user.name");
-        value
-    }).collect::<Vec<_>>().join(" ")
+    args.iter()
+        .map(|part| {
+            let value = if redact_next {
+                "[redacted]".to_string()
+            } else {
+                let safe = redact_log_urls(part);
+                let shortened: String = safe.chars().take(180).collect();
+                if shortened.chars().count() < safe.chars().count() {
+                    format!("{shortened}…")
+                } else {
+                    shortened
+                }
+            };
+            redact_next = matches!(
+                part.as_str(),
+                "-m" | "--message" | "user.email" | "user.name"
+            );
+            value
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn limit_log_output(value: String) -> String {
     let value = redact_log_urls(&value);
     let shortened: String = value.chars().take(20_000).collect();
-    if shortened.chars().count() < value.chars().count() { format!("{shortened}\n… 输出已截断") } else { shortened }
+    if shortened.chars().count() < value.chars().count() {
+        format!("{shortened}\n…")
+    } else {
+        shortened
+    }
 }
 
 #[cfg(test)]
@@ -96,24 +121,41 @@ mod command_log_redaction_tests {
     fn hides_url_credentials_and_queries_in_commands_and_output() {
         let source = "https://user:secret@example.com/team/repo.git?token=private";
         let command = sanitize_command(&["clone".into(), source.into()]);
-        let output = limit_log_output(format!("Cloning {source}\nssh://git@example.com/team/repo.git"));
+        let output = limit_log_output(format!(
+            "Cloning {source}\nssh://git@example.com/team/repo.git"
+        ));
         for value in [command, output] {
             assert!(!value.contains("secret"));
             assert!(!value.contains("private"));
             assert!(value.contains("example.com/team/repo.git"));
         }
-        assert_eq!(limit_log_output("plain output\nhttps://example.com/repo.git".into()), "plain output\nhttps://example.com/repo.git");
+        assert_eq!(
+            limit_log_output("plain output\nhttps://example.com/repo.git".into()),
+            "plain output\nhttps://example.com/repo.git"
+        );
     }
 }
 
-fn record_command(path: &Path, args: &[String], output: &std::process::Output, started: SystemTime) {
+fn record_command(
+    path: &Path,
+    args: &[String],
+    output: &std::process::Output,
+    started: SystemTime,
+) {
     let stdout = limit_log_output(String::from_utf8_lossy(&output.stdout).trim().to_string());
     let stderr = limit_log_output(String::from_utf8_lossy(&output.stderr).trim().to_string());
     let entry = CommandLogEntry {
         id: next_command_log_id(),
-        started_at: started.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),
+        started_at: started
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
         duration_ms: started.elapsed().unwrap_or(Duration::ZERO).as_millis(),
-        command: if path.as_os_str().is_empty() { format!("git {}", sanitize_command(args)) } else { format!("git -C {} {}", path.display(), sanitize_command(args)) },
+        command: if path.as_os_str().is_empty() {
+            format!("git {}", sanitize_command(args))
+        } else {
+            format!("git -C {} {}", path.display(), sanitize_command(args))
+        },
         working_directory: path.to_string_lossy().to_string(),
         success: output.status.success(),
         exit_code: output.status.code(),
@@ -122,24 +164,35 @@ fn record_command(path: &Path, args: &[String], output: &std::process::Output, s
     };
     if let Ok(mut logs) = command_logs().lock() {
         logs.push(entry);
-        if logs.len() > 500 { let excess = logs.len() - 500; logs.drain(0..excess); }
+        if logs.len() > 500 {
+            let excess = logs.len() - 500;
+            logs.drain(0..excess);
+        }
     }
 }
 
 pub fn load_command_logs() -> Vec<CommandLogEntry> {
-    command_logs().lock().map(|logs| logs.clone()).unwrap_or_default()
+    command_logs()
+        .lock()
+        .map(|logs| logs.clone())
+        .unwrap_or_default()
 }
 
 pub fn clear_command_logs() {
-    if let Ok(mut logs) = command_logs().lock() { logs.clear(); }
+    if let Ok(mut logs) = command_logs().lock() {
+        logs.clear();
+    }
 }
 
-fn command_output<I, S>(path: &Path, args: I) -> Result<String, String>
+fn command_output<I, S>(path: &Path, args: I) -> Result<String, ApplicationError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let args: Vec<String> = args.into_iter().map(|value| value.as_ref().to_string_lossy().to_string()).collect();
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|value| value.as_ref().to_string_lossy().to_string())
+        .collect();
     let started = SystemTime::now();
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args(&args);
@@ -147,25 +200,28 @@ where
     command.creation_flags(0x08000000);
     let output = command
         .output()
-        .map_err(|error| format!("无法启动 Git：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
     record_command(path, &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
-            "Git 命令执行失败".into()
+            ApplicationError::new("git.commandFailed")
         } else {
-            message
+            ApplicationError::native(message)
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn command_output_bytes<I, S>(path: &Path, args: I) -> Result<Vec<u8>, String>
+fn command_output_bytes<I, S>(path: &Path, args: I) -> Result<Vec<u8>, ApplicationError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let args: Vec<String> = args.into_iter().map(|value| value.as_ref().to_string_lossy().to_string()).collect();
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|value| value.as_ref().to_string_lossy().to_string())
+        .collect();
     let started = SystemTime::now();
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args(&args);
@@ -173,20 +229,20 @@ where
     command.creation_flags(0x08000000);
     let output = command
         .output()
-        .map_err(|error| format!("无法启动 Git：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
     record_command(path, &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
-            "Git 命令执行失败".into()
+            ApplicationError::new("git.commandFailed")
         } else {
-            message
+            ApplicationError::native(message)
         });
     }
     Ok(output.stdout)
 }
 
-pub fn git_output(path: &Path, args: &[&str]) -> Result<String, String> {
+pub fn git_output(path: &Path, args: &[&str]) -> Result<String, ApplicationError> {
     command_output(path, args)
 }
 
@@ -194,7 +250,7 @@ fn optional_git_output(path: &Path, args: &[&str]) -> String {
     git_output(path, args).unwrap_or_default()
 }
 
-fn global_git_output(args: &[&str]) -> Result<String, String> {
+fn global_git_output(args: &[&str]) -> Result<String, ApplicationError> {
     let args: Vec<String> = args.iter().map(|value| (*value).to_string()).collect();
     let started = SystemTime::now();
     let mut command = Command::new("git");
@@ -203,14 +259,14 @@ fn global_git_output(args: &[&str]) -> Result<String, String> {
     command.creation_flags(0x08000000);
     let output = command
         .output()
-        .map_err(|error| format!("无法启动 Git：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
     record_command(Path::new(""), &args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
-            "Git 命令执行失败".into()
+            ApplicationError::new("git.commandFailed")
         } else {
-            message
+            ApplicationError::native(message)
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -232,7 +288,7 @@ fn configured_global_commit_template_path() -> Option<PathBuf> {
     (!value.is_empty()).then(|| PathBuf::from(value))
 }
 
-fn default_global_commit_template_path() -> Result<PathBuf, String> {
+fn default_global_commit_template_path() -> Result<PathBuf, ApplicationError> {
     #[cfg(target_os = "windows")]
     let base = std::env::var_os("APPDATA")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -242,13 +298,17 @@ fn default_global_commit_template_path() -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|value| PathBuf::from(value).join(".config")));
     base.map(|path| path.join("Branchline").join("commit-template.txt"))
-        .ok_or_else(|| "无法确定用户配置目录".into())
+        .ok_or_else(|| ApplicationError::new("configuration.homeUnavailable"))
 }
 
-fn resolved_git_path(root: &Path, name: &str) -> Result<PathBuf, String> {
+fn resolved_git_path(root: &Path, name: &str) -> Result<PathBuf, ApplicationError> {
     let value = git_output(root, &["rev-parse", "--git-path", name])?;
     let path = PathBuf::from(value.trim());
-    Ok(if path.is_absolute() { path } else { root.join(path) })
+    Ok(if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    })
 }
 
 pub fn load_git_user_config() -> GitUserConfig {
@@ -295,21 +355,21 @@ pub fn update_git_user_config(
     autocrlf: &str,
     pull_strategy: &str,
     commit_template_content: &str,
-) -> Result<GitUserConfig, String> {
+) -> Result<GitUserConfig, ApplicationError> {
     let user_name = user_name.trim();
     let user_email = user_email.trim();
     let default_branch = default_branch.trim();
     if user_name.is_empty() {
-        return Err("Git 用户名不能为空".into());
+        return Err(ApplicationError::new("configuration.nameRequired"));
     }
     if user_email.is_empty() || !user_email.contains('@') {
-        return Err("请输入有效的 Git 邮箱".into());
+        return Err(ApplicationError::new("configuration.emailInvalid"));
     }
     if !matches!(autocrlf, "true" | "input" | "false") {
-        return Err("无效的换行符策略".into());
+        return Err(ApplicationError::new("configuration.lineEndingInvalid"));
     }
     if !matches!(pull_strategy, "merge" | "rebase" | "ff-only") {
-        return Err("无效的拉取策略".into());
+        return Err(ApplicationError::new("configuration.pullStrategyInvalid"));
     }
     global_git_output(&["check-ref-format", "--branch", default_branch])?;
     global_git_output(&["config", "--global", "user.name", user_name])?;
@@ -337,10 +397,13 @@ pub fn update_git_user_config(
         let template_path = configured_global_commit_template_path()
             .unwrap_or(default_global_commit_template_path()?);
         if let Some(parent) = template_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("创建全局模板目录失败：{error}"))?;
+            fs::create_dir_all(parent).map_err(|error| {
+                ApplicationError::new("configuration.globalTemplateDirectory").cause(error)
+            })?;
         }
-        fs::write(&template_path, template_content.as_bytes())
-            .map_err(|error| format!("写入全局提交模板失败：{error}"))?;
+        fs::write(&template_path, template_content.as_bytes()).map_err(|error| {
+            ApplicationError::new("configuration.globalTemplateWrite").cause(error)
+        })?;
         let template_path = template_path.to_string_lossy().to_string();
         global_git_output(&["config", "--global", "commit.template", &template_path])?;
     }
@@ -350,34 +413,45 @@ pub fn update_git_user_config(
 pub fn update_repository_commit_template(
     repository_path: &str,
     content: &str,
-) -> Result<RepositorySnapshot, String> {
+) -> Result<RepositorySnapshot, ApplicationError> {
     let root = repository_root(repository_path)?;
     let template_path = resolved_git_path(&root, "branchline-commit-template.txt")?;
     let template_content = content.replace("\r\n", "\n");
     if template_content.trim().is_empty() {
-        let _ = git_output(&root, &["config", "--local", "--unset-all", "commit.template"]);
+        let _ = git_output(
+            &root,
+            &["config", "--local", "--unset-all", "commit.template"],
+        );
         let _ = fs::remove_file(&template_path);
     } else {
         if let Some(parent) = template_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("创建仓库模板目录失败：{error}"))?;
+            fs::create_dir_all(parent).map_err(|error| {
+                ApplicationError::new("configuration.repositoryTemplateDirectory").cause(error)
+            })?;
         }
-        fs::write(&template_path, template_content.as_bytes())
-            .map_err(|error| format!("写入仓库提交模板失败：{error}"))?;
+        fs::write(&template_path, template_content.as_bytes()).map_err(|error| {
+            ApplicationError::new("configuration.repositoryTemplateWrite").cause(error)
+        })?;
         let template_path = template_path.to_string_lossy().to_string();
-        git_output(&root, &["config", "--local", "commit.template", &template_path])?;
+        git_output(
+            &root,
+            &["config", "--local", "commit.template", &template_path],
+        )?;
     }
     read_repository(repository_path)
 }
 
-pub fn clear_repository_commit_template(repository_path: &str) -> Result<RepositorySnapshot, String> {
+pub fn clear_repository_commit_template(
+    repository_path: &str,
+) -> Result<RepositorySnapshot, ApplicationError> {
     update_repository_commit_template(repository_path, "")
 }
 
-pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, String> {
+pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, ApplicationError> {
     command_output(path, args)
 }
 
-fn git_apply_cached(path: &Path, patch: &str, reverse: bool) -> Result<(), String> {
+fn git_apply_cached(path: &Path, patch: &str, reverse: bool) -> Result<(), ApplicationError> {
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args([
         "apply",
@@ -396,29 +470,29 @@ fn git_apply_cached(path: &Path, patch: &str, reverse: bool) -> Result<(), Strin
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("无法启动 Git：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
     child
         .stdin
         .take()
-        .ok_or_else(|| "无法写入 Git patch".to_string())?
+        .ok_or_else(|| ApplicationError::new("patch.write"))?
         .write_all(patch.as_bytes())
-        .map_err(|error| format!("无法写入 Git patch：{error}"))?;
+        .map_err(|error| ApplicationError::new("patch.write").cause(error))?;
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("等待 Git 完成失败：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.wait").cause(error))?;
     if output.status.success() {
         Ok(())
     } else {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(if message.is_empty() {
-            "Git 无法应用所选修改块".into()
+            ApplicationError::new("patch.apply")
         } else {
-            message
+            ApplicationError::native(message)
         })
     }
 }
 
-fn git_apply_reverse(path: &Path, patch: &str) -> Result<(), String> {
+fn git_apply_reverse(path: &Path, patch: &str) -> Result<(), ApplicationError> {
     let mut command = Command::new("git");
     command.arg("-C").arg(path).args([
         "apply",
@@ -434,24 +508,24 @@ fn git_apply_reverse(path: &Path, patch: &str) -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("无法启动 Git：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
     child
         .stdin
         .take()
-        .ok_or_else(|| "无法写入 Git patch".to_string())?
+        .ok_or_else(|| ApplicationError::new("patch.write"))?
         .write_all(patch.as_bytes())
-        .map_err(|error| format!("无法写入 Git patch：{error}"))?;
+        .map_err(|error| ApplicationError::new("patch.write").cause(error))?;
     let output = child
         .wait_with_output()
-        .map_err(|error| format!("等待 Git 完成失败：{error}"))?;
+        .map_err(|error| ApplicationError::new("git.wait").cause(error))?;
     if output.status.success() {
         Ok(())
     } else {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(if message.is_empty() {
-            "Git 无法还原所选修改块".into()
+            ApplicationError::new("patch.restore")
         } else {
-            message
+            ApplicationError::native(message)
         })
     }
 }
@@ -555,7 +629,10 @@ const COMMIT_GRAPH_LIMIT: usize = 2_000;
 const MAX_COMMIT_GRAPH_LIMIT: usize = 20_000;
 
 fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
-    let max_count = format!("--max-count={}", limit.clamp(COMMIT_GRAPH_LIMIT, MAX_COMMIT_GRAPH_LIMIT));
+    let max_count = format!(
+        "--max-count={}",
+        limit.clamp(COMMIT_GRAPH_LIMIT, MAX_COMMIT_GRAPH_LIMIT)
+    );
     let output = optional_git_output(
         path,
         &[
@@ -590,7 +667,7 @@ fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
                 .map(ToString::to_string)
                 .collect();
             let message = fields[9].trim().to_string();
-            let title = message.lines().next().unwrap_or("无提交信息").to_string();
+            let title = message.lines().next().unwrap_or_default().to_string();
             let branches = decorations(fields[8]);
             let is_stash = branches.iter().any(|reference| reference == "refs/stash");
             Some(RepositoryCommit {
@@ -711,8 +788,10 @@ fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
             let bytes = code.as_bytes();
             let staged = code != "??" && bytes.first().is_some_and(|value| *value != b' ');
             let unstaged = code == "??" || bytes.get(1).is_some_and(|value| *value != b' ');
-            let (staged_add, staged_del) = staged_stats.get(&file_path).copied().unwrap_or_default();
-            let (unstaged_add, unstaged_del) = unstaged_stats.get(&file_path).copied().unwrap_or_default();
+            let (staged_add, staged_del) =
+                staged_stats.get(&file_path).copied().unwrap_or_default();
+            let (unstaged_add, unstaged_del) =
+                unstaged_stats.get(&file_path).copied().unwrap_or_default();
             Some(RepositoryFile {
                 path: file_path,
                 r#type: file_type.into(),
@@ -825,8 +904,8 @@ fn stashable_changed_paths(path: &Path) -> Vec<String> {
 
 fn with_gitlinks_excluded_from_stash<T>(
     path: &Path,
-    action: impl FnOnce() -> Result<T, String>,
-) -> Result<T, String> {
+    action: impl FnOnce() -> Result<T, ApplicationError>,
+) -> Result<T, ApplicationError> {
     let changed: HashSet<String> = parse_changed_files(path)
         .into_iter()
         .map(|file| file.path)
@@ -842,7 +921,7 @@ fn with_gitlinks_excluded_from_stash<T>(
         .iter()
         .any(|file_path| conflicts.contains(file_path))
     {
-        return Err("Gitlink 存在未解决冲突，无法安全创建 Stash".into());
+        return Err(ApplicationError::new("stash.gitlinkConflict"));
     }
     if changed_gitlinks.is_empty() {
         return action();
@@ -890,12 +969,12 @@ fn with_gitlinks_excluded_from_stash<T>(
     match (result, restore_error) {
         (Ok(value), None) => Ok(value),
         (Err(error), None) => Err(error),
-        (Ok(_), Some(error)) => Err(format!(
-            "Stash 已创建，但恢复 Gitlink 索引状态失败：{error}"
-        )),
-        (Err(error), Some(restore_error)) => Err(format!(
-            "{error}\n同时恢复 Gitlink 索引状态失败：{restore_error}"
-        )),
+        (Ok(_), Some(error)) => Err(ApplicationError::new("stash.indexRestore").cause(error)),
+        (Err(error), Some(restore_error)) => {
+            Err(ApplicationError::new("stash.indexRestoreAfterFailure")
+                .cause(error)
+                .cause(restore_error))
+        }
     }
 }
 
@@ -1030,8 +1109,12 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
                     continue;
                 }
             }
-            if let Some(row) = deletion { pending_deletions.push(row.clone()); }
-            if let Some(row) = addition { pending_additions.push(row.clone()); }
+            if let Some(row) = deletion {
+                pending_deletions.push(row.clone());
+            }
+            if let Some(row) = addition {
+                pending_additions.push(row.clone());
+            }
         }
         normalized.append(&mut pending_deletions);
         normalized.append(&mut pending_additions);
@@ -1039,9 +1122,22 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
     normalized
 }
 
-pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
-    let mut args = vec!["-c", "core.quotepath=false", "diff", "--no-color", "--unified=100000", "HEAD"]
-        .into_iter().map(str::to_string).collect::<Vec<_>>();
+pub fn parse_diff(
+    path: &Path,
+    file_path: &str,
+    show_whitespace: bool,
+) -> Result<Vec<DiffLine>, ApplicationError> {
+    let mut args = vec![
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--no-color",
+        "--unified=100000",
+        "HEAD",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path.into());
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
@@ -1049,17 +1145,17 @@ pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result
     if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", file_path]) {
         let root = path
             .canonicalize()
-            .map_err(|error| format!("无法访问仓库：{error}"))?;
+            .map_err(|error| ApplicationError::new("repository.access").cause(error))?;
         let candidate = path.join(file_path);
         if candidate.exists() {
             let resolved = candidate
                 .canonicalize()
-                .map_err(|error| format!("无法访问文件：{error}"))?;
+                .map_err(|error| ApplicationError::new("file.access").cause(error))?;
             if !resolved.starts_with(&root) {
-                return Err("文件路径超出仓库范围".into());
+                return Err(ApplicationError::new("file.outsideRepository"));
             }
             let content = std::fs::read_to_string(&resolved)
-                .map_err(|_| "暂不支持预览二进制文件".to_string())?;
+                .map_err(|_| ApplicationError::new("file.binaryPreview"))?;
             let line_count = content.lines().count();
             rows = content
                 .lines()
@@ -1080,10 +1176,22 @@ pub fn parse_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result
     Ok(rows)
 }
 
-pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
+pub fn parse_unstaged_diff(
+    path: &Path,
+    file_path: &str,
+    show_whitespace: bool,
+) -> Result<Vec<DiffLine>, ApplicationError> {
     let file_path = validated_file_path(file_path)?;
-    let mut args = vec!["-c", "core.quotepath=false", "diff", "--no-color", "--unified=100000"]
-        .into_iter().map(str::to_string).collect::<Vec<_>>();
+    let mut args = vec![
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--no-color",
+        "--unified=100000",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path.clone());
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
@@ -1091,17 +1199,17 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) 
     if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", &file_path]) {
         let root = path
             .canonicalize()
-            .map_err(|error| format!("无法访问仓库：{error}"))?;
+            .map_err(|error| ApplicationError::new("repository.access").cause(error))?;
         let candidate = root.join(&file_path);
         if candidate.exists() {
             let resolved = candidate
                 .canonicalize()
-                .map_err(|error| format!("无法访问文件：{error}"))?;
+                .map_err(|error| ApplicationError::new("file.access").cause(error))?;
             if !resolved.starts_with(&root) {
-                return Err("文件路径超出仓库范围".into());
+                return Err(ApplicationError::new("file.outsideRepository"));
             }
             let content = std::fs::read_to_string(&resolved)
-                .map_err(|_| "暂不支持预览二进制文件".to_string())?;
+                .map_err(|_| ApplicationError::new("file.binaryPreview"))?;
             let line_count = content.lines().count();
             rows = content
                 .lines()
@@ -1122,17 +1230,30 @@ pub fn parse_unstaged_diff(path: &Path, file_path: &str, show_whitespace: bool) 
     Ok(rows)
 }
 
-pub fn parse_staged_diff(path: &Path, file_path: &str, show_whitespace: bool) -> Result<Vec<DiffLine>, String> {
+pub fn parse_staged_diff(
+    path: &Path,
+    file_path: &str,
+    show_whitespace: bool,
+) -> Result<Vec<DiffLine>, ApplicationError> {
     let file_path = validated_file_path(file_path)?;
-    let mut args = vec!["-c", "core.quotepath=false", "diff", "--cached", "--no-color", "--unified=100000"]
-        .into_iter().map(str::to_string).collect::<Vec<_>>();
+    let mut args = vec![
+        "-c",
+        "core.quotepath=false",
+        "diff",
+        "--cached",
+        "--no-color",
+        "--unified=100000",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path);
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
     Ok(parse_diff_text(&diff, show_whitespace))
 }
 
-fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
+fn resolve_commit(path: &Path, reference: &str) -> Result<String, ApplicationError> {
     let object = git_output_owned(
         path,
         &[
@@ -1145,7 +1266,9 @@ fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
     .trim()
     .to_string();
     if object.len() != 40 || !object.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("无效的提交或分支：{reference}"));
+        return Err(
+            ApplicationError::new("reference.invalid").param("reference", reference.to_string())
+        );
     }
     let commit = git_output_owned(
         path,
@@ -1158,7 +1281,9 @@ fn resolve_commit(path: &Path, reference: &str) -> Result<String, String> {
     .trim()
     .to_string();
     if commit.len() != 40 || !commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("无效的提交或分支：{reference}"));
+        return Err(
+            ApplicationError::new("reference.invalid").param("reference", reference.to_string())
+        );
     }
     Ok(commit)
 }
@@ -1169,20 +1294,20 @@ pub fn parse_compare_diff(
     target: &str,
     file_path: &str,
     show_whitespace: bool,
-) -> Result<Vec<DiffLine>, String> {
+) -> Result<Vec<DiffLine>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     let base_hash = resolve_commit(&root, base)?;
     let target_hash = resolve_commit(&root, target)?;
     let range = format!("{base_hash}..{target_hash}");
     let mut args = vec![
-            "-c".into(),
-            "core.quotepath=false".into(),
-            "diff".into(),
-            "--no-color".into(),
-            range,
-            "--unified=100000".into(),
-        ];
+        "-c".into(),
+        "core.quotepath=false".into(),
+        "diff".into(),
+        "--no-color".into(),
+        range,
+        "--unified=100000".into(),
+    ];
     args.push("--".into());
     args.push(file_path);
     let diff = git_output_owned(&root, &args)?;
@@ -1262,30 +1387,42 @@ fn normalized_path_key(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-fn worktree_entry<'a>(root: &Path, requested_path: &str, worktrees: &'a [RepositoryWorktree]) -> Result<&'a RepositoryWorktree, String> {
+fn worktree_entry<'a>(
+    root: &Path,
+    requested_path: &str,
+    worktrees: &'a [RepositoryWorktree],
+) -> Result<&'a RepositoryWorktree, ApplicationError> {
     let requested = PathBuf::from(requested_path.trim());
-    let requested = if requested.is_absolute() { requested } else { root.join(requested) };
+    let requested = if requested.is_absolute() {
+        requested
+    } else {
+        root.join(requested)
+    };
     let key = normalized_path_key(&requested);
     worktrees
         .iter()
         .find(|worktree| normalized_path_key(Path::new(&worktree.path)) == key)
-        .ok_or_else(|| format!("Worktree 不存在：{}", requested.display()))
+        .ok_or_else(|| {
+            ApplicationError::new("worktree.missing").param("path", requested.display().to_string())
+        })
 }
 
-fn validated_submodule_path(root: &Path, requested_path: &str) -> Result<String, String> {
+fn validated_submodule_path(root: &Path, requested_path: &str) -> Result<String, ApplicationError> {
     let requested = requested_path
         .trim()
         .replace('\\', "/")
         .trim_matches('/')
         .to_string();
     if requested.is_empty() {
-        return Err("Submodule 路径不能为空".into());
+        return Err(ApplicationError::new("submodule.pathRequired"));
     }
     parse_submodules(root)
         .into_iter()
         .find(|submodule| submodule.path.replace('\\', "/") == requested)
         .map(|submodule| submodule.path)
-        .ok_or_else(|| format!("Submodule 不存在：{requested}"))
+        .ok_or_else(|| {
+            ApplicationError::new("submodule.missing").param("requested", requested.to_string())
+        })
 }
 
 pub fn create_repository_worktree(
@@ -1293,34 +1430,43 @@ pub fn create_repository_worktree(
     worktree_path: &str,
     branch: &str,
     create_branch: bool,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let requested = worktree_path.trim();
     if requested.is_empty() {
-        return Err("Worktree 目录不能为空".into());
+        return Err(ApplicationError::new("worktree.pathRequired"));
     }
     let destination = PathBuf::from(requested);
-    let destination = if destination.is_absolute() { destination } else { root.join(destination) };
+    let destination = if destination.is_absolute() {
+        destination
+    } else {
+        root.join(destination)
+    };
     if parse_worktrees(&root).iter().any(|worktree| {
         normalized_path_key(Path::new(&worktree.path)) == normalized_path_key(&destination)
     }) {
-        return Err(format!("该目录已经是 Worktree：{}", destination.display()));
+        return Err(ApplicationError::new("worktree.exists")
+            .param("path", destination.display().to_string()));
     }
 
     let branch = branch.trim();
     if branch.is_empty() {
-        return Err("Worktree 分支不能为空".into());
+        return Err(ApplicationError::new("worktree.branchRequired"));
     }
     git_output_owned(
         &root,
         &["check-ref-format".into(), "--branch".into(), branch.into()],
     )?;
-    let branch_exists = parse_local_branches(&root).iter().any(|item| item == branch);
+    let branch_exists = parse_local_branches(&root)
+        .iter()
+        .any(|item| item == branch);
     if create_branch && branch_exists {
-        return Err(format!("分支已存在：{branch}"));
+        return Err(ApplicationError::new("branch.exists").param("branch", branch.to_string()));
     }
     if !create_branch && !branch_exists {
-        return Err(format!("本地分支不存在：{branch}"));
+        return Err(
+            ApplicationError::new("branch.localMissing").param("branch", branch.to_string())
+        );
     }
 
     let mut args = vec!["worktree".into(), "add".into()];
@@ -1328,16 +1474,23 @@ pub fn create_repository_worktree(
         args.extend(["-b".into(), branch.into()]);
     }
     args.push(destination.to_string_lossy().to_string());
-    args.push(if create_branch { "HEAD".into() } else { branch.into() });
+    args.push(if create_branch {
+        "HEAD".into()
+    } else {
+        branch.into()
+    });
     git_output_owned(&root, &args).map(|_| ())
 }
 
-pub fn remove_repository_worktree(repository_path: &str, worktree_path: &str) -> Result<(), String> {
+pub fn remove_repository_worktree(
+    repository_path: &str,
+    worktree_path: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let worktrees = parse_worktrees(&root);
     let worktree = worktree_entry(&root, worktree_path, &worktrees)?;
     if normalized_path_key(Path::new(&worktree.path)) == normalized_path_key(&root) {
-        return Err("不能移除当前 Worktree".into());
+        return Err(ApplicationError::new("worktree.removeCurrent"));
     }
     git_output_owned(
         &root,
@@ -1351,7 +1504,11 @@ pub fn remove_repository_worktree(repository_path: &str, worktree_path: &str) ->
     .map(|_| ())
 }
 
-pub fn set_repository_worktree_lock(repository_path: &str, worktree_path: &str, locked: bool) -> Result<(), String> {
+pub fn set_repository_worktree_lock(
+    repository_path: &str,
+    worktree_path: &str,
+    locked: bool,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let worktrees = parse_worktrees(&root);
     let worktree = worktree_entry(&root, worktree_path, &worktrees)?;
@@ -1369,12 +1526,15 @@ pub fn set_repository_worktree_lock(repository_path: &str, worktree_path: &str, 
     git_output_owned(&root, &args).map(|_| ())
 }
 
-pub fn prune_repository_worktrees(repository_path: &str) -> Result<(), String> {
+pub fn prune_repository_worktrees(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     git_output(&root, &["worktree", "prune"]).map(|_| ())
 }
 
-pub fn initialize_repository_submodule(repository_path: &str, submodule_path: &str) -> Result<(), String> {
+pub fn initialize_repository_submodule(
+    repository_path: &str,
+    submodule_path: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let submodule = validated_submodule_path(&root, submodule_path)?;
     git_output_owned(
@@ -1384,7 +1544,10 @@ pub fn initialize_repository_submodule(repository_path: &str, submodule_path: &s
     .map(|_| ())
 }
 
-pub fn update_repository_submodule(repository_path: &str, submodule_path: Option<&str>) -> Result<(), String> {
+pub fn update_repository_submodule(
+    repository_path: &str,
+    submodule_path: Option<&str>,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let mut args = vec![
         "submodule".into(),
@@ -1393,17 +1556,23 @@ pub fn update_repository_submodule(repository_path: &str, submodule_path: Option
         "--recursive".into(),
     ];
     if let Some(submodule_path) = submodule_path {
-        args.extend(["--".into(), validated_submodule_path(&root, submodule_path)?]);
+        args.extend([
+            "--".into(),
+            validated_submodule_path(&root, submodule_path)?,
+        ]);
     }
     git_output_owned(&root, &args).map(|_| ())
 }
 
-pub fn sync_repository_submodules(repository_path: &str) -> Result<(), String> {
+pub fn sync_repository_submodules(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     git_output(&root, &["submodule", "sync", "--recursive"]).map(|_| ())
 }
 
-pub fn deinitialize_repository_submodule(repository_path: &str, submodule_path: &str) -> Result<(), String> {
+pub fn deinitialize_repository_submodule(
+    repository_path: &str,
+    submodule_path: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let submodule = validated_submodule_path(&root, submodule_path)?;
     git_output_owned(
@@ -1460,7 +1629,12 @@ pub(crate) fn parse_local_branches(path: &Path) -> Vec<String> {
 fn repository_default_branch(root: &Path) -> Option<String> {
     optional_git_output(
         root,
-        &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
     )
     .trim()
     .strip_prefix("origin/")
@@ -1596,13 +1770,13 @@ fn superproject_working_tree(path: &Path) -> Option<String> {
     Some(display_path(&resolved))
 }
 
-pub fn repository_root(selected_path: &str) -> Result<PathBuf, String> {
+pub fn repository_root(selected_path: &str) -> Result<PathBuf, ApplicationError> {
     let selected = Path::new(selected_path);
     if !selected.exists() || !selected.is_dir() {
-        return Err("选择的目录不存在".into());
+        return Err(ApplicationError::new("repository.directoryMissing"));
     }
     let root_output = git_output(selected, &["rev-parse", "--show-toplevel"])
-        .map_err(|_| "该目录不是 Git 仓库，也不在 Git Worktree 中".to_string())?;
+        .map_err(|_| ApplicationError::new("repository.notGit"))?;
     Ok(PathBuf::from(root_output.trim()))
 }
 
@@ -1773,28 +1947,12 @@ fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
                 Vec::new(),
             )
         } else if !conflicts.is_empty() {
-            (
-                "conflict",
-                0,
-                0,
-                None,
-                None,
-                None,
-                Some("工作区存在未解决冲突".into()),
-                Vec::new(),
-            )
+            ("conflict", 0, 0, None, None, None, None, Vec::new())
         } else {
             return None;
         };
     Some(RepositoryOperationState {
         kind: kind.into(),
-        label: match kind {
-            "rebase" => "变基进行中",
-            "merge" => "合并进行中",
-            "cherry-pick" => "Cherry-pick 进行中",
-            _ => "冲突待处理",
-        }
-        .into(),
         original_branch,
         onto,
         current_step,
@@ -1806,7 +1964,7 @@ fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
     })
 }
 
-pub fn repository_state_token(selected_path: &str) -> Result<String, String> {
+pub fn repository_state_token(selected_path: &str) -> Result<String, ApplicationError> {
     let root = repository_root(selected_path)?;
     let status = command_output_bytes(
         &root,
@@ -1835,7 +1993,10 @@ pub fn repository_state_token(selected_path: &str) -> Result<String, String> {
     references.hash(&mut hasher);
     worktrees.hash(&mut hasher);
 
-    for record in status.split(|byte| *byte == 0).filter(|record| record.len() > 3) {
+    for record in status
+        .split(|byte| *byte == 0)
+        .filter(|record| record.len() > 3)
+    {
         let relative_path = String::from_utf8_lossy(&record[3..]);
         let path = root.join(relative_path.as_ref());
         path.hash(&mut hasher);
@@ -1851,14 +2012,14 @@ pub fn repository_state_token(selected_path: &str) -> Result<String, String> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, String> {
+pub fn read_repository(selected_path: &str) -> Result<RepositorySnapshot, ApplicationError> {
     read_repository_with_commit_limit(selected_path, COMMIT_GRAPH_LIMIT)
 }
 
 pub fn read_repository_with_commit_limit(
     selected_path: &str,
     commit_limit: usize,
-) -> Result<RepositorySnapshot, String> {
+) -> Result<RepositorySnapshot, ApplicationError> {
     let root = repository_root(selected_path)?;
     let root_path = root.as_path();
     let root_text = root.to_string_lossy();
@@ -1881,7 +2042,7 @@ pub fn read_repository_with_commit_limit(
                             .trim()
                             .to_string();
                     branch = if short_hash.is_empty() {
-                        "无提交".into()
+                        "HEAD".into()
                     } else {
                         let exact_refs = optional_git_output(
                             root_path,
@@ -1987,11 +2148,14 @@ pub fn read_repository_with_commit_limit(
     })
 }
 
-pub fn switch_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+pub fn switch_repository_branch(
+    repository_path: &str,
+    branch: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = branch.trim();
     if branch.is_empty() || !parse_branches(&root).iter().any(|item| item == branch) {
-        return Err(format!("分支不存在：{branch}"));
+        return Err(ApplicationError::new("branch.missing").param("branch", branch.to_string()));
     }
 
     let locals = parse_local_branches(&root);
@@ -2003,7 +2167,9 @@ pub fn switch_repository_branch(repository_path: &str, branch: &str) -> Result<(
         .split_once('/')
         .map(|(_, value)| value)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("无法从远程分支创建本地分支：{branch}"))?;
+        .ok_or_else(|| {
+            ApplicationError::new("branch.createFromRemote").param("branch", branch.to_string())
+        })?;
     if locals.iter().any(|item| item == local_name) {
         git_output_owned(
             &root,
@@ -2025,18 +2191,21 @@ pub fn switch_repository_branch(repository_path: &str, branch: &str) -> Result<(
     }
 }
 
-pub fn create_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+pub fn create_repository_branch(
+    repository_path: &str,
+    branch: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = branch.trim();
     if branch.is_empty() {
-        return Err("分支名不能为空".into());
+        return Err(ApplicationError::new("branch.nameRequired"));
     }
     git_output_owned(
         &root,
         &["check-ref-format".into(), "--branch".into(), branch.into()],
     )?;
     if parse_branches(&root).iter().any(|item| item == branch) {
-        return Err(format!("分支已存在：{branch}"));
+        return Err(ApplicationError::new("branch.exists").param("branch", branch.to_string()));
     }
     git_output_owned(
         &root,
@@ -2045,20 +2214,21 @@ pub fn create_repository_branch(repository_path: &str, branch: &str) -> Result<(
     .map(|_| ())
 }
 
-fn ensure_clean_worktree(root: &Path, action: &str) -> Result<(), String> {
+fn ensure_clean_worktree(root: &Path) -> Result<(), ApplicationError> {
     if git_output(root, &["status", "--porcelain"])?
         .trim()
         .is_empty()
     {
         Ok(())
     } else {
-        Err(format!(
-            "工作区存在未提交变更，请先提交或 Stash 后再{action}"
-        ))
+        Err(ApplicationError::new("worktree.cleanRequired"))
     }
 }
 
-pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Result<(), String> {
+pub fn merge_repository_reference(
+    repository_path: &str,
+    reference: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let reference = reference.trim();
     resolve_commit(&root, reference)?;
@@ -2080,14 +2250,17 @@ pub fn merge_repository_reference(repository_path: &str, reference: &str) -> Res
                 continue_repository_operation(repository_path)
             }
             Ok(_) => Err(merge_error),
-            Err(gitlink_error) => Err(format!(
-                "{merge_error}\n自动处理 Gitlink 冲突失败：{gitlink_error}"
-            )),
+            Err(gitlink_error) => Err(ApplicationError::new("conflict.gitlinkResolution")
+                .cause(merge_error)
+                .cause(gitlink_error)),
         },
     }
 }
 
-pub fn cherry_pick_repository_commit(repository_path: &str, commit: &str) -> Result<(), String> {
+pub fn cherry_pick_repository_commit(
+    repository_path: &str,
+    commit: &str,
+) -> Result<(), ApplicationError> {
     cherry_pick_repository_commit_with_mainline(repository_path, commit, None)
 }
 
@@ -2095,7 +2268,7 @@ pub fn cherry_pick_repository_commit_with_mainline(
     repository_path: &str,
     commit: &str,
     mainline: Option<usize>,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
     let parent_count = git_output_owned(
@@ -2113,30 +2286,29 @@ pub fn cherry_pick_repository_commit_with_mainline(
     .saturating_sub(1);
     let mut args = vec!["cherry-pick".into()];
     if parent_count > 1 {
-        let mainline = mainline.ok_or_else(|| {
-            "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号".to_string()
-        })?;
+        let mainline =
+            mainline.ok_or_else(|| ApplicationError::new("operation.mainlineRequired"))?;
         if !(1..=parent_count).contains(&mainline) {
-            return Err(format!(
-                "主线父提交编号无效：请输入 1 到 {parent_count} 之间的编号"
-            ));
+            return Err(ApplicationError::new("operation.mainlineInvalid")
+                .param("parent_count", parent_count));
         }
         args.push("-m".into());
         args.push(mainline.to_string());
     } else if mainline.is_some() {
-        return Err("普通提交不能指定主线父提交".into());
+        return Err(ApplicationError::new("operation.mainlineUnexpected"));
     }
     args.extend(["--".into(), commit]);
     match git_output_owned(&root, &args) {
         Ok(_) => Ok(()),
-        Err(error) if error.to_ascii_lowercase().contains("cherry-pick is now empty") => {
+        Err(error)
+            if error
+                .diagnostic_text()
+                .to_ascii_lowercase()
+                .contains("cherry-pick is now empty") =>
+        {
             // A duplicate or already-applied commit leaves CHERRY_PICK_HEAD behind even
             // though there is nothing to resolve. Treat it as a successful no-op.
-            git_output_owned(
-                &root,
-                &["cherry-pick".into(), "--skip".into()],
-            )
-            .map(|_| ())
+            git_output_owned(&root, &["cherry-pick".into(), "--skip".into()]).map(|_| ())
         }
         Err(error) => {
             // A gitlink has no mergeable file content. Keep the current branch's
@@ -2144,19 +2316,19 @@ pub fn cherry_pick_repository_commit_with_mainline(
             // unresolved for the operation panel.
             match resolve_gitlink_conflicts_local(repository_path) {
                 Ok(_) => Err(error),
-                Err(gitlink_error) => Err(format!(
-                    "{error}\n自动处理 Gitlink 冲突失败：{gitlink_error}"
-                )),
+                Err(gitlink_error) => Err(ApplicationError::new("conflict.gitlinkResolution")
+                    .cause(error)
+                    .cause(gitlink_error)),
             }
         }
     }
 }
 
-pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = branch.trim();
     if branch.is_empty() || !parse_branches(&root).iter().any(|item| item == branch) {
-        return Err(format!("分支不存在：{branch}"));
+        return Err(ApplicationError::new("branch.missing").param("branch", branch.to_string()));
     }
 
     let locals = parse_local_branches(&root);
@@ -2164,7 +2336,9 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
         let (remote, remote_branch) = branch
             .split_once('/')
             .filter(|(remote, remote_branch)| !remote.is_empty() && !remote_branch.is_empty())
-            .ok_or_else(|| format!("无法识别远程分支：{branch}"))?;
+            .ok_or_else(|| {
+                ApplicationError::new("branch.remoteInvalid").param("branch", branch.to_string())
+            })?;
         return git_output_owned(
             &root,
             &["fetch".into(), remote.into(), remote_branch.into()],
@@ -2186,7 +2360,9 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
     let (remote, remote_branch) = upstream
         .split_once('/')
         .filter(|(remote, remote_branch)| !remote.is_empty() && !remote_branch.is_empty())
-        .ok_or_else(|| format!("分支 {branch} 尚未配置上游分支"))?;
+        .ok_or_else(|| {
+            ApplicationError::new("branch.upstreamMissing").param("branch", branch.to_string())
+        })?;
     git_output_owned(
         &root,
         &["fetch".into(), remote.into(), remote_branch.into()],
@@ -2210,7 +2386,7 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
                 "push".into(),
                 "--include-untracked".into(),
                 "-m".into(),
-                format!("Branchline 自动 Stash：拉取 {branch}"),
+                format!("Branchline automatic stash: pull {branch}"),
             ];
             with_gitlinks_excluded_from_stash(&root, || git_output_owned(&root, &args))?;
             auto_stashed =
@@ -2219,7 +2395,7 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
                     .count()
                     > stash_count;
             if !auto_stashed {
-                return Err("检测到本地修改，但 Git 未能创建自动 Stash；为避免覆盖文件，拉取已取消。请手动处理 Submodule 或特殊工作区变更后重试。".into());
+                return Err(ApplicationError::new("pull.autoStashFailed"));
             }
         }
         let merge_result = git_output_owned(
@@ -2237,10 +2413,10 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
                         "stash@{0}".into(),
                     ],
                 ) {
-                    Ok(_) => Err(format!("{error}\n本地修改已从自动 Stash 恢复。")),
-                    Err(restore_error) => Err(format!(
-                        "{error}\n恢复自动 Stash 失败：{restore_error}\n本地修改仍保留在 stash@{{0}}。"
-                    )),
+                    Ok(_) => Err(ApplicationError::new("pull.changesRestored").cause(error)),
+                    Err(restore_error) => Err(ApplicationError::new("pull.restoreFailed")
+                        .cause(error)
+                        .cause(restore_error)),
                 };
             }
             return Err(error);
@@ -2255,16 +2431,12 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
                     "stash@{0}".into(),
                 ],
             )
-            .map_err(|error| format!(
-                "拉取已完成，但恢复本地修改时产生冲突或失败：{error}\n自动 Stash 已保留在 stash@{{0}}，请解决工作区冲突后再处理该 Stash。"
-            ))?;
+            .map_err(|error| ApplicationError::new("pull.restoreConflict").cause(error))?;
         }
         return Ok(());
     }
     if !git_success(&root, &["merge-base", "--is-ancestor", branch, &upstream]) {
-        return Err(format!(
-            "分支 {branch} 包含尚未推送的提交，无法在后台快进；请先切换到该分支"
-        ));
+        return Err(ApplicationError::new("branch.unpushed").param("branch", branch.to_string()));
     }
     git_output_owned(
         &root,
@@ -2280,36 +2452,48 @@ pub fn pull_repository_branch(repository_path: &str, branch: &str) -> Result<(),
 }
 
 // Fetch already updated upstream refs. Never check out or merge a branch here.
-pub fn fast_forward_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+pub fn fast_forward_repository_branch(
+    repository_path: &str,
+    branch: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = branch.trim();
     let local_ref = format!("refs/heads/{branch}");
     if branch.is_empty() || !git_success(&root, &["show-ref", "--verify", "--quiet", &local_ref]) {
-        return Err(format!("本地分支不存在：{branch}"));
+        return Err(
+            ApplicationError::new("branch.localMissing").param("branch", branch.to_string())
+        );
     }
     if optional_git_output(&root, &["branch", "--show-current"]).trim() == branch {
-        return Err(format!("分支 {branch} 正在检出，跳过自动快进"));
+        return Err(ApplicationError::new("branch.checkedOut").param("branch", branch.to_string()));
     }
     let upstream = git_output(&root, &["for-each-ref", "--format=%(upstream)", &local_ref])?
         .trim()
         .to_string();
     if upstream.is_empty() {
-        return Err(format!("分支 {branch} 尚未配置上游分支"));
+        return Err(
+            ApplicationError::new("branch.upstreamMissing").param("branch", branch.to_string())
+        );
     }
-    if !git_success(&root, &["merge-base", "--is-ancestor", &local_ref, &upstream]) {
-        return Err(format!("分支 {branch} 无法安全快进，保留本地提交"));
+    if !git_success(
+        &root,
+        &["merge-base", "--is-ancestor", &local_ref, &upstream],
+    ) {
+        return Err(
+            ApplicationError::new("branch.cannotFastForward").param("branch", branch.to_string())
+        );
     }
     // Git also refuses branches checked out in another worktree, or checked out while this ran.
     git_output(&root, &["branch", "-f", "--", branch, &upstream]).map(|_| ())
 }
 
-pub fn push_repository(repository_path: &str) -> Result<(), String> {
+pub fn push_repository(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = git_output(&root, &["branch", "--show-current"])?
         .trim()
         .to_string();
     if branch.is_empty() {
-        return Err("当前处于 Detached HEAD，无法直接推送".into());
+        return Err(ApplicationError::new("push.detached"));
     }
     let ref_name = format!("refs/heads/{branch}");
     let upstream = git_output_owned(
@@ -2327,7 +2511,7 @@ pub fn push_repository(repository_path: &str) -> Result<(), String> {
             .trim()
             .is_empty()
         {
-            return Err("当前仓库没有 origin 远程仓库".into());
+            return Err(ApplicationError::new("repository.originMissing"));
         }
         return git_output_owned(
             &root,
@@ -2343,20 +2527,23 @@ pub fn push_repository(repository_path: &str) -> Result<(), String> {
     git_output(&root, &["push"]).map(|_| ())
 }
 
-pub fn reset_repository_to_commit(repository_path: &str, commit: &str) -> Result<(), String> {
+pub fn reset_repository_to_commit(
+    repository_path: &str,
+    commit: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
     if repository_operation(&root).is_some() {
-        return Err("当前存在未完成的 Git 操作，请先完成或中止后再回退".into());
+        return Err(ApplicationError::new("operation.resetBlocked"));
     }
     git_output_owned(&root, &["reset".into(), "--hard".into(), commit]).map(|_| ())
 }
 
-pub fn undo_last_commit(repository_path: &str) -> Result<String, String> {
+pub fn undo_last_commit(repository_path: &str) -> Result<String, ApplicationError> {
     let root = repository_root(repository_path)?;
     let message = git_output(&root, &["show", "-s", "--format=%B", "HEAD"])?;
     let parent = git_output(&root, &["rev-parse", "HEAD^"])
-        .map_err(|_| "当前提交没有父提交，无法撤回".to_string())?
+        .map_err(|_| ApplicationError::new("commit.parentMissing"))?
         .trim()
         .to_string();
     git_output_owned(&root, &["reset".into(), "--mixed".into(), parent]).map(|_| message)
@@ -2366,7 +2553,7 @@ pub fn revert_repository_commit(
     repository_path: &str,
     commit: &str,
     mainline: Option<usize>,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
     let parent_count = git_output_owned(
@@ -2384,35 +2571,37 @@ pub fn revert_repository_commit(
     .saturating_sub(1);
     let mut args = vec!["revert".into(), "--no-edit".into()];
     if parent_count > 1 {
-        let mainline = mainline.ok_or_else(|| {
-            "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号".to_string()
-        })?;
+        let mainline =
+            mainline.ok_or_else(|| ApplicationError::new("operation.mainlineRequired"))?;
         if !(1..=parent_count).contains(&mainline) {
-            return Err(format!(
-                "主线父提交编号无效：请输入 1 到 {parent_count} 之间的编号"
-            ));
+            return Err(ApplicationError::new("operation.mainlineInvalid")
+                .param("parent_count", parent_count));
         }
         args.push("-m".into());
         args.push(mainline.to_string());
     } else if mainline.is_some() {
-        return Err("普通提交不能指定主线父提交".into());
+        return Err(ApplicationError::new("operation.mainlineUnexpected"));
     }
     args.extend(["--".into(), commit]);
     git_output_owned(&root, &args).map(|_| ())
 }
 
-pub fn rebase_repository_onto(repository_path: &str, commit: &str) -> Result<(), String> {
+pub fn rebase_repository_onto(repository_path: &str, commit: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
-    ensure_clean_worktree(&root, "变基")?;
+    ensure_clean_worktree(&root)?;
     git_output_owned(&root, &["rebase".into(), commit]).map(|_| ())
 }
 
-pub fn create_repository_tag(repository_path: &str, tag: &str, commit: &str) -> Result<(), String> {
+pub fn create_repository_tag(
+    repository_path: &str,
+    tag: &str,
+    commit: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let tag = tag.trim();
     if tag.is_empty() {
-        return Err("标签名称不能为空".into());
+        return Err(ApplicationError::new("tag.nameRequired"));
     }
     git_output_owned(
         &root,
@@ -2427,17 +2616,20 @@ pub fn create_repository_tag(repository_path: &str, tag: &str, commit: &str) -> 
             &format!("refs/tags/{tag}"),
         ],
     ) {
-        return Err(format!("标签已存在：{tag}"));
+        return Err(ApplicationError::new("tag.exists").param("tag", tag.to_string()));
     }
     let commit = resolve_commit(&root, commit.trim())?;
     git_output_owned(&root, &["tag".into(), tag.into(), commit]).map(|_| ())
 }
 
-pub fn delete_repository_branch(repository_path: &str, branch: &str) -> Result<(), String> {
+pub fn delete_repository_branch(
+    repository_path: &str,
+    branch: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let branch = branch.trim();
     if branch.is_empty() || !parse_branches(&root).iter().any(|item| item == branch) {
-        return Err(format!("分支不存在：{branch}"));
+        return Err(ApplicationError::new("branch.missing").param("branch", branch.to_string()));
     }
     let locals = parse_local_branches(&root);
     if locals.iter().any(|item| item == branch) {
@@ -2445,7 +2637,9 @@ pub fn delete_repository_branch(repository_path: &str, branch: &str) -> Result<(
             .trim()
             .to_string();
         if current == branch {
-            return Err(format!("不能删除当前分支：{branch}"));
+            return Err(
+                ApplicationError::new("branch.deleteCurrent").param("branch", branch.to_string())
+            );
         }
         return git_output_owned(
             &root,
@@ -2456,7 +2650,9 @@ pub fn delete_repository_branch(repository_path: &str, branch: &str) -> Result<(
     let (remote, remote_branch) = branch
         .split_once('/')
         .filter(|(remote, remote_branch)| !remote.is_empty() && !remote_branch.is_empty())
-        .ok_or_else(|| format!("无法识别远程分支：{branch}"))?;
+        .ok_or_else(|| {
+            ApplicationError::new("branch.remoteInvalid").param("branch", branch.to_string())
+        })?;
     git_output_owned(
         &root,
         &[
@@ -2469,7 +2665,10 @@ pub fn delete_repository_branch(repository_path: &str, branch: &str) -> Result<(
     .map(|_| ())
 }
 
-fn parse_comparison_files(path: &Path, range: &str) -> Result<Vec<RepositoryFile>, String> {
+fn parse_comparison_files(
+    path: &Path,
+    range: &str,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let numstat = git_output_owned(
         path,
         &[
@@ -2545,7 +2744,7 @@ pub fn compare_repository_refs(
     repository_path: &str,
     base: &str,
     target: &str,
-) -> Result<RepositoryComparison, String> {
+) -> Result<RepositoryComparison, ApplicationError> {
     let root = repository_root(repository_path)?;
     let base_hash = resolve_commit(&root, base)?;
     let target_hash = resolve_commit(&root, target)?;
@@ -2573,13 +2772,13 @@ pub fn compare_repository_refs(
     })
 }
 
-pub fn load_merge_queue(repository_path: &str) -> Result<MergeQueueSnapshot, String> {
+pub fn load_merge_queue(repository_path: &str) -> Result<MergeQueueSnapshot, ApplicationError> {
     let root = repository_root(repository_path)?;
     let current_branch = git_output(&root, &["branch", "--show-current"])?
         .trim()
         .to_string();
     if current_branch.is_empty() {
-        return Err("Detached HEAD 状态下无法计算合并队列".into());
+        return Err(ApplicationError::new("merge.detached"));
     }
 
     let mut candidates = Vec::new();
@@ -2640,7 +2839,7 @@ pub fn load_merge_queue(repository_path: &str) -> Result<MergeQueueSnapshot, Str
     })
 }
 
-fn validated_stash_reference(reference: &str) -> Result<&str, String> {
+fn validated_stash_reference(reference: &str) -> Result<&str, ApplicationError> {
     let reference = reference.trim();
     let index = reference
         .strip_prefix("stash@{")
@@ -2648,18 +2847,18 @@ fn validated_stash_reference(reference: &str) -> Result<&str, String> {
         .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()));
     index
         .map(|_| reference)
-        .ok_or_else(|| "无效的 Stash 引用".to_string())
+        .ok_or_else(|| ApplicationError::new("stash.referenceInvalid"))
 }
 
 pub fn create_repository_stash(
     repository_path: &str,
     message: &str,
     include_untracked: bool,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let stash_paths = stashable_changed_paths(&root);
     if stash_paths.is_empty() {
-        return Err("除 Gitlink 外没有可 Stash 的变更".into());
+        return Err(ApplicationError::new("stash.noChanges"));
     }
     let mut args = vec!["stash".to_string(), "push".to_string()];
     if include_untracked {
@@ -2676,7 +2875,7 @@ pub fn create_scoped_repository_stash(
     repository_path: &str,
     scope: &str,
     message: &str,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let gitlinks = gitlink_paths(&root);
     let stash_paths: Vec<String> = parse_changed_files(&root)
@@ -2693,18 +2892,18 @@ pub fn create_scoped_repository_stash(
     match scope.trim() {
         "staged" => {
             if stash_paths.is_empty() {
-                return Err("除 Gitlink 外没有可 Stash 的已暂存变更".into());
+                return Err(ApplicationError::new("stash.noStagedChanges"));
             }
             args.push("--staged".into());
         }
         "unstaged" => {
             if stash_paths.is_empty() {
-                return Err("除 Gitlink 外没有可 Stash 的未暂存变更".into());
+                return Err(ApplicationError::new("stash.noUnstagedChanges"));
             }
             args.push("--keep-index".into());
             args.push("--include-untracked".into());
         }
-        _ => return Err("不支持的 Stash 范围".into()),
+        _ => return Err(ApplicationError::new("stash.scopeInvalid")),
     }
     if !message.trim().is_empty() {
         args.push("-m".into());
@@ -2717,7 +2916,7 @@ pub fn apply_repository_stash(
     repository_path: &str,
     reference: &str,
     pop: bool,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let reference = validated_stash_reference(reference)?;
     git_output_owned(
@@ -2732,7 +2931,10 @@ pub fn apply_repository_stash(
     .map(|_| ())
 }
 
-pub fn drop_repository_stash(repository_path: &str, reference: &str) -> Result<(), String> {
+pub fn drop_repository_stash(
+    repository_path: &str,
+    reference: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let reference = validated_stash_reference(reference)?;
     git_output_owned(&root, &["stash".into(), "drop".into(), reference.into()]).map(|_| ())
@@ -2786,7 +2988,7 @@ fn files_from_diff_outputs(numstat: &str, status: &str) -> Vec<RepositoryFile> {
 pub fn load_stash_files(
     repository_path: &str,
     reference: &str,
-) -> Result<Vec<RepositoryFile>, String> {
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let reference = validated_stash_reference(reference)?;
     resolve_commit(&root, reference)?;
@@ -2857,21 +3059,21 @@ pub fn load_stash_file_diff(
     reference: &str,
     file_path: &str,
     show_whitespace: bool,
-) -> Result<Vec<DiffLine>, String> {
+) -> Result<Vec<DiffLine>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let reference = validated_stash_reference(reference)?;
     let file_path = validated_file_path(file_path)?;
     resolve_commit(&root, reference)?;
     let base = format!("{reference}^1");
     let mut tracked_args = vec![
-            "-c".into(),
-            "core.quotepath=false".into(),
-            "diff".into(),
-            "--no-color".into(),
-            base,
-            reference.into(),
-            "--unified=100000".into(),
-        ];
+        "-c".into(),
+        "core.quotepath=false".into(),
+        "diff".into(),
+        "--no-color".into(),
+        base,
+        reference.into(),
+        "--unified=100000".into(),
+    ];
     tracked_args.push("--".into());
     tracked_args.push(file_path.clone());
     let tracked = git_output_owned(&root, &tracked_args)?;
@@ -2885,23 +3087,23 @@ pub fn load_stash_file_diff(
         return Ok(Vec::new());
     }
     let mut untracked_args = vec![
-            "-c".into(),
-            "core.quotepath=false".into(),
-            "show".into(),
-            "--format=".into(),
-            "--no-color".into(),
-            untracked,
-            "--unified=100000".into(),
-        ];
+        "-c".into(),
+        "core.quotepath=false".into(),
+        "show".into(),
+        "--format=".into(),
+        "--no-color".into(),
+        untracked,
+        "--unified=100000".into(),
+    ];
     untracked_args.push("--".into());
     untracked_args.push(file_path);
     let diff = git_output_owned(&root, &untracked_args)?;
     Ok(parse_diff_text(&diff, show_whitespace))
 }
 
-fn validated_file_args(file_paths: &[String]) -> Result<Vec<String>, String> {
+fn validated_file_args(file_paths: &[String]) -> Result<Vec<String>, ApplicationError> {
     if file_paths.is_empty() {
-        return Err("没有选择文件".into());
+        return Err(ApplicationError::new("file.selectionRequired"));
     }
     for file_path in file_paths {
         let path = Path::new(file_path);
@@ -2910,13 +3112,14 @@ fn validated_file_args(file_paths: &[String]) -> Result<Vec<String>, String> {
                 .components()
                 .any(|part| matches!(part, std::path::Component::ParentDir))
         {
-            return Err(format!("文件路径超出仓库范围：{file_path}"));
+            return Err(ApplicationError::new("file.outsideRepositoryPath")
+                .param("file_path", file_path.to_string()));
         }
     }
     Ok(file_paths.to_vec())
 }
 
-fn validated_file_path(file_path: &str) -> Result<String, String> {
+fn validated_file_path(file_path: &str) -> Result<String, ApplicationError> {
     validated_file_args(&[file_path.to_string()]).map(|mut values| values.remove(0))
 }
 
@@ -2924,7 +3127,7 @@ pub fn stage_files(
     repository_path: &str,
     file_paths: &[String],
     force: bool,
-) -> Result<Vec<RepositoryFile>, String> {
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_paths = validated_file_args(file_paths)?;
     for file_path in &file_paths {
@@ -2937,7 +3140,8 @@ pub fn stage_files(
                 .ok()
                 .is_some_and(|content| has_conflict_markers(&content))
         {
-            return Err(format!("请先处理文件中的全部冲突块：{file_path}"));
+            return Err(ApplicationError::new("conflict.resolveAll")
+                .param("file_path", file_path.to_string()));
         }
     }
     let mut args = vec!["add".to_string(), "--".to_string()];
@@ -2946,17 +3150,17 @@ pub fn stage_files(
     Ok(parse_changed_files(&root))
 }
 
-pub fn stage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+pub fn stage_patch(
+    repository_path: &str,
+    patch: &str,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let mut patch = patch.trim_start_matches('\u{feff}').to_string();
     if patch.trim().is_empty() {
-        return Err("没有选择要暂存的修改".into());
+        return Err(ApplicationError::new("patch.stageSelectionRequired"));
     }
     if patch.contains("new file mode 100644") {
-        if let Some(path) = patch
-            .lines()
-            .find_map(|line| line.strip_prefix("+++ b/"))
-        {
+        if let Some(path) = patch.lines().find_map(|line| line.strip_prefix("+++ b/")) {
             if git_success(&root, &["ls-files", "--error-unmatch", "--", path]) {
                 patch = patch
                     .replace("new file mode 100644\n", "")
@@ -2975,17 +3179,20 @@ pub fn stage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryF
         }
     }
     if file_count == 0 {
-        return Err("暂存 patch 缺少有效文件路径".into());
+        return Err(ApplicationError::new("patch.stagePathRequired"));
     }
     git_apply_cached(&root, &patch, false)?;
     Ok(parse_changed_files(&root))
 }
 
-pub fn restore_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+pub fn restore_patch(
+    repository_path: &str,
+    patch: &str,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let patch = patch.trim_start_matches('\u{feff}');
     if patch.trim().is_empty() {
-        return Err("没有选择要还原的修改".into());
+        return Err(ApplicationError::new("patch.restoreSelectionRequired"));
     }
     let mut file_path = None;
     for line in patch.lines() {
@@ -2997,7 +3204,7 @@ pub fn restore_patch(repository_path: &str, patch: &str) -> Result<Vec<Repositor
             file_path = Some(path.to_string());
         }
     }
-    let file_path = file_path.ok_or_else(|| "还原 patch 缺少有效文件路径".to_string())?;
+    let file_path = file_path.ok_or_else(|| ApplicationError::new("patch.restorePathRequired"))?;
     git_apply_reverse(&root, patch)?;
     let tracked = git_success(&root, &["ls-files", "--error-unmatch", "--", &file_path]);
     if !tracked {
@@ -3013,29 +3220,40 @@ pub fn restore_patch(repository_path: &str, patch: &str) -> Result<Vec<Repositor
     Ok(parse_changed_files(&root))
 }
 
-pub fn unstage_patch(repository_path: &str, patch: &str) -> Result<Vec<RepositoryFile>, String> {
+pub fn unstage_patch(
+    repository_path: &str,
+    patch: &str,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let patch = patch.trim_start_matches('\u{feff}');
     if patch.trim().is_empty() {
-        return Err("没有选择要取消暂存的修改".into());
+        return Err(ApplicationError::new("patch.unstageSelectionRequired"));
     }
     let mut file_count = 0;
     for line in patch.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/").or_else(|| line.strip_prefix("--- a/")) {
+        if let Some(path) = line
+            .strip_prefix("+++ b/")
+            .or_else(|| line.strip_prefix("--- a/"))
+        {
             validated_file_path(path)?;
             file_count += 1;
         }
     }
     if file_count == 0 {
-        return Err("取消暂存 patch 缺少有效文件路径".into());
+        return Err(ApplicationError::new("patch.unstagePathRequired"));
     }
     // Reversing a deletion recreates the index entry with its committed mode.
     let mut patch = patch.to_string();
     if patch.contains("deleted file mode 100644\n") {
         if let Some(path) = patch.lines().find_map(|line| line.strip_prefix("--- a/")) {
             if let Ok(entry) = git_output(&root, &["ls-tree", "HEAD", "--", path]) {
-                if let Some(mode @ ("100644" | "100755" | "120000")) = entry.split_whitespace().next() {
-                    patch = patch.replace("deleted file mode 100644\n", &format!("deleted file mode {mode}\n"));
+                if let Some(mode @ ("100644" | "100755" | "120000")) =
+                    entry.split_whitespace().next()
+                {
+                    patch = patch.replace(
+                        "deleted file mode 100644\n",
+                        &format!("deleted file mode {mode}\n"),
+                    );
                 }
             }
         }
@@ -3047,7 +3265,7 @@ pub fn unstage_patch(repository_path: &str, patch: &str) -> Result<Vec<Repositor
 pub fn unstage_files(
     repository_path: &str,
     file_paths: &[String],
-) -> Result<Vec<RepositoryFile>, String> {
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let mut args = vec![
         "restore".to_string(),
@@ -3067,7 +3285,7 @@ pub fn unstage_files(
 pub fn discard_worktree_files(
     repository_path: &str,
     file_paths: &[String],
-) -> Result<Vec<RepositoryFile>, String> {
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_paths = validated_file_args(file_paths)?;
     let mut tracked_args = vec![
@@ -3113,7 +3331,7 @@ pub fn discard_worktree_files(
 pub fn load_commit_stats(
     repository_path: &str,
     commit: &str,
-) -> Result<RepositoryCommitStats, String> {
+) -> Result<RepositoryCommitStats, ApplicationError> {
     let root = repository_root(repository_path)?;
     let hash = resolve_commit(&root, commit.trim())?;
     let parent_line = git_output_owned(
@@ -3178,7 +3396,7 @@ pub fn load_commit_stats(
 pub fn load_commit_files(
     repository_path: &str,
     commit: &str,
-) -> Result<Vec<RepositoryFile>, String> {
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let hash = resolve_commit(&root, commit.trim())?;
     let parent_line = git_output_owned(
@@ -3257,7 +3475,10 @@ pub fn load_commit_files(
     Ok(parse_repository_files(&numstat, &status))
 }
 
-pub fn load_commit_tree_files(repository_path: &str, commit: &str) -> Result<Vec<String>, String> {
+pub fn load_commit_tree_files(
+    repository_path: &str,
+    commit: &str,
+) -> Result<Vec<String>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let hash = resolve_commit(&root, commit.trim())?;
     let output = git_output_owned(
@@ -3277,14 +3498,34 @@ pub fn load_commit_tree_files(repository_path: &str, commit: &str) -> Result<Vec
         .collect())
 }
 
-pub fn load_commit_file_content(repository_path: &str, commit: &str, file_path: &str) -> Result<String, String> {
+pub fn load_commit_file_content(
+    repository_path: &str,
+    commit: &str,
+    file_path: &str,
+) -> Result<String, ApplicationError> {
     let path = Path::new(file_path);
-    if file_path.is_empty() || path.is_absolute() || path.components().any(|component| matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
-        return Err("提交文件路径无效".into());
+    if file_path.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(ApplicationError::new("file.commitPathInvalid"));
     }
     let root = repository_root(repository_path)?;
     let hash = resolve_commit(&root, commit.trim())?;
-    git_output_owned(&root, &["show".into(), format!("{hash}:{}", file_path.replace('\\', "/"))])
+    git_output_owned(
+        &root,
+        &[
+            "show".into(),
+            format!("{hash}:{}", file_path.replace('\\', "/")),
+        ],
+    )
 }
 
 pub fn commit_repository(
@@ -3292,9 +3533,9 @@ pub fn commit_repository(
     message: &str,
     amend: bool,
     sign: bool,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     if message.trim().is_empty() {
-        return Err("提交信息不能为空".into());
+        return Err(ApplicationError::new("commit.messageRequired"));
     }
     let root = repository_root(repository_path)?;
     let mut args = vec!["commit".to_string()];
@@ -3309,12 +3550,12 @@ pub fn commit_repository(
     git_output_owned(&root, &args).map(|_| ())
 }
 
-pub fn fetch_repository(repository_path: &str) -> Result<(), String> {
+pub fn fetch_repository(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     git_output(&root, &["fetch", "--all", "--prune"]).map(|_| ())
 }
 
-fn unresolved_gitlink_paths(root: &Path) -> Result<HashSet<String>, String> {
+fn unresolved_gitlink_paths(root: &Path) -> Result<HashSet<String>, ApplicationError> {
     let entries = git_output(root, &["ls-files", "-u"])?;
     Ok(entries
         .lines()
@@ -3325,7 +3566,7 @@ fn unresolved_gitlink_paths(root: &Path) -> Result<HashSet<String>, String> {
         .collect())
 }
 
-pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, String> {
+pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, ApplicationError> {
     let root = repository_root(repository_path)?;
     let paths = unresolved_gitlink_paths(&root)?;
     for path in &paths {
@@ -3334,21 +3575,23 @@ pub fn resolve_gitlink_conflicts_local(repository_path: &str) -> Result<usize, S
     Ok(paths.len())
 }
 
-fn repository_file_target(root: &Path, file_path: &str) -> Result<PathBuf, String> {
+fn repository_file_target(root: &Path, file_path: &str) -> Result<PathBuf, ApplicationError> {
     let file_path = validated_file_path(file_path)?;
     let target = root.join(&file_path);
-    let canonical_root =
-        std::fs::canonicalize(root).map_err(|error| format!("无法定位仓库：{error}"))?;
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| ApplicationError::new("repository.locate").cause(error))?;
     let mut parent = target.clone();
     while !parent.exists() {
         if !parent.pop() {
-            return Err(format!("文件路径超出仓库范围：{file_path}"));
+            return Err(ApplicationError::new("file.outsideRepositoryPath")
+                .param("file_path", file_path.to_string()));
         }
     }
-    let canonical_parent =
-        std::fs::canonicalize(&parent).map_err(|error| format!("无法定位文件路径：{error}"))?;
+    let canonical_parent = std::fs::canonicalize(&parent)
+        .map_err(|error| ApplicationError::new("file.locate").cause(error))?;
     if !canonical_parent.starts_with(&canonical_root) {
-        return Err(format!("文件路径超出仓库范围：{file_path}"));
+        return Err(ApplicationError::new("file.outsideRepositoryPath")
+            .param("file_path", file_path.to_string()));
     }
     Ok(target)
 }
@@ -3371,10 +3614,14 @@ fn has_conflict_markers(content: &str) -> bool {
     })
 }
 
-fn write_conflict_result(root: &Path, file_path: &str, content: &str) -> Result<(), String> {
+fn write_conflict_result(
+    root: &Path,
+    file_path: &str,
+    content: &str,
+) -> Result<(), ApplicationError> {
     let target = repository_file_target(root, file_path)?;
     std::fs::write(&target, content.as_bytes())
-        .map_err(|error| format!("写入合并结果失败：{error}"))
+        .map_err(|error| ApplicationError::new("conflict.write").cause(error))
 }
 
 pub fn resolve_conflict_block(
@@ -3382,21 +3629,22 @@ pub fn resolve_conflict_block(
     file_path: &str,
     block_index: usize,
     strategy: &str,
-) -> Result<String, String> {
+) -> Result<String, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     if !unresolved_paths(&root)
         .iter()
         .any(|path| path == &file_path)
     {
-        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+        return Err(ApplicationError::new("conflict.notConflicted")
+            .param("file_path", file_path.to_string()));
     }
     if !matches!(strategy, "current" | "incoming" | "both") {
-        return Err("未知的冲突块解决方式".into());
+        return Err(ApplicationError::new("conflict.blockStrategyInvalid"));
     }
     let target = repository_file_target(&root, &file_path)?;
-    let content =
-        std::fs::read_to_string(&target).map_err(|error| format!("无法读取冲突文件：{error}"))?;
+    let content = std::fs::read_to_string(&target)
+        .map_err(|error| ApplicationError::new("conflict.read").cause(error))?;
     let lines: Vec<&str> = content.lines().collect();
     let mut blocks = Vec::new();
     let mut cursor = 0;
@@ -3407,30 +3655,30 @@ pub fn resolve_conflict_block(
         }
         let start = cursor;
         if cursor + 1 >= lines.len() {
-            return Err("冲突标记不完整，无法解析冲突块".into());
+            return Err(ApplicationError::new("conflict.markersIncomplete"));
         }
         let Some(separator_offset) = lines[cursor + 1..]
             .iter()
             .position(|line| line.starts_with("======="))
         else {
-            return Err("冲突标记不完整，无法解析冲突块".into());
+            return Err(ApplicationError::new("conflict.markersIncomplete"));
         };
         let separator = cursor + 1 + separator_offset;
         if separator + 1 >= lines.len() {
-            return Err("冲突标记不完整，无法解析冲突块".into());
+            return Err(ApplicationError::new("conflict.markersIncomplete"));
         }
         let Some(end_offset) = lines[separator + 1..]
             .iter()
             .position(|line| line.starts_with(">>>>>>>"))
         else {
-            return Err("冲突标记不完整，无法解析冲突块".into());
+            return Err(ApplicationError::new("conflict.markersIncomplete"));
         };
         let end = separator + 1 + end_offset;
         blocks.push((start, separator, end));
         cursor = end + 1;
     }
     let Some(&(start, separator, end)) = blocks.get(block_index) else {
-        return Err(format!("未找到第 {} 个冲突块", block_index + 1));
+        return Err(ApplicationError::new("conflict.blockMissing").param("index", block_index + 1));
     };
     let current = lines[start + 1..separator].join("\n");
     let incoming = lines[separator + 1..end].join("\n");
@@ -3458,14 +3706,15 @@ pub fn resolve_conflict_block(
 pub fn load_conflict_file(
     repository_path: &str,
     file_path: &str,
-) -> Result<ConflictFileContent, String> {
+) -> Result<ConflictFileContent, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     if !unresolved_paths(&root)
         .iter()
         .any(|path| path == &file_path)
     {
-        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+        return Err(ApplicationError::new("conflict.notConflicted")
+            .param("file_path", file_path.to_string()));
     }
     let (base, base_binary) = conflict_stage_text(&root, 1, &file_path);
     let (current, current_binary) = conflict_stage_text(&root, 2, &file_path);
@@ -3499,15 +3748,15 @@ pub fn load_conflict_file(
         current,
         incoming,
         result,
-        current_label: if rebase {
-            "变基目标（当前）".into()
+        current_side: if rebase {
+            "rebase-target".into()
         } else {
-            "当前分支".into()
+            "current-branch".into()
         },
-        incoming_label: if rebase {
-            "正在应用的提交".into()
+        incoming_side: if rebase {
+            "applied-commit".into()
         } else {
-            "对方分支".into()
+            "incoming-branch".into()
         },
         binary: gitlink || base_binary || current_binary || incoming_binary || result_binary,
         gitlink,
@@ -3519,14 +3768,15 @@ pub fn resolve_conflict_file(
     file_path: &str,
     strategy: &str,
     content: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     if !unresolved_paths(&root)
         .iter()
         .any(|path| path == &file_path)
     {
-        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+        return Err(ApplicationError::new("conflict.notConflicted")
+            .param("file_path", file_path.to_string()));
     }
     let target = repository_file_target(&root, &file_path)?;
     let gitlink = unresolved_gitlink_paths(&root)?.contains(&file_path);
@@ -3561,34 +3811,39 @@ pub fn resolve_conflict_file(
                 combined.push_str(&incoming);
             }
             std::fs::write(&target, combined.as_bytes())
-                .map_err(|error| format!("写入合并结果失败：{error}"))?;
+                .map_err(|error| ApplicationError::new("conflict.write").cause(error))?;
         }
         "result" => {
-            let content = content.ok_or_else(|| "缺少待保存的合并结果".to_string())?;
+            let content =
+                content.ok_or_else(|| ApplicationError::new("conflict.resultRequired"))?;
             write_conflict_result(&root, &file_path, content)?;
         }
         "delete" => {
             git_output_owned(&root, &["rm".into(), "-f".into(), "--".into(), file_path])?;
         }
-        _ => return Err("未知的冲突解决方式".into()),
+        _ => return Err(ApplicationError::new("conflict.strategyInvalid")),
     }
     Ok(())
 }
 
-pub fn launch_conflict_mergetool(repository_path: &str, file_path: &str) -> Result<(), String> {
+pub fn launch_conflict_mergetool(
+    repository_path: &str,
+    file_path: &str,
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     if !unresolved_paths(&root)
         .iter()
         .any(|path| path == &file_path)
     {
-        return Err(format!("文件当前没有未解决冲突：{file_path}"));
+        return Err(ApplicationError::new("conflict.notConflicted")
+            .param("file_path", file_path.to_string()));
     }
     if optional_git_output(&root, &["config", "--get", "merge.tool"])
         .trim()
         .is_empty()
     {
-        return Err("尚未配置 merge.tool，请先在 Git 配置中选择外部合并工具".into());
+        return Err(ApplicationError::new("conflict.mergetoolRequired"));
     }
     git_output_owned(
         &root,
@@ -3608,14 +3863,14 @@ pub fn launch_conflict_mergetool(repository_path: &str, file_path: &str) -> Resu
 pub fn preview_repository_rebase(
     repository_path: &str,
     onto: &str,
-) -> Result<RebasePreview, String> {
+) -> Result<RebasePreview, ApplicationError> {
     let root = repository_root(repository_path)?;
     let onto_hash = resolve_commit(&root, onto.trim())?;
     let branch = git_output(&root, &["branch", "--show-current"])?
         .trim()
         .to_string();
     if branch.is_empty() {
-        return Err("Detached HEAD 状态下无法开始变基".into());
+        return Err(ApplicationError::new("rebase.detached"));
     }
     let head = resolve_commit(&root, "HEAD")?;
     let merge_base = git_output_owned(&root, &["merge-base".into(), head, onto_hash.clone()])?
@@ -3637,15 +3892,14 @@ pub fn preview_repository_rebase(
     })
 }
 
-pub fn continue_repository_operation(repository_path: &str) -> Result<(), String> {
+pub fn continue_repository_operation(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let operation =
-        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+        repository_operation(&root).ok_or_else(|| ApplicationError::new("operation.none"))?;
     if !operation.conflicts.is_empty() {
-        return Err(format!(
-            "仍有 {} 个文件未解决冲突",
-            operation.conflicts.len()
-        ));
+        return Err(
+            ApplicationError::new("conflict.remaining").param("count", operation.conflicts.len())
+        );
     }
     let args = match operation.kind.as_str() {
         "merge" => vec![
@@ -3666,45 +3920,44 @@ pub fn continue_repository_operation(repository_path: &str) -> Result<(), String
             "cherry-pick".into(),
             "--continue".into(),
         ],
-        _ => return Err("当前操作不支持继续".into()),
+        _ => return Err(ApplicationError::new("operation.continueUnsupported")),
     };
     match git_output_owned(&root, &args) {
         Ok(_) => Ok(()),
         Err(error)
             if operation.kind == "cherry-pick"
-                && error.to_ascii_lowercase().contains("cherry-pick is now empty") =>
+                && error
+                    .diagnostic_text()
+                    .to_ascii_lowercase()
+                    .contains("cherry-pick is now empty") =>
         {
-            git_output_owned(
-                &root,
-                &["cherry-pick".into(), "--skip".into()],
-            )
-            .map(|_| ())
+            git_output_owned(&root, &["cherry-pick".into(), "--skip".into()]).map(|_| ())
         }
         Err(error) => Err(error),
     }
 }
 
-pub fn skip_repository_operation(repository_path: &str) -> Result<(), String> {
+pub fn skip_repository_operation(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let operation =
-        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+        repository_operation(&root).ok_or_else(|| ApplicationError::new("operation.none"))?;
     let command = match operation.kind.as_str() {
         "rebase" => "rebase",
         "cherry-pick" => "cherry-pick",
-        _ => return Err("合并操作不能跳过提交".into()),
+        _ => return Err(ApplicationError::new("merge.skipUnsupported")),
     };
     git_output_owned(&root, &[command.into(), "--skip".into()]).map(|_| ())
 }
 
-pub fn abort_repository_operation(repository_path: &str) -> Result<(), String> {
+pub fn abort_repository_operation(repository_path: &str) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let operation =
-        repository_operation(&root).ok_or_else(|| "当前没有正在进行的 Git 操作".to_string())?;
+        repository_operation(&root).ok_or_else(|| ApplicationError::new("operation.none"))?;
     let command = match operation.kind.as_str() {
         "merge" => "merge",
         "rebase" => "rebase",
         "cherry-pick" => "cherry-pick",
-        _ => return Err("当前冲突不是由可中止的 Git 操作产生".into()),
+        _ => return Err(ApplicationError::new("conflict.abortUnsupported")),
     };
     git_output_owned(&root, &[command.into(), "--abort".into()]).map(|_| ())
 }
@@ -3741,7 +3994,7 @@ fn parse_file_history_entries(output: &str) -> Vec<FileHistoryEntry> {
 pub fn load_file_history(
     repository_path: &str,
     file_path: &str,
-) -> Result<Vec<FileHistoryEntry>, String> {
+) -> Result<Vec<FileHistoryEntry>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     let args = vec![
@@ -3766,9 +4019,9 @@ pub fn load_line_history(
     file_path: &str,
     line: usize,
     revision: Option<&str>,
-) -> Result<Vec<FileHistoryEntry>, String> {
+) -> Result<Vec<FileHistoryEntry>, ApplicationError> {
     if line == 0 || line > 10_000_000 {
-        return Err("行号必须在 1 到 10000000 之间".into());
+        return Err(ApplicationError::new("history.lineInvalid"));
     }
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
@@ -3795,7 +4048,7 @@ pub fn load_file_commit_diff(
     commit: &str,
     file_path: &str,
     show_whitespace: bool,
-) -> Result<Vec<DiffLine>, String> {
+) -> Result<Vec<DiffLine>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     let commit = resolve_commit(&root, commit.trim())?;
@@ -3815,24 +4068,24 @@ pub fn load_file_commit_diff(
         .map(ToString::to_string);
     let mut args = if let Some(parent) = parent {
         vec![
-                "-c".into(),
-                "core.quotepath=false".into(),
-                "diff".into(),
-                "--no-color".into(),
-                parent,
-                commit,
-                "--unified=100000".into(),
-            ]
+            "-c".into(),
+            "core.quotepath=false".into(),
+            "diff".into(),
+            "--no-color".into(),
+            parent,
+            commit,
+            "--unified=100000".into(),
+        ]
     } else {
         vec![
-                "-c".into(),
-                "core.quotepath=false".into(),
-                "show".into(),
-                "--format=".into(),
-                "--no-color".into(),
-                commit,
-                "--unified=100000".into(),
-            ]
+            "-c".into(),
+            "core.quotepath=false".into(),
+            "show".into(),
+            "--format=".into(),
+            "--no-color".into(),
+            commit,
+            "--unified=100000".into(),
+        ]
     };
     args.push("--".into());
     args.push(file_path);
@@ -3844,7 +4097,7 @@ pub fn load_file_blame(
     repository_path: &str,
     file_path: &str,
     revision: Option<&str>,
-) -> Result<Vec<BlameLine>, String> {
+) -> Result<Vec<BlameLine>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_path = validated_file_path(file_path)?;
     let mut args = vec![
@@ -3898,11 +4151,14 @@ pub fn load_file_blame(
     Ok(result)
 }
 
-pub fn preview_branch_prefix(repository_path: &str, prefix: &str) -> Result<Vec<String>, String> {
+pub fn preview_branch_prefix(
+    repository_path: &str,
+    prefix: &str,
+) -> Result<Vec<String>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let prefix = prefix.trim().trim_end_matches('/');
     if prefix.is_empty() {
-        return Err("分支前缀不能为空".into());
+        return Err(ApplicationError::new("branch.prefixRequired"));
     }
     let mut branches: Vec<String> = optional_git_output(
         &root,
@@ -3921,17 +4177,17 @@ pub fn delete_branch_prefix(
     repository_path: &str,
     prefix: &str,
     expected_branches: &[String],
-) -> Result<(), String> {
+) -> Result<(), ApplicationError> {
     let root = repository_root(repository_path)?;
     let mut actual = preview_branch_prefix(repository_path, prefix)?;
     let mut expected = expected_branches.to_vec();
     actual.sort();
     expected.sort();
     if actual.is_empty() {
-        return Err("该前缀下没有本地分支".into());
+        return Err(ApplicationError::new("branch.prefixEmpty"));
     }
     if actual != expected {
-        return Err("分支列表已变化，请重新确认删除范围".into());
+        return Err(ApplicationError::new("branch.selectionChanged"));
     }
     // Checked-out branches are skipped rather than rejected, so a group that happens to contain the
     // current branch still deletes everything else the confirmation dialog listed.
@@ -4017,10 +4273,14 @@ mod tests {
             .expect("read current branch")
             .trim()
             .to_string();
-        git_output(&repository.0, &["checkout", "--detach"])
-            .expect("detach at local branch head");
+        git_output(&repository.0, &["checkout", "--detach"]).expect("detach at local branch head");
 
-        assert_eq!(read_repository(&path).expect("read detached repository").branch, branch);
+        assert_eq!(
+            read_repository(&path)
+                .expect("read detached repository")
+                .branch,
+            branch
+        );
     }
 
     #[test]
@@ -4029,15 +4289,13 @@ mod tests {
         let clean = repository_state_token(&repository.0.to_string_lossy())
             .expect("read clean repository token");
 
-        fs::write(repository.0.join("README.md"), "first\nsecond\n")
-            .expect("modify tracked file");
+        fs::write(repository.0.join("README.md"), "first\nsecond\n").expect("modify tracked file");
         let modified = repository_state_token(&repository.0.to_string_lossy())
             .expect("read modified repository token");
         assert_ne!(modified, clean);
 
         git_output(&repository.0, &["add", "README.md"]).expect("stage update");
-        git_output(&repository.0, &["commit", "-m", "second commit"])
-            .expect("commit update");
+        git_output(&repository.0, &["commit", "-m", "second commit"]).expect("commit update");
         let committed = repository_state_token(&repository.0.to_string_lossy())
             .expect("read committed repository token");
         assert_ne!(committed, modified);
@@ -4052,8 +4310,17 @@ mod tests {
         let rows = parse_unstaged_diff(&repository.0, "README.md", false)
             .expect("read whitespace-filtered diff");
 
-        assert!(rows.iter().all(|row| row.code.trim() != "first" || row.kind == "same"), "{:?}", rows.iter().map(|row| (&row.kind, &row.code)).collect::<Vec<_>>());
-        assert!(rows.iter().any(|row| row.code == "sec ond" && row.kind == "add"));
+        assert!(
+            rows.iter()
+                .all(|row| row.code.trim() != "first" || row.kind == "same"),
+            "{:?}",
+            rows.iter()
+                .map(|row| (&row.kind, &row.code))
+                .collect::<Vec<_>>()
+        );
+        assert!(rows
+            .iter()
+            .any(|row| row.code == "sec ond" && row.kind == "add"));
         assert!(parse_unstaged_diff(&repository.0, "README.md", true)
             .expect("read regular diff")
             .iter()
@@ -4069,8 +4336,11 @@ mod tests {
         git_output(&repository.0, &["add", "README.md"]).expect("stage patch context baseline");
         git_output(&repository.0, &["commit", "-m", "patch context baseline"])
             .expect("commit patch context baseline");
-        fs::write(repository.0.join("README.md"), "  first  \nsecond!\nthird\n")
-            .expect("modify whitespace and substantive content");
+        fs::write(
+            repository.0.join("README.md"),
+            "  first  \nsecond!\nthird\n",
+        )
+        .expect("modify whitespace and substantive content");
 
         let rows = parse_unstaged_diff(&repository.0, "README.md", false)
             .expect("read whitespace-filtered diff");
@@ -4084,15 +4354,18 @@ mod tests {
         let stage_patch_text = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n first\n-second\n+second!\n third\n";
         stage_patch(&path, stage_patch_text).expect("stage substantive line with old-side context");
         let restore_patch_text = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n   first  \n-second\n+second!\n third\n";
-        restore_patch(&path, restore_patch_text).expect("restore substantive line with new-side context");
+        restore_patch(&path, restore_patch_text)
+            .expect("restore substantive line with new-side context");
 
         assert_eq!(
             fs::read_to_string(repository.0.join("README.md")).expect("read restored file"),
             "  first  \nsecond\nthird\n"
         );
-        assert!(git_output(&repository.0, &["diff", "--cached", "--", "README.md"])
-            .expect("read staged diff")
-            .contains("+second!"));
+        assert!(
+            git_output(&repository.0, &["diff", "--cached", "--", "README.md"])
+                .expect("read staged diff")
+                .contains("+second!")
+        );
     }
 
     #[test]
@@ -4121,8 +4394,14 @@ mod tests {
         fs::write(repository.0.join("README.md"), "first!\nsecond\nlocal\n").unwrap();
         let patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,2 @@\n first!\n+second\n";
         unstage_patch(&path, patch).expect("unstage selected insertion");
-        assert_eq!(git_output(&repository.0, &["show", ":README.md"]).unwrap(), "first!\n");
-        assert_eq!(fs::read_to_string(repository.0.join("README.md")).unwrap(), "first!\nsecond\nlocal\n");
+        assert_eq!(
+            git_output(&repository.0, &["show", ":README.md"]).unwrap(),
+            "first!\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).unwrap(),
+            "first!\nsecond\nlocal\n"
+        );
         assert!(unstage_patch(&path, "").is_err());
         assert!(unstage_patch(&path, "--- a/../outside\n+++ b/../outside\n").is_err());
     }
@@ -4137,8 +4416,13 @@ mod tests {
         git_output(&repository.0, &["add", "new.txt"]).unwrap();
         let patch = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1,1 @@\n+new\n";
         unstage_patch(&path, patch).expect("unstage added file without HEAD");
-        assert!(git_output(&repository.0, &["ls-files", "--", "new.txt"]).unwrap().is_empty());
-        assert_eq!(fs::read_to_string(repository.0.join("new.txt")).unwrap(), "new\n");
+        assert!(git_output(&repository.0, &["ls-files", "--", "new.txt"])
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            fs::read_to_string(repository.0.join("new.txt")).unwrap(),
+            "new\n"
+        );
     }
 
     #[test]
@@ -4150,19 +4434,26 @@ mod tests {
         git_output(&repository.0, &["rm", "-f", "README.md"]).unwrap();
         let patch = "diff --git a/README.md b/README.md\ndeleted file mode 100644\n--- a/README.md\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-first\n";
         unstage_patch(&path, patch).expect("restore deleted executable to index");
-        let index_entry = git_output(&repository.0, &["ls-files", "--stage", "--", "README.md"]).unwrap();
+        let index_entry =
+            git_output(&repository.0, &["ls-files", "--stage", "--", "README.md"]).unwrap();
         assert!(index_entry.starts_with("100755 "), "{index_entry}");
         assert!(!repository.0.join("README.md").exists());
     }
 
     #[test]
     fn crlf_diff_rows_keep_patch_content_separate_from_display_text() {
-        let rows = parse_diff_text("@@ -1,3 +1,3 @@\n context\r\n-old\r\n+new\r\n tail\r\n", true);
+        let rows = parse_diff_text(
+            "@@ -1,3 +1,3 @@\n context\r\n-old\r\n+new\r\n tail\r\n",
+            true,
+        );
         assert_eq!(rows[0].old_code.as_deref(), Some("context\r"));
         assert_eq!(rows[1].old_code.as_deref(), Some("old\r"));
         assert_eq!(rows[2].new_code.as_deref(), Some("new\r"));
         assert_eq!(rows[2].code, "new");
-        let hidden = parse_diff_text("@@ -1,2 +1,2 @@\n-old\r\n-tail\r\n+new\r\n+  tail  \r\n", false);
+        let hidden = parse_diff_text(
+            "@@ -1,2 +1,2 @@\n-old\r\n-tail\r\n+new\r\n+  tail  \r\n",
+            false,
+        );
         assert_eq!(hidden[2].old_code.as_deref(), Some("tail\r"));
         assert_eq!(hidden[2].new_code.as_deref(), Some("  tail  \r"));
     }
@@ -4182,14 +4473,17 @@ mod tests {
         git_output(root, &["config", "core.autocrlf", "input"]).unwrap();
         fs::write(root.join("README.md"), after).unwrap();
         let rows = parse_unstaged_diff(root, "README.md", true).unwrap();
-        let body: String = rows.iter().map(|row| {
-            let (prefix, code) = match row.kind.as_str() {
-                "del" => ('-', row.old_code.as_ref().unwrap()),
-                "add" => ('+', row.new_code.as_ref().unwrap()),
-                _ => (' ', row.old_code.as_ref().unwrap()),
-            };
-            format!("{prefix}{code}\n")
-        }).collect();
+        let body: String = rows
+            .iter()
+            .map(|row| {
+                let (prefix, code) = match row.kind.as_str() {
+                    "del" => ('-', row.old_code.as_ref().unwrap()),
+                    "add" => ('+', row.new_code.as_ref().unwrap()),
+                    _ => (' ', row.old_code.as_ref().unwrap()),
+                };
+                format!("{prefix}{code}\n")
+            })
+            .collect();
         let patch = format!("diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n{body}");
         stage_patch(&path, &patch).expect("stage parsed CRLF block");
         assert_eq!(git_output(root, &["show", ":README.md"]).unwrap(), after);
@@ -4202,7 +4496,10 @@ mod tests {
 
     #[test]
     fn retains_missing_newline_markers_in_diff_rows() {
-        let rows = parse_diff_text("@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", true);
+        let rows = parse_diff_text(
+            "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+            true,
+        );
         assert!(rows[0].old_no_newline);
         assert!(rows[1].new_no_newline);
     }
@@ -4210,7 +4507,12 @@ mod tests {
     #[test]
     fn hidden_whitespace_context_keeps_replacements_in_file_order() {
         let rows = parse_diff_text("@@ -1,2 +1,2 @@\n-old\n-tail\n+new\n+  tail  \n", false);
-        assert_eq!(rows.iter().map(|row| (row.kind.as_str(), row.code.as_str())).collect::<Vec<_>>(), vec![("del", "old"), ("add", "new"), ("same", "  tail  ")]);
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.kind.as_str(), row.code.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("del", "old"), ("add", "new"), ("same", "  tail  ")]
+        );
     }
 
     #[test]
@@ -4223,8 +4525,7 @@ mod tests {
             .expect("read parent commit")
             .trim()
             .to_string();
-        git_output(&repository.0, &["commit", "-m", "第二次提交"])
-            .expect("create second commit");
+        git_output(&repository.0, &["commit", "-m", "第二次提交"]).expect("create second commit");
 
         let message = undo_last_commit(&path).expect("undo latest commit");
 
@@ -4251,8 +4552,7 @@ mod tests {
         let path = repository.0.to_string_lossy().to_string();
         fs::write(repository.0.join("README.md"), "second\n").expect("write second commit");
         git_output(&repository.0, &["add", "README.md"]).expect("stage second commit");
-        git_output(&repository.0, &["commit", "-m", "第二次提交"])
-            .expect("create second commit");
+        git_output(&repository.0, &["commit", "-m", "第二次提交"]).expect("create second commit");
         fs::write(repository.0.join("README.md"), "second\nlocal\n")
             .expect("write existing worktree change");
 
@@ -4275,8 +4575,7 @@ mod tests {
         let path = repository.0.to_string_lossy().to_string();
         fs::write(repository.0.join("README.md"), "second\n").expect("write second commit");
         git_output(&repository.0, &["add", "README.md"]).expect("stage second commit");
-        git_output(&repository.0, &["commit", "-m", "第二次提交"])
-            .expect("create second commit");
+        git_output(&repository.0, &["commit", "-m", "第二次提交"]).expect("create second commit");
         let reverted = git_output(&repository.0, &["rev-parse", "HEAD"])
             .expect("read reverted source")
             .trim()
@@ -4312,18 +4611,25 @@ mod tests {
             "feat: complete message\n\nIssue: BL-42\n# editor hint\n"
         );
         assert_eq!(
-            git_output(&repository.0, &["config", "--local", "--get", "commit.template"])
-                .expect("read local template setting")
-                .trim(),
+            git_output(
+                &repository.0,
+                &["config", "--local", "--get", "commit.template"]
+            )
+            .expect("read local template setting")
+            .trim(),
             template.path
         );
 
         let snapshot = clear_repository_commit_template(&path).expect("clear repository template");
+        assert!(git_output(
+            &repository.0,
+            &["config", "--local", "--get", "commit.template"]
+        )
+        .is_err());
         assert!(
-            git_output(&repository.0, &["config", "--local", "--get", "commit.template"])
-                .is_err()
+            snapshot.commit_template.is_none()
+                || snapshot.commit_template.unwrap().path != template.path
         );
-        assert!(snapshot.commit_template.is_none() || snapshot.commit_template.unwrap().path != template.path);
         assert!(!Path::new(&template.path).exists());
     }
 
@@ -4404,9 +4710,11 @@ mod tests {
         let root_files = load_commit_files(&path, &history[1].hash).expect("load root files");
         assert_eq!(root_files.len(), 1);
         assert_eq!(root_files[0].r#type, "A");
-        assert!(!load_file_commit_diff(&path, &history[0].hash, "README.md", true)
-            .expect("load historical file diff")
-            .is_empty());
+        assert!(
+            !load_file_commit_diff(&path, &history[0].hash, "README.md", true)
+                .expect("load historical file diff")
+                .is_empty()
+        );
         let blame = load_file_blame(&path, "README.md", None).expect("load file blame");
         assert_eq!(blame.len(), 2);
         let historical_blame = load_file_blame(&path, "README.md", Some(&history[1].hash))
@@ -4457,7 +4765,11 @@ mod tests {
             .expect("write unstaged version");
 
         let snapshot = read_repository(&repository.0.to_string_lossy()).expect("read repository");
-        let file = snapshot.files.iter().find(|file| file.path == "README.md").expect("changed file");
+        let file = snapshot
+            .files
+            .iter()
+            .find(|file| file.path == "README.md")
+            .expect("changed file");
 
         assert_eq!((file.staged_add, file.staged_del), (1, 1));
         assert_eq!((file.unstaged_add, file.unstaged_del), (1, 0));
@@ -4466,27 +4778,34 @@ mod tests {
     #[test]
     fn separates_staged_and_unstaged_diff_for_the_same_file() {
         let repository = test_repository();
-        fs::write(repository.0.join("README.md"), "first\nstaged\n")
-            .expect("write staged change");
+        fs::write(repository.0.join("README.md"), "first\nstaged\n").expect("write staged change");
         git_output(&repository.0, &["add", "README.md"]).expect("stage change");
         fs::write(repository.0.join("README.md"), "first\nstaged\nunstaged\n")
             .expect("write unstaged change");
 
         let staged = parse_staged_diff(&repository.0, "README.md", true).expect("read staged diff");
-        let unstaged = parse_unstaged_diff(&repository.0, "README.md", true).expect("read unstaged diff");
+        let unstaged =
+            parse_unstaged_diff(&repository.0, "README.md", true).expect("read unstaged diff");
 
-        assert!(staged.iter().any(|line| line.code == "staged" && line.kind == "add"));
-        assert!(!staged.iter().any(|line| line.code == "unstaged" && line.kind == "add"));
-        assert!(unstaged.iter().any(|line| line.code == "unstaged" && line.kind == "add"));
-        assert!(!unstaged.iter().any(|line| line.code == "staged" && line.kind == "add"));
+        assert!(staged
+            .iter()
+            .any(|line| line.code == "staged" && line.kind == "add"));
+        assert!(!staged
+            .iter()
+            .any(|line| line.code == "unstaged" && line.kind == "add"));
+        assert!(unstaged
+            .iter()
+            .any(|line| line.code == "unstaged" && line.kind == "add"));
+        assert!(!unstaged
+            .iter()
+            .any(|line| line.code == "staged" && line.kind == "add"));
     }
 
     #[test]
     fn stages_a_context_anchored_deletion_patch_at_the_original_location() {
         let repository = test_repository();
         let path = repository.0.to_string_lossy().to_string();
-        fs::write(repository.0.join("README.md"), "top\nremove\nbottom\n")
-            .expect("write baseline");
+        fs::write(repository.0.join("README.md"), "top\nremove\nbottom\n").expect("write baseline");
         git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
         git_output(&repository.0, &["commit", "-m", "baseline"]).expect("commit baseline");
         fs::write(repository.0.join("README.md"), "top\nbottom\n").expect("remove line");
@@ -4571,13 +4890,8 @@ mod tests {
 
         let submodule_path = repository.0.join("vendor/module");
         let snapshot = read_repository(&submodule_path.to_string_lossy()).expect("read submodule");
-        let expected_parent = display_path(
-            &repository
-                .0
-                .canonicalize()
-                .expect("canonical parent"),
-        )
-        .replace('\\', "/");
+        let expected_parent = display_path(&repository.0.canonicalize().expect("canonical parent"))
+            .replace('\\', "/");
         let actual_parent = snapshot
             .superproject_path
             .expect("submodule should expose its superproject");
@@ -4687,9 +5001,11 @@ mod tests {
         assert!(!load_stash_file_diff(&path, &reference, "README.md", true)
             .expect("load tracked stash diff")
             .is_empty());
-        assert!(!load_stash_file_diff(&path, &reference, "untracked.txt", true)
-            .expect("load untracked stash diff")
-            .is_empty());
+        assert!(
+            !load_stash_file_diff(&path, &reference, "untracked.txt", true)
+                .expect("load untracked stash diff")
+                .is_empty()
+        );
         apply_repository_stash(&path, &reference, false).expect("apply stash");
         assert!(fs::read_to_string(repository.0.join("README.md"))
             .expect("read applied stash")
@@ -4730,12 +5046,15 @@ mod tests {
             .expect("create linked worktree");
         assert!(parse_worktrees(&repository.0)
             .iter()
-            .any(|item| normalized_path_key(Path::new(&item.path)) == normalized_path_key(&worktree_path) && item.branch.as_deref() == Some("feat/linked")));
+            .any(|item| normalized_path_key(Path::new(&item.path))
+                == normalized_path_key(&worktree_path)
+                && item.branch.as_deref() == Some("feat/linked")));
 
         set_repository_worktree_lock(&path, &worktree, true).expect("lock linked worktree");
         assert!(parse_worktrees(&repository.0)
             .iter()
-            .find(|item| normalized_path_key(Path::new(&item.path)) == normalized_path_key(&worktree_path))
+            .find(|item| normalized_path_key(Path::new(&item.path))
+                == normalized_path_key(&worktree_path))
             .and_then(|item| item.locked.as_ref())
             .is_some());
         set_repository_worktree_lock(&path, &worktree, false).expect("unlock linked worktree");
@@ -4798,7 +5117,10 @@ mod tests {
             "binary.png",
             "src/空 格.ts",
         ] {
-            assert!(paths.iter().any(|path| path == expected), "missing {expected}");
+            assert!(
+                paths.iter().any(|path| path == expected),
+                "missing {expected}"
+            );
         }
         assert!(!paths.iter().any(|path| path == "src/new.ts"));
         assert!(load_commit_tree_files(&path, "--all").is_err());
@@ -4816,7 +5138,10 @@ mod tests {
             ],
         )
         .expect("set origin default branch");
-        assert_eq!(repository_default_branch(&repository.0), Some("trunk".into()));
+        assert_eq!(
+            repository_default_branch(&repository.0),
+            Some("trunk".into())
+        );
         let snapshot = read_repository(&repository.0.to_string_lossy()).expect("read repository");
         assert_eq!(snapshot.default_branch.as_deref(), Some("trunk"));
     }
@@ -4844,8 +5169,7 @@ mod tests {
         git_output(&repository.0, &["config", "protocol.file.allow", "always"])
             .expect("allow local submodule update");
 
-        deinitialize_repository_submodule(&path, "vendor/module")
-            .expect("deinitialize submodule");
+        deinitialize_repository_submodule(&path, "vendor/module").expect("deinitialize submodule");
         assert_eq!(parse_submodules(&repository.0)[0].status, "uninitialized");
         initialize_repository_submodule(&path, "vendor/module").expect("initialize submodule");
         update_repository_submodule(&path, Some("vendor/module")).expect("update submodule");
@@ -4971,8 +5295,7 @@ mod tests {
             .expect("commit merge feature change");
 
         git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
-        fs::write(repository.0.join("base-only.txt"), "from base\n")
-            .expect("write base-only file");
+        fs::write(repository.0.join("base-only.txt"), "from base\n").expect("write base-only file");
         git_output(&repository.0, &["add", "base-only.txt"]).expect("stage base-only file");
         git_output(&repository.0, &["commit", "-m", "base-only change"])
             .expect("commit base-only change");
@@ -4982,21 +5305,33 @@ mod tests {
             .to_string();
         git_output(
             &repository.0,
-            &["merge", "--no-ff", "feat/merge-pick", "-m", "create merge commit"],
+            &[
+                "merge",
+                "--no-ff",
+                "feat/merge-pick",
+                "-m",
+                "create merge commit",
+            ],
         )
         .expect("create merge commit");
         let merge_commit = git_output(&repository.0, &["rev-parse", "HEAD"])
             .expect("read merge commit")
             .trim()
             .to_string();
-        let parents = git_output(&repository.0, &["rev-list", "--parents", "-n", "1", &merge_commit])
-            .expect("read merge parents")
-            .split_whitespace()
-            .count();
+        let parents = git_output(
+            &repository.0,
+            &["rev-list", "--parents", "-n", "1", &merge_commit],
+        )
+        .expect("read merge parents")
+        .split_whitespace()
+        .count();
         assert_eq!(parents, 3);
 
-        git_output(&repository.0, &["branch", "cherry-pick-merge-target", &first_parent])
-            .expect("create cherry-pick target branch");
+        git_output(
+            &repository.0,
+            &["branch", "cherry-pick-merge-target", &first_parent],
+        )
+        .expect("create cherry-pick target branch");
         git_output(&repository.0, &["switch", "cherry-pick-merge-target"])
             .expect("switch cherry-pick target branch");
         assert!(cherry_pick_repository_commit(&path, &merge_commit).is_err());
@@ -5008,7 +5343,9 @@ mod tests {
                 .replace("\r\n", "\n"),
             "from feature\n"
         );
-        assert!(cherry_pick_repository_commit_with_mainline(&path, &merge_commit, Some(3)).is_err());
+        assert!(
+            cherry_pick_repository_commit_with_mainline(&path, &merge_commit, Some(3)).is_err()
+        );
     }
 
     #[test]
@@ -5111,12 +5448,12 @@ mod tests {
             .trim()
             .to_string();
         git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
-        fs::write(repository.0.join("README.md"), "main version\n")
-            .expect("write main version");
+        fs::write(repository.0.join("README.md"), "main version\n").expect("write main version");
         git_output(&repository.0, &["commit", "-am", "main conflict"])
             .expect("commit main conflict");
 
-        cherry_pick_repository_commit(&path, &cherry_hash).expect_err("cherry-pick should conflict");
+        cherry_pick_repository_commit(&path, &cherry_hash)
+            .expect_err("cherry-pick should conflict");
         let snapshot = read_repository(&path).expect("read cherry-pick conflict state");
         assert!(snapshot.files.iter().any(|file| file.path == "README.md"));
         let operation = snapshot.operation.expect("cherry-pick operation");
@@ -5141,7 +5478,14 @@ mod tests {
         let submodule_path = submodule.0.to_string_lossy().to_string();
         git_output(
             &repository.0,
-            &["-c", "protocol.file.allow=always", "submodule", "add", &submodule_path, "apps/planning"],
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                &submodule_path,
+                "apps/planning",
+            ],
         )
         .expect("add submodule");
         let checkout = repository.0.join("apps/planning");
@@ -5164,8 +5508,7 @@ mod tests {
             .to_string();
         git_output(&checkout, &["fetch", "origin"]).expect("fetch feature submodule commit");
         git_output(&checkout, &["checkout", &feature_pointer]).expect("checkout feature pointer");
-        git_output(&repository.0, &["add", "apps/planning"])
-            .expect("stage feature pointer");
+        git_output(&repository.0, &["add", "apps/planning"]).expect("stage feature pointer");
         git_output(&repository.0, &["commit", "-m", "update feature planning"])
             .expect("commit feature pointer");
         let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
@@ -5174,8 +5517,11 @@ mod tests {
             .to_string();
 
         git_output(&repository.0, &["switch", &base_branch]).expect("switch current branch");
-        git_output(&submodule.0, &["switch", "-c", "current-planning", &initial])
-            .expect("create divergent current submodule branch");
+        git_output(
+            &submodule.0,
+            &["switch", "-c", "current-planning", &initial],
+        )
+        .expect("create divergent current submodule branch");
         fs::write(submodule.0.join("current.txt"), "current\n")
             .expect("write current submodule change");
         git_output(&submodule.0, &["add", "current.txt"]).expect("stage current submodule change");
@@ -5187,19 +5533,25 @@ mod tests {
             .to_string();
         git_output(&checkout, &["fetch", "origin"]).expect("fetch current submodule commit");
         git_output(&checkout, &["checkout", &current_pointer]).expect("checkout current pointer");
-        git_output(&repository.0, &["add", "apps/planning"])
-            .expect("stage current pointer");
+        git_output(&repository.0, &["add", "apps/planning"]).expect("stage current pointer");
         git_output(&repository.0, &["commit", "-m", "update current planning"])
             .expect("commit current pointer");
 
-        cherry_pick_repository_commit(&path, &cherry_hash).expect_err("cherry-pick should conflict");
+        cherry_pick_repository_commit(&path, &cherry_hash)
+            .expect_err("cherry-pick should conflict");
 
         assert!(!unresolved_paths(&repository.0)
             .iter()
             .any(|conflict| conflict == "apps/planning"));
-        let stage = git_output(&repository.0, &["ls-files", "--stage", "--", "apps/planning"])
-            .expect("read staged current pointer");
-        assert_eq!(stage.trim(), format!("160000 {current_pointer} 0\tapps/planning"));
+        let stage = git_output(
+            &repository.0,
+            &["ls-files", "--stage", "--", "apps/planning"],
+        )
+        .expect("read staged current pointer");
+        assert_eq!(
+            stage.trim(),
+            format!("160000 {current_pointer} 0\tapps/planning")
+        );
     }
 
     #[test]
@@ -5215,8 +5567,7 @@ mod tests {
             .expect("create merge branch");
         fs::write(repository.0.join("merged.txt"), "merged\n").expect("write merged file");
         git_output(&repository.0, &["add", "merged.txt"]).expect("add merged file");
-        git_output(&repository.0, &["commit", "-m", "新增合并文件"])
-            .expect("commit merged file");
+        git_output(&repository.0, &["commit", "-m", "新增合并文件"]).expect("commit merged file");
         git_output(&repository.0, &["switch", &base_branch]).expect("switch base branch");
 
         fs::write(repository.0.join("README.md"), "local change\n")
@@ -5248,8 +5599,7 @@ mod tests {
             .trim()
             .to_string();
 
-        git_output(&submodule.0, &["switch", "-c", "left"])
-            .expect("create left source branch");
+        git_output(&submodule.0, &["switch", "-c", "left"]).expect("create left source branch");
         fs::write(submodule.0.join("left.txt"), "left\n").expect("write left source change");
         git_output(&submodule.0, &["add", "left.txt"]).expect("stage left source change");
         git_output(&submodule.0, &["commit", "-m", "left source commit"])
@@ -5307,10 +5657,17 @@ mod tests {
             .expect("gitlink-only merge should complete automatically");
 
         let snapshot = read_repository(&path).expect("read completed gitlink merge");
-        assert!(snapshot.operation.is_none(), "merge operation should be complete");
+        assert!(
+            snapshot.operation.is_none(),
+            "merge operation should be complete"
+        );
         let parents = git_output(&repository.0, &["rev-list", "--parents", "-n", "1", "HEAD"])
             .expect("read merge parents");
-        assert_eq!(parents.split_whitespace().count(), 3, "HEAD must be a merge commit");
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "HEAD must be a merge commit"
+        );
 
         assert!(
             unresolved_paths(&repository.0)
@@ -5318,8 +5675,11 @@ mod tests {
                 .all(|conflict| conflict != "vendor/module"),
             "gitlink conflict should be staged automatically"
         );
-        let stage = git_output(&repository.0, &["ls-files", "--stage", "--", "vendor/module"])
-            .expect("read staged gitlink");
+        let stage = git_output(
+            &repository.0,
+            &["ls-files", "--stage", "--", "vendor/module"],
+        )
+        .expect("read staged gitlink");
         assert_eq!(
             stage.trim(),
             format!("160000 {right_gitlink} 0\tvendor/module"),
@@ -5332,47 +5692,113 @@ mod tests {
         let repository = test_repository();
         let path = repository.0.to_string_lossy().to_string();
         let current = git_output(&repository.0, &["branch", "--show-current"])
-            .expect("current branch").trim().to_string();
+            .expect("current branch")
+            .trim()
+            .to_string();
         let before = git_output(&repository.0, &["rev-parse", "HEAD"])
-            .expect("initial commit").trim().to_string();
+            .expect("initial commit")
+            .trim()
+            .to_string();
         for branch in ["sync", "diverged", "occupied", "untracked"] {
             git_output(&repository.0, &["branch", branch]).expect("create branch");
         }
-        git_output(&repository.0, &["remote", "add", "origin", "C:/nonexistent-branchline-remote"])
-            .expect("configure unavailable remote");
-        git_output(&repository.0, &["commit", "--allow-empty", "-m", "upstream update"])
-            .expect("upstream commit");
+        git_output(
+            &repository.0,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "C:/nonexistent-branchline-remote",
+            ],
+        )
+        .expect("configure unavailable remote");
+        git_output(
+            &repository.0,
+            &["commit", "--allow-empty", "-m", "upstream update"],
+        )
+        .expect("upstream commit");
         let upstream = git_output(&repository.0, &["rev-parse", "HEAD"])
-            .expect("upstream hash").trim().to_string();
-        git_output(&repository.0, &["update-ref", "refs/remotes/origin/main", &upstream])
-            .expect("simulate completed Fetch");
+            .expect("upstream hash")
+            .trim()
+            .to_string();
+        git_output(
+            &repository.0,
+            &["update-ref", "refs/remotes/origin/main", &upstream],
+        )
+        .expect("simulate completed Fetch");
         git_output(&repository.0, &["reset", "--hard", &before]).expect("restore current branch");
         for branch in [current.as_str(), "sync", "diverged", "occupied"] {
-            git_output(&repository.0, &["branch", "--set-upstream-to", "origin/main", branch])
-                .expect("set upstream");
+            git_output(
+                &repository.0,
+                &["branch", "--set-upstream-to", "origin/main", branch],
+            )
+            .expect("set upstream");
         }
         git_output(&repository.0, &["switch", "diverged"]).expect("switch diverged");
-        git_output(&repository.0, &["commit", "--allow-empty", "-m", "local update"])
-            .expect("local commit");
+        git_output(
+            &repository.0,
+            &["commit", "--allow-empty", "-m", "local update"],
+        )
+        .expect("local commit");
         let diverged = git_output(&repository.0, &["rev-parse", "HEAD"]).expect("diverged hash");
         git_output(&repository.0, &["switch", &current]).expect("restore checkout");
-        let worktree_path = repository.0.join("other-worktree").to_string_lossy().to_string();
-        git_output(&repository.0, &["worktree", "add", &worktree_path, "occupied"])
-            .expect("checkout occupied branch elsewhere");
+        let worktree_path = repository
+            .0
+            .join("other-worktree")
+            .to_string_lossy()
+            .to_string();
+        git_output(
+            &repository.0,
+            &["worktree", "add", &worktree_path, "occupied"],
+        )
+        .expect("checkout occupied branch elsewhere");
         fs::write(repository.0.join("README.md"), "local changes\n").expect("write local changes");
         let status = git_output(&repository.0, &["status", "--porcelain"]).expect("initial status");
 
         fast_forward_repository_branch(&path, "sync").expect("use fetched refs without network");
-        assert_eq!(git_output(&repository.0, &["rev-parse", "sync"]).unwrap().trim(), upstream);
+        assert_eq!(
+            git_output(&repository.0, &["rev-parse", "sync"])
+                .unwrap()
+                .trim(),
+            upstream
+        );
         fast_forward_repository_branch(&path, "sync").expect("up-to-date is safe");
-        for branch in [current.as_str(), "diverged", "occupied", "untracked", "missing"] {
-            assert!(fast_forward_repository_branch(&path, branch).is_err(), "must refuse {branch}");
+        for branch in [
+            current.as_str(),
+            "diverged",
+            "occupied",
+            "untracked",
+            "missing",
+        ] {
+            assert!(
+                fast_forward_repository_branch(&path, branch).is_err(),
+                "must refuse {branch}"
+            );
         }
-        assert_eq!(git_output(&repository.0, &["rev-parse", "HEAD"]).unwrap().trim(), before);
-        assert_eq!(git_output(&repository.0, &["rev-parse", "diverged"]).unwrap(), diverged);
-        assert_eq!(git_output(&repository.0, &["rev-parse", "occupied"]).unwrap().trim(), before);
-        assert_eq!(git_output(&repository.0, &["status", "--porcelain"]).unwrap(), status);
-        assert_eq!(fs::read_to_string(repository.0.join("README.md")).unwrap(), "local changes\n");
+        assert_eq!(
+            git_output(&repository.0, &["rev-parse", "HEAD"])
+                .unwrap()
+                .trim(),
+            before
+        );
+        assert_eq!(
+            git_output(&repository.0, &["rev-parse", "diverged"]).unwrap(),
+            diverged
+        );
+        assert_eq!(
+            git_output(&repository.0, &["rev-parse", "occupied"])
+                .unwrap()
+                .trim(),
+            before
+        );
+        assert_eq!(
+            git_output(&repository.0, &["status", "--porcelain"]).unwrap(),
+            status
+        );
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).unwrap(),
+            "local changes\n"
+        );
     }
 
     #[test]
@@ -5523,8 +5949,8 @@ mod tests {
             .expect("write conflicting local update");
         let error = pull_repository_branch(&path, &base_branch)
             .expect_err("auto stash restore should report conflict");
-        assert!(error.contains("拉取已完成"));
-        assert!(error.contains("自动 Stash 已保留"));
+        assert_eq!(error.code, "pull.restoreConflict");
+        assert!(!error.diagnostic_text().is_empty());
         assert_eq!(parse_stashes(&repository.0).len(), stash_count + 1);
         assert!(git_output(&repository.0, &["status", "--porcelain"])
             .expect("read auto stash conflict status")
@@ -5709,7 +6135,7 @@ mod tests {
         assert_eq!(operation.steps.len(), 1);
         assert_eq!(operation.steps[0].status, "current");
         let conflict = load_conflict_file(&path, "route.txt").expect("load rebase conflict");
-        assert_eq!(conflict.current_label, "变基目标（当前）");
+        assert_eq!(conflict.current_side, "rebase-target");
         assert!(conflict
             .incoming
             .as_deref()

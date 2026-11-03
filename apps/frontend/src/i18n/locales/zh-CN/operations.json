@@ -1,1 +1,14 @@
-{}
+{
+  "kind": {
+    "merge": "合并进行中",
+    "rebase": "变基进行中",
+    "cherry-pick": "Cherry-pick 进行中",
+    "conflict": "冲突待处理"
+  },
+  "side": {
+    "current-branch": "当前分支",
+    "rebase-target": "变基目标（当前）",
+    "incoming-branch": "对方分支",
+    "applied-commit": "正在应用的提交"
+  }
+}

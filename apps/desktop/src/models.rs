@@ -65,7 +65,6 @@ pub struct RepositoryOperationStep {
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryOperationState {
     pub kind: String,
-    pub label: String,
     pub original_branch: Option<String>,
     pub onto: Option<String>,
     pub current_step: usize,
@@ -84,8 +83,8 @@ pub struct ConflictFileContent {
     pub current: Option<String>,
     pub incoming: Option<String>,
     pub result: String,
-    pub current_label: String,
-    pub incoming_label: String,
+    pub current_side: String,
+    pub incoming_side: String,
     pub binary: bool,
     pub gitlink: bool,
 }

@@ -4,6 +4,223 @@
     "required": "此操作需要桌面版。请运行 pnpm desktop:dev。"
   },
   "repository": {
-    "required": "请先打开本地仓库"
+    "required": "请先打开本地仓库",
+    "access": "无法访问仓库",
+    "directoryMissing": "选择的目录不存在",
+    "notGit": "该目录不是 Git 仓库，也不在 Git Worktree 中",
+    "originMissing": "当前仓库没有 origin 远程仓库",
+    "locate": "无法定位仓库",
+    "readmeRead": "无法读取 README",
+    "absolutePathRequired": "请选择仓库的绝对路径",
+    "sourceInvalid": "请输入有效的远程地址或本地仓库路径",
+    "destinationNotEmpty": "目标目录必须为空，请选择新目录或空目录",
+    "destinationInvalid": "目标目录无效",
+    "parentMissing": "目标目录的父目录不存在"
+  },
+  "git": {
+    "start": "无法启动 Git",
+    "commandFailed": "Git 命令执行失败",
+    "wait": "等待 Git 完成失败"
+  },
+  "configuration": {
+    "homeUnavailable": "无法确定用户配置目录",
+    "nameRequired": "Git 用户名不能为空",
+    "emailInvalid": "请输入有效的 Git 邮箱",
+    "lineEndingInvalid": "无效的换行符策略",
+    "pullStrategyInvalid": "无效的拉取策略",
+    "globalTemplateDirectory": "创建全局模板目录失败",
+    "globalTemplateWrite": "写入全局提交模板失败",
+    "repositoryTemplateDirectory": "创建仓库模板目录失败",
+    "repositoryTemplateWrite": "写入仓库提交模板失败"
+  },
+  "patch": {
+    "write": "无法写入 Git patch",
+    "apply": "Git 无法应用所选修改块",
+    "restore": "Git 无法还原所选修改块",
+    "stageSelectionRequired": "没有选择要暂存的修改",
+    "stagePathRequired": "暂存 patch 缺少有效文件路径",
+    "restoreSelectionRequired": "没有选择要还原的修改",
+    "restorePathRequired": "还原 patch 缺少有效文件路径",
+    "unstageSelectionRequired": "没有选择要取消暂存的修改",
+    "unstagePathRequired": "取消暂存 patch 缺少有效文件路径"
+  },
+  "stash": {
+    "gitlinkConflict": "Gitlink 存在未解决冲突，无法安全创建 Stash",
+    "indexRestore": "Stash 已创建，但恢复 Gitlink 索引状态失败",
+    "indexRestoreAfterFailure": "同时恢复 Gitlink 索引状态失败",
+    "referenceInvalid": "无效的 Stash 引用",
+    "noChanges": "除 Gitlink 外没有可 Stash 的变更",
+    "noStagedChanges": "除 Gitlink 外没有可 Stash 的已暂存变更",
+    "noUnstagedChanges": "除 Gitlink 外没有可 Stash 的未暂存变更",
+    "scopeInvalid": "不支持的 Stash 范围"
+  },
+  "file": {
+    "access": "无法访问文件",
+    "outsideRepository": "文件路径超出仓库范围",
+    "binaryPreview": "暂不支持预览二进制文件",
+    "selectionRequired": "没有选择文件",
+    "outsideRepositoryPath": "文件路径超出仓库范围：{{file_path}}",
+    "commitPathInvalid": "提交文件路径无效",
+    "locate": "无法定位文件路径"
+  },
+  "reference": {
+    "invalid": "无效的提交或分支：{{reference}}"
+  },
+  "worktree": {
+    "missing": "Worktree 不存在：{{path}}",
+    "pathRequired": "Worktree 目录不能为空",
+    "exists": "该目录已经是 Worktree：{{path}}",
+    "branchRequired": "Worktree 分支不能为空",
+    "removeCurrent": "不能移除当前 Worktree",
+    "cleanRequired": "工作区存在未提交变更，请先提交或 Stash 后再继续"
+  },
+  "submodule": {
+    "pathRequired": "Submodule 路径不能为空",
+    "missing": "Submodule 不存在：{{requested}}"
+  },
+  "branch": {
+    "exists": "分支已存在：{{branch}}",
+    "localMissing": "本地分支不存在：{{branch}}",
+    "missing": "分支不存在：{{branch}}",
+    "createFromRemote": "无法从远程分支创建本地分支：{{branch}}",
+    "nameRequired": "分支名不能为空",
+    "remoteInvalid": "无法识别远程分支：{{branch}}",
+    "upstreamMissing": "分支 {{branch}} 尚未配置上游分支",
+    "unpushed": "分支 {{branch}} 包含尚未推送的提交，无法在后台快进；请先切换到该分支",
+    "checkedOut": "分支 {{branch}} 正在检出，跳过自动快进",
+    "cannotFastForward": "分支 {{branch}} 无法安全快进，保留本地提交",
+    "deleteCurrent": "不能删除当前分支：{{branch}}",
+    "prefixRequired": "分支前缀不能为空",
+    "prefixEmpty": "该前缀下没有本地分支",
+    "selectionChanged": "分支列表已变化，请重新确认删除范围"
+  },
+  "conflict": {
+    "gitlinkResolution": "自动处理 Gitlink 冲突失败",
+    "resolveAll": "请先处理文件中的全部冲突块：{{file_path}}",
+    "write": "写入合并结果失败",
+    "notConflicted": "文件当前没有未解决冲突：{{file_path}}",
+    "blockStrategyInvalid": "未知的冲突块解决方式",
+    "read": "无法读取冲突文件",
+    "markersIncomplete": "冲突标记不完整，无法解析冲突块",
+    "blockMissing": "未找到第 {{index}} 个冲突块",
+    "resultRequired": "缺少待保存的合并结果",
+    "strategyInvalid": "未知的冲突解决方式",
+    "mergetoolRequired": "尚未配置 merge.tool，请先在 Git 配置中选择外部合并工具",
+    "remaining": "仍有 {{count}} 个文件未解决冲突",
+    "abortUnsupported": "当前冲突不是由可中止的 Git 操作产生"
+  },
+  "operation": {
+    "mainlineRequired": "合并提交需要选择主线父提交（-m），请指定 1 到父提交数量之间的编号",
+    "mainlineInvalid": "主线父提交编号无效：请输入 1 到 {{parent_count}} 之间的编号",
+    "mainlineUnexpected": "普通提交不能指定主线父提交",
+    "resetBlocked": "当前存在未完成的 Git 操作，请先完成或中止后再回退",
+    "none": "当前没有正在进行的 Git 操作",
+    "continueUnsupported": "当前操作不支持继续"
+  },
+  "pull": {
+    "autoStashFailed": "检测到本地修改，但 Git 未能创建自动 Stash；为避免覆盖文件，拉取已取消。请手动处理 Submodule 或特殊工作区变更后重试。",
+    "changesRestored": "本地修改已从自动 Stash 恢复。",
+    "restoreFailed": "恢复自动 Stash 失败：\n本地修改仍保留在 stash@{0}。",
+    "restoreConflict": "拉取已完成，但恢复本地修改时产生冲突或失败：\n自动 Stash 已保留在 stash@{0}，请解决工作区冲突后再处理该 Stash。"
+  },
+  "push": {
+    "detached": "当前处于 Detached HEAD，无法直接推送"
+  },
+  "commit": {
+    "parentMissing": "当前提交没有父提交，无法撤回",
+    "messageRequired": "提交信息不能为空"
+  },
+  "tag": {
+    "nameRequired": "标签名称不能为空",
+    "exists": "标签已存在：{{tag}}"
+  },
+  "merge": {
+    "detached": "Detached HEAD 状态下无法计算合并队列",
+    "skipUnsupported": "合并操作不能跳过提交"
+  },
+  "rebase": {
+    "detached": "Detached HEAD 状态下无法开始变基"
+  },
+  "history": {
+    "lineInvalid": "行号必须在 1 到 10000000 之间"
+  },
+  "editor": {
+    "notFound": "未找到 VS Code，请先安装 VS Code 并启用 code 命令",
+    "open": "无法打开 VS Code"
+  },
+  "task": {
+    "load_stash_file_diff": "读取 Stash Diff失败",
+    "load_stash_files": "读取 Stash 文件失败",
+    "drop_repository_stash": "删除 Stash失败",
+    "apply_repository_stash": "应用 Stash失败",
+    "create_scoped_repository_stash": "快速 Stash失败",
+    "create_repository_stash": "创建 Stash失败",
+    "deinitialize_repository_submodule": "取消初始化 Submodule失败",
+    "sync_repository_submodules": "同步 Submodule URL失败",
+    "update_repository_submodule": "更新 Submodule失败",
+    "initialize_repository_submodule": "初始化 Submodule失败",
+    "prune_repository_worktrees": "清理 Worktree失败",
+    "set_repository_worktree_lock": "锁定 Worktree失败",
+    "remove_repository_worktree": "移除 Worktree失败",
+    "create_repository_worktree": "创建 Worktree失败",
+    "load_merge_queue": "读取合并队列失败",
+    "load_compare_file_diff": "读取比较 Diff失败",
+    "compare_repository_refs": "比较分支失败",
+    "delete_repository_branch": "删除分支失败",
+    "create_repository_tag": "创建标签失败",
+    "abort_repository_operation": "中止 Git 操作失败",
+    "skip_repository_operation": "跳过当前提交失败",
+    "continue_repository_operation": "继续 Git 操作失败",
+    "preview_repository_rebase": "预览变基失败",
+    "rebase_repository_onto": "变基失败",
+    "revert_repository_commit": "还原提交失败",
+    "undo_last_commit": "撤回上一次提交失败",
+    "reset_repository_to_commit": "回退提交失败",
+    "push_repository": "推送分支失败",
+    "fast_forward_repository_branch": "自动快进分支失败",
+    "pull_repository_branch": "拉取分支失败",
+    "cherry_pick_repository_commit": "操作失败：cherry pick repository commit",
+    "merge_repository_reference": "合并失败",
+    "create_repository_branch": "创建分支失败",
+    "switch_repository_branch": "切换分支失败",
+    "delete_branch_prefix": "删除分支前缀失败",
+    "preview_branch_prefix": "读取分支前缀失败",
+    "load_line_history": "读取指定行历史失败",
+    "load_file_blame": "读取逐行归属失败",
+    "load_file_commit_diff": "读取文件提交 Diff失败",
+    "load_file_history": "读取文件历史失败",
+    "launch_conflict_mergetool": "打开外部合并工具失败",
+    "resolve_conflict_block": "解决冲突块失败",
+    "resolve_conflict_file": "保存冲突解决结果失败",
+    "load_conflict_file": "读取冲突文件失败",
+    "resolve_gitlink_conflicts_local": "解决 Gitlink 冲突失败",
+    "commit_repository": "提交失败",
+    "load_commit_file_content": "读取提交文件内容失败",
+    "load_commit_tree_files": "读取提交文件树失败",
+    "load_commit_files": "读取提交文件失败",
+    "load_commit_stats": "读取提交统计失败",
+    "discard_worktree_files": "丢弃改动失败",
+    "unstage_files": "取消暂存失败",
+    "unstage_patch": "取消暂存修改块失败",
+    "restore_patch": "还原修改块失败",
+    "stage_patch": "暂存修改块失败",
+    "stage_files": "暂存文件失败",
+    "fetch_repository": "操作失败：fetch repository",
+    "load_staged_file_diff": "读取已暂存 Diff失败",
+    "load_unstaged_file_diff": "读取未暂存 Diff失败",
+    "load_file_diff": "读取 Diff失败",
+    "load_repository_state_token": "检查仓库状态失败",
+    "load_repository_history": "读取扩展提交图谱失败",
+    "load_repository": "读取仓库失败",
+    "clear_command_logs": "操作失败：clear command logs",
+    "load_command_logs": "操作失败：load command logs",
+    "clear_repository_commit_template": "移除仓库提交模板失败",
+    "update_repository_commit_template": "保存仓库提交模板失败",
+    "update_git_user_config": "保存 Git 配置失败",
+    "load_git_user_config": "读取 Git 配置失败",
+    "open_repository_in_vscode": "打开 VS Code失败",
+    "create_repository": "创建仓库失败",
+    "load_repository_readme": "读取 README失败",
+    "load_repository_details": "读取仓库信息失败"
   }
 }

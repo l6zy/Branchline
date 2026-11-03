@@ -1,1 +1,14 @@
-{}
+{
+  "kind": {
+    "merge": "Merge in progress",
+    "rebase": "Rebase in progress",
+    "cherry-pick": "Cherry-pick in progress",
+    "conflict": "Conflicts to resolve"
+  },
+  "side": {
+    "current-branch": "Current branch",
+    "rebase-target": "Rebase target (current)",
+    "incoming-branch": "Incoming branch",
+    "applied-commit": "Commit being applied"
+  }
+}

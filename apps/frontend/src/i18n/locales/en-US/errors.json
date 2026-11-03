@@ -4,6 +4,223 @@
     "required": "This action requires the desktop app. Run pnpm desktop:dev."
   },
   "repository": {
-    "required": "Open a local repository first"
+    "required": "Open a local repository first",
+    "access": "Unable to access the repository",
+    "directoryMissing": "The selected directory does not exist",
+    "notGit": "This directory is not a Git repository or worktree",
+    "originMissing": "This repository has no origin remote",
+    "locate": "Unable to locate the repository",
+    "readmeRead": "Unable to read README",
+    "absolutePathRequired": "Choose an absolute repository path",
+    "sourceInvalid": "Enter a valid remote URL or local repository path",
+    "destinationNotEmpty": "Choose a new or empty destination directory",
+    "destinationInvalid": "Invalid destination directory",
+    "parentMissing": "The destination parent directory does not exist"
+  },
+  "git": {
+    "start": "Unable to start Git",
+    "commandFailed": "The Git command failed",
+    "wait": "Unable to wait for Git to finish"
+  },
+  "configuration": {
+    "homeUnavailable": "Unable to locate the user configuration directory",
+    "nameRequired": "Git user name is required",
+    "emailInvalid": "Enter a valid Git email address",
+    "lineEndingInvalid": "Invalid line ending policy",
+    "pullStrategyInvalid": "Invalid pull strategy",
+    "globalTemplateDirectory": "Unable to create the global template directory",
+    "globalTemplateWrite": "Unable to write the global commit template",
+    "repositoryTemplateDirectory": "Unable to create the repository template directory",
+    "repositoryTemplateWrite": "Unable to write the repository commit template"
+  },
+  "patch": {
+    "write": "Unable to write the Git patch",
+    "apply": "Git could not apply the selected changes",
+    "restore": "Git could not restore the selected changes",
+    "stageSelectionRequired": "No changes selected to stage",
+    "stagePathRequired": "The staging patch has no valid file path",
+    "restoreSelectionRequired": "No changes selected to restore",
+    "restorePathRequired": "The restore patch has no valid file path",
+    "unstageSelectionRequired": "No changes selected to unstage",
+    "unstagePathRequired": "The unstaging patch has no valid file path"
+  },
+  "stash": {
+    "gitlinkConflict": "Resolve Gitlink conflicts before creating a stash",
+    "indexRestore": "The stash was created, but restoring the Gitlink index failed",
+    "indexRestoreAfterFailure": "The operation failed and the Gitlink index could not be restored",
+    "referenceInvalid": "Invalid stash reference",
+    "noChanges": "There are no changes to stash other than Gitlinks",
+    "noStagedChanges": "There are no staged changes to stash other than Gitlinks",
+    "noUnstagedChanges": "There are no unstaged changes to stash other than Gitlinks",
+    "scopeInvalid": "Unsupported stash scope"
+  },
+  "file": {
+    "access": "Unable to access the file",
+    "outsideRepository": "The file path is outside the repository",
+    "binaryPreview": "Binary file previews are not supported",
+    "selectionRequired": "No files selected",
+    "outsideRepositoryPath": "The file path is outside the repository: {{file_path}}",
+    "commitPathInvalid": "Invalid commit file path",
+    "locate": "Unable to locate the file path"
+  },
+  "reference": {
+    "invalid": "Invalid commit or branch: {{reference}}"
+  },
+  "worktree": {
+    "missing": "Worktree does not exist: {{path}}",
+    "pathRequired": "A worktree directory is required",
+    "exists": "This directory is already a worktree: {{path}}",
+    "branchRequired": "A worktree branch is required",
+    "removeCurrent": "The current worktree cannot be removed",
+    "cleanRequired": "Commit or stash local changes before continuing"
+  },
+  "submodule": {
+    "pathRequired": "A submodule path is required",
+    "missing": "Submodule does not exist: {{requested}}"
+  },
+  "branch": {
+    "exists": "The branch already exists: {{branch}}",
+    "localMissing": "Local branch does not exist: {{branch}}",
+    "missing": "Branch does not exist: {{branch}}",
+    "createFromRemote": "Unable to create a local branch from: {{branch}}",
+    "nameRequired": "A branch name is required",
+    "remoteInvalid": "Unable to identify the remote branch: {{branch}}",
+    "upstreamMissing": "Branch {{branch}} has no upstream configured",
+    "unpushed": "Branch {{branch}} has unpushed commits and cannot be fast-forwarded in the background. Switch to it first.",
+    "checkedOut": "Branch {{branch}} is checked out; automatic fast-forward was skipped",
+    "cannotFastForward": "Branch {{branch}} cannot be safely fast-forwarded; local commits were preserved",
+    "deleteCurrent": "Cannot delete the current branch: {{branch}}",
+    "prefixRequired": "A branch prefix is required",
+    "prefixEmpty": "There are no local branches with this prefix",
+    "selectionChanged": "The branch list changed. Review the branches to delete again."
+  },
+  "conflict": {
+    "gitlinkResolution": "Automatic Gitlink conflict resolution failed",
+    "resolveAll": "Resolve all conflict blocks first: {{file_path}}",
+    "write": "Unable to save the merge result",
+    "notConflicted": "The file has no unresolved conflicts: {{file_path}}",
+    "blockStrategyInvalid": "Unknown conflict block resolution strategy",
+    "read": "Unable to read the conflicted file",
+    "markersIncomplete": "Incomplete conflict markers; cannot parse conflict blocks",
+    "blockMissing": "Conflict block {{index}} was not found",
+    "resultRequired": "A merge result is required",
+    "strategyInvalid": "Unknown conflict resolution strategy",
+    "mergetoolRequired": "Choose an external merge tool in Git settings first (merge.tool)",
+    "remaining": "{{count}} files still have unresolved conflicts",
+    "abortUnsupported": "These conflicts were not created by an abortable Git operation"
+  },
+  "operation": {
+    "mainlineRequired": "Select a mainline parent (-m) between 1 and the number of parents",
+    "mainlineInvalid": "Invalid mainline parent: enter a number between 1 and {{parent_count}}",
+    "mainlineUnexpected": "A non-merge commit cannot specify a mainline parent",
+    "resetBlocked": "Complete or abort the active Git operation before resetting",
+    "none": "There is no active Git operation",
+    "continueUnsupported": "This operation cannot be continued"
+  },
+  "pull": {
+    "autoStashFailed": "Git could not stash local changes. Pull was cancelled to protect your files. Handle submodule or special worktree changes and retry.",
+    "changesRestored": "The pull failed. Local changes were restored from the automatic stash.",
+    "restoreFailed": "The pull failed and the automatic stash could not be restored. Local changes remain in stash@{0}.",
+    "restoreConflict": "Pull completed, but restoring local changes failed or caused conflicts. The automatic stash remains in stash@{0}; resolve worktree conflicts before handling it."
+  },
+  "push": {
+    "detached": "Cannot push directly from a detached HEAD"
+  },
+  "commit": {
+    "parentMissing": "This commit has no parent and cannot be undone",
+    "messageRequired": "A commit message is required"
+  },
+  "tag": {
+    "nameRequired": "A tag name is required",
+    "exists": "The tag already exists: {{tag}}"
+  },
+  "merge": {
+    "detached": "The merge queue is unavailable with a detached HEAD",
+    "skipUnsupported": "Commits cannot be skipped during a merge"
+  },
+  "rebase": {
+    "detached": "Cannot start a rebase with a detached HEAD"
+  },
+  "history": {
+    "lineInvalid": "Line number must be between 1 and 10000000"
+  },
+  "editor": {
+    "notFound": "VS Code was not found. Install it and enable the code command.",
+    "open": "Unable to open VS Code"
+  },
+  "task": {
+    "load_stash_file_diff": "Operation failed: load stash file diff",
+    "load_stash_files": "Operation failed: load stash files",
+    "drop_repository_stash": "Operation failed: drop repository stash",
+    "apply_repository_stash": "Operation failed: apply repository stash",
+    "create_scoped_repository_stash": "Operation failed: create scoped repository stash",
+    "create_repository_stash": "Operation failed: create repository stash",
+    "deinitialize_repository_submodule": "Operation failed: deinitialize repository submodule",
+    "sync_repository_submodules": "Operation failed: sync repository submodules",
+    "update_repository_submodule": "Operation failed: update repository submodule",
+    "initialize_repository_submodule": "Operation failed: initialize repository submodule",
+    "prune_repository_worktrees": "Operation failed: prune repository worktrees",
+    "set_repository_worktree_lock": "Operation failed: set repository worktree lock",
+    "remove_repository_worktree": "Operation failed: remove repository worktree",
+    "create_repository_worktree": "Operation failed: create repository worktree",
+    "load_merge_queue": "Operation failed: load merge queue",
+    "load_compare_file_diff": "Operation failed: load compare file diff",
+    "compare_repository_refs": "Operation failed: compare repository refs",
+    "delete_repository_branch": "Operation failed: delete repository branch",
+    "create_repository_tag": "Operation failed: create repository tag",
+    "abort_repository_operation": "Operation failed: abort repository operation",
+    "skip_repository_operation": "Operation failed: skip repository operation",
+    "continue_repository_operation": "Operation failed: continue repository operation",
+    "preview_repository_rebase": "Operation failed: preview repository rebase",
+    "rebase_repository_onto": "Operation failed: rebase repository onto",
+    "revert_repository_commit": "Operation failed: revert repository commit",
+    "undo_last_commit": "Operation failed: undo last commit",
+    "reset_repository_to_commit": "Operation failed: reset repository to commit",
+    "push_repository": "Operation failed: push repository",
+    "fast_forward_repository_branch": "Operation failed: fast forward repository branch",
+    "pull_repository_branch": "Operation failed: pull repository branch",
+    "cherry_pick_repository_commit": "Operation failed: cherry pick repository commit",
+    "merge_repository_reference": "Operation failed: merge repository reference",
+    "create_repository_branch": "Operation failed: create repository branch",
+    "switch_repository_branch": "Operation failed: switch repository branch",
+    "delete_branch_prefix": "Operation failed: delete branch prefix",
+    "preview_branch_prefix": "Operation failed: preview branch prefix",
+    "load_line_history": "Operation failed: load line history",
+    "load_file_blame": "Operation failed: load file blame",
+    "load_file_commit_diff": "Operation failed: load file commit diff",
+    "load_file_history": "Operation failed: load file history",
+    "launch_conflict_mergetool": "Operation failed: launch conflict mergetool",
+    "resolve_conflict_block": "Operation failed: resolve conflict block",
+    "resolve_conflict_file": "Operation failed: resolve conflict file",
+    "load_conflict_file": "Operation failed: load conflict file",
+    "resolve_gitlink_conflicts_local": "Operation failed: resolve gitlink conflicts local",
+    "commit_repository": "Operation failed: commit repository",
+    "load_commit_file_content": "Operation failed: load commit file content",
+    "load_commit_tree_files": "Operation failed: load commit tree files",
+    "load_commit_files": "Operation failed: load commit files",
+    "load_commit_stats": "Operation failed: load commit stats",
+    "discard_worktree_files": "Operation failed: discard worktree files",
+    "unstage_files": "Operation failed: unstage files",
+    "unstage_patch": "Operation failed: unstage patch",
+    "restore_patch": "Operation failed: restore patch",
+    "stage_patch": "Operation failed: stage patch",
+    "stage_files": "Operation failed: stage files",
+    "fetch_repository": "Operation failed: fetch repository",
+    "load_staged_file_diff": "Operation failed: load staged file diff",
+    "load_unstaged_file_diff": "Operation failed: load unstaged file diff",
+    "load_file_diff": "Operation failed: load file diff",
+    "load_repository_state_token": "Operation failed: load repository state token",
+    "load_repository_history": "Operation failed: load repository history",
+    "load_repository": "Operation failed: load repository",
+    "clear_command_logs": "Operation failed: clear command logs",
+    "load_command_logs": "Operation failed: load command logs",
+    "clear_repository_commit_template": "Operation failed: clear repository commit template",
+    "update_repository_commit_template": "Operation failed: update repository commit template",
+    "update_git_user_config": "Operation failed: update git user config",
+    "load_git_user_config": "Operation failed: load git user config",
+    "open_repository_in_vscode": "Operation failed: open repository in vscode",
+    "create_repository": "Operation failed: create repository",
+    "load_repository_readme": "Operation failed: load repository readme",
+    "load_repository_details": "Operation failed: load repository details"
   }
 }

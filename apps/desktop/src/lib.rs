@@ -1,4 +1,5 @@
 mod commands;
+mod errors;
 mod git;
 mod models;
 mod repository_management;

@@ -75,7 +75,6 @@ export type RepositoryOperationStep = {
 
 export type RepositoryOperationState = {
   kind: 'merge' | 'rebase' | 'cherry-pick' | 'conflict'
-  label: string
   originalBranch?: string
   onto?: string
   currentStep: number
@@ -92,8 +91,8 @@ export type ConflictFileContent = {
   current: string | null
   incoming: string | null
   result: string
-  currentLabel: string
-  incomingLabel: string
+  currentSide: 'current-branch' | 'rebase-target'
+  incomingSide: 'incoming-branch' | 'applied-commit'
   binary: boolean
   gitlink: boolean
 }
@@ -233,4 +232,10 @@ export type MergeQueueSnapshot = {
   currentBranch: string
   conflicts: string[]
   candidates: MergeCandidate[]
+}
+export type ApplicationErrorData = {
+  code: string
+  params: Record<string, string | number | boolean>
+  details?: string
+  causes?: ApplicationErrorData[]
 }

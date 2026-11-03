@@ -1,3 +1,4 @@
+use crate::errors::ApplicationError;
 use crate::{git, models::RepositorySubmodule};
 use serde::Serialize;
 use std::{
@@ -37,7 +38,7 @@ pub struct RepositoryReadme {
     pub truncated: bool,
 }
 
-pub fn load_repository_details(path: &str) -> Result<RepositoryDetails, String> {
+pub fn load_repository_details(path: &str) -> Result<RepositoryDetails, ApplicationError> {
     let root = git::repository_root(path)?;
     let branch =
         git::git_output(&root, &["symbolic-ref", "--short", "-q", "HEAD"]).unwrap_or_else(|_| {
@@ -75,7 +76,7 @@ pub fn load_repository_details(path: &str) -> Result<RepositoryDetails, String> 
     })
 }
 
-pub fn load_repository_readme(path: &str) -> Result<Option<RepositoryReadme>, String> {
+pub fn load_repository_readme(path: &str) -> Result<Option<RepositoryReadme>, ApplicationError> {
     let root = git::repository_root(path)?
         .canonicalize()
         .map_err(|error| error.to_string())?;
@@ -108,7 +109,7 @@ pub fn load_repository_readme(path: &str) -> Result<Option<RepositoryReadme>, St
         }
         let mut bytes = Vec::new();
         fs::File::open(resolved)
-            .map_err(|error| format!("无法读取 README：{error}"))?
+            .map_err(|error| ApplicationError::new("repository.readmeRead").cause(error))?
             .take((README_LIMIT + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
@@ -128,17 +129,17 @@ pub fn load_repository_readme(path: &str) -> Result<Option<RepositoryReadme>, St
 pub fn create_repository(
     destination: &str,
     source: Option<&str>,
-) -> Result<RepositoryDetails, String> {
+) -> Result<RepositoryDetails, ApplicationError> {
     let target = PathBuf::from(destination.trim());
     if !target.is_absolute() || target.file_name().is_none() {
-        return Err("请选择仓库的绝对路径".into());
+        return Err(ApplicationError::new("repository.absolutePathRequired"));
     }
     if let Some(source) = source {
         if source.trim().is_empty()
             || source.trim().starts_with('-')
             || source.contains(['\0', '\n', '\r'])
         {
-            return Err("请输入有效的远程地址或本地仓库路径".into());
+            return Err(ApplicationError::new("repository.sourceInvalid"));
         }
     }
     if target.exists() {
@@ -148,12 +149,14 @@ pub fn create_repository(
                 .next()
                 .is_some()
         {
-            return Err("目标目录必须为空，请选择新目录或空目录".into());
+            return Err(ApplicationError::new("repository.destinationNotEmpty"));
         }
     }
-    let parent = target.parent().ok_or("目标目录无效")?;
+    let parent = target
+        .parent()
+        .ok_or(ApplicationError::new("repository.destinationInvalid"))?;
     if !parent.is_dir() {
-        return Err("目标目录的父目录不存在".into());
+        return Err(ApplicationError::new("repository.parentMissing"));
     }
     let destination = target.to_string_lossy();
     if let Some(source) = source {
@@ -183,7 +186,7 @@ fn find_windows_vscode(
     candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
-pub fn open_repository_in_vscode(path: &str) -> Result<(), String> {
+pub fn open_repository_in_vscode(path: &str) -> Result<(), ApplicationError> {
     let root = git::repository_root(path)?;
     let mut candidates = Vec::new();
     #[cfg(target_os = "windows")]
@@ -211,7 +214,7 @@ pub fn open_repository_in_vscode(path: &str) -> Result<(), String> {
     let executable = candidates
         .into_iter()
         .find(|candidate| candidate.is_file())
-        .ok_or("未找到 VS Code，请先安装 VS Code 并启用 code 命令")?;
+        .ok_or(ApplicationError::new("editor.notFound"))?;
     let mut command = Command::new(executable);
     command
         .arg("--new-window")
@@ -227,7 +230,7 @@ pub fn open_repository_in_vscode(path: &str) -> Result<(), String> {
     }
     command
         .spawn()
-        .map_err(|error| format!("无法打开 VS Code：{error}"))?;
+        .map_err(|error| ApplicationError::new("editor.open").cause(error))?;
     Ok(())
 }
 

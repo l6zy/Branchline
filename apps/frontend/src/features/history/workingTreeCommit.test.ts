@@ -1,8 +1,12 @@
+import { createAppI18n } from '../../i18n'
+import type { RepositoryFile, RepositoryOperationState } from '../../repository'
 import { describe, expect, it } from 'vitest'
 import type { RepositorySnapshot } from '../../repository'
 import * as workingTree from './workingTreeCommit'
 
-const { createWorkingTreeCommit, WORKING_TREE_COMMIT_ID } = workingTree
+const { WORKING_TREE_COMMIT_ID } = workingTree
+const translator = (await createAppI18n('zh-CN')).t
+const createWorkingTreeCommit = (files: RepositoryFile[], head?: string, operation?: RepositoryOperationState) => workingTree.createWorkingTreeCommit(files, head, operation, translator)
 
 describe('working tree history commit', () => {
   it('does not create a history node for a clean working tree', () => {
@@ -29,7 +33,6 @@ describe('working tree history commit', () => {
   it('creates an operation node when Git has no file changes yet', () => {
     const commit = createWorkingTreeCommit([], 'abcdef0123456789', {
       kind: 'cherry-pick',
-      label: 'Cherry-pick 进行中',
       currentStep: 1,
       totalSteps: 1,
       conflicts: [],

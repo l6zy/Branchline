@@ -1,3 +1,5 @@
+import { operationLabel } from '../../i18n/operationLabels'
+import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useState } from 'react'
 import { Archive, Check, CornerDownLeft, GitCommitHorizontal, Plus, Trash2 } from 'lucide-react'
 import {
@@ -11,6 +13,7 @@ import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
 
 export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: { repository: RepositorySnapshot | null; onSelectStash: (reference: string) => void; onSnapshot: (snapshot: RepositorySnapshot) => void; onNotice: (message: string) => void }) {
+  const { t } = useAppTranslation()
   const [message, setMessage] = useState('')
   const [includeUntracked, setIncludeUntracked] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -22,7 +25,7 @@ export function StashPage({ repository, onSelectStash, onSnapshot, onNotice }: {
       const snapshot = await operation()
       onSnapshot(snapshot)
       onNotice(snapshot.operation
-        ? `${snapshot.operation.label}：请处理 ${snapshot.operation.conflicts.length} 个冲突文件`
+        ? `${operationLabel(snapshot.operation.kind, t)}：请处理 ${snapshot.operation.conflicts.length} 个冲突文件`
         : notice)
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))

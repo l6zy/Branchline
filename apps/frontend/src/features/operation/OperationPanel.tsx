@@ -1,3 +1,5 @@
+import { operationLabel } from '../../i18n/operationLabels'
+import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, CircleAlert, ExternalLink, GitBranch, GitMerge, GitPullRequest, RefreshCw, RotateCcw, SkipForward, Square, Trash2, X } from 'lucide-react'
 import { ConflictCodeEditor, type ConflictCodeEditorHandle } from './ConflictCodeEditor'
@@ -62,6 +64,7 @@ function parseConflictBlocks(value: string): ConflictBlock[] {
 }
 
 export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, onReturnToChanges, onClose }: OperationPanelProps) {
+  const { t } = useAppTranslation()
   const operation = repository.operation
   const conflicts = operation?.conflicts ?? []
   const [selectedPath, setSelectedPath] = useState<string | null>(conflicts[0] ?? null)
@@ -117,7 +120,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
       const snapshot = await action()
       onSnapshot(snapshot)
       setReloadToken((value) => value + 1)
-      onNotice(snapshot.operation ? `${snapshot.operation.label}：${snapshot.operation.conflicts.length ? `还有 ${snapshot.operation.conflicts.length} 个冲突` : '可以继续操作'}` : success)
+      onNotice(snapshot.operation ? `${operationLabel(snapshot.operation.kind, t)}：${snapshot.operation.conflicts.length ? `还有 ${snapshot.operation.conflicts.length} 个冲突` : '可以继续操作'}` : success)
       return true
     } catch (error) {
       onNotice(error instanceof Error ? error.message : String(error))
@@ -191,7 +194,7 @@ export function OperationPanel({ repository, onSnapshot, onNotice, initialPath, 
     <div className="operation-heading operation-statusbar">
       <div className="operation-heading-title">
         <span className={`operation-kind operation-kind-${operation.kind}`}>{operation.kind === 'rebase' ? <GitPullRequest size={15}/> : operation.kind === 'merge' ? <GitMerge size={15}/> : <CircleAlert size={15}/>}</span>
-        <strong>{operation.label}</strong>
+        <strong>{operationLabel(operation.kind, t)}</strong>
         <span className="operation-status-meta">{operation.kind === 'rebase' ? `${completedSteps} / ${operation.steps.length || totalSteps} 个提交` : `${conflicts.length} 个冲突文件`}</span>
       </div>
       <div className="operation-actions">

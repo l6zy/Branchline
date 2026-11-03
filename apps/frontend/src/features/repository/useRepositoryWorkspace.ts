@@ -1,3 +1,4 @@
+import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchRepository,
@@ -59,6 +60,7 @@ function readAutoFetchSettings(): AutoFetchSettings {
 }
 
 export function useRepositoryWorkspace() {
+  const { t } = useAppTranslation()
   const [repository, setRepository] = useState<RepositorySnapshot | null>(null)
   const [structureRepository, setStructureRepository] = useState<RepositorySnapshot | null>(null)
   const [recentRepositories, setRecentRepositories] = useState<RecentRepository[]>(readRecentRepositories)
@@ -284,7 +286,7 @@ export function useRepositoryWorkspace() {
     setOpeningRepository(true)
     setRepositoryNotice(null)
     try {
-      const snapshot = await pickAndLoadRepository()
+      const snapshot = await pickAndLoadRepository(t('repository:open.dialogTitle'))
       if (!snapshot) return null
       navigationSequence.current += 1
       applySnapshot(snapshot, `已打开仓库：${snapshot.name}`)

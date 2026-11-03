@@ -1,3 +1,5 @@
+import { operationLabel } from './i18n/operationLabels'
+import { useAppTranslation } from './i18n/useAppTranslation'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
@@ -655,6 +657,7 @@ function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () => void
 }
 
 export default function App() {
+  const { t } = useAppTranslation()
   const { repository, structureRepository, parentRepository, recentRepositories, favoriteRepositories, registerRepository, toggleFavorite, forgetRepository, openingRepository, restoringRepository, fetching, repositoryNotice, pauseRepositoryNotice, resumeRepositoryNotice, setRepositoryNotice, applySnapshot, applyStructureSnapshot, openRepository, openRepositoryPath, openSubmodulePath, returnToParentRepository, fetchNow, autoFetchEnabled, fetchIntervalMinutes, localPollingEnabled, localPollingIntervalSeconds, setAutoFetchEnabled, setFetchIntervalMinutes, setLocalPollingEnabled, setLocalPollingIntervalSeconds, lastFetchAt, fetchCompletion } = useRepositoryWorkspace()
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState('branchline.sidebarCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
@@ -761,7 +764,7 @@ export default function App() {
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
   }, [notificationOpen])
   const workingTreeCommit = useMemo(() => repository
-    ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository), repository.operation)
+    ? createWorkingTreeCommit(repository.files, resolveWorkingTreeParent(repository), repository.operation, t)
     : null, [repository])
   const activeCommits = useMemo<Commit[]>(() => workingTreeCommit
     ? [workingTreeCommit, ...(repository?.commits ?? [])]
@@ -1091,8 +1094,8 @@ export default function App() {
         setInspectorCollapsed(false)
         setWorkspaceView(conflictPath ? 'history' : 'operation')
         setRepositoryNotice(conflictPath
-          ? `${snapshot.operation.label}：已打开冲突文件处理面板`
-          : `${snapshot.operation.label}：请在操作面板中继续处理`)
+          ? `${operationLabel(snapshot.operation.kind, t)}：已打开冲突文件处理面板`
+          : `${operationLabel(snapshot.operation.kind, t)}：请在操作面板中继续处理`)
       } else {
         setRepositoryNotice(success)
       }
@@ -1111,7 +1114,7 @@ export default function App() {
   }
   const handleMergeReference = async (reference: string, label = reference) => {
     if (!repository) return setRepositoryNotice('合并操作需要先打开本地仓库')
-    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${operationLabel(repository.operation.kind, t)}`)
     if (!acquireOperationLock(mergeOperationLock)) return setRepositoryNotice('合并正在执行，请等待当前操作完成')
     try {
       if (!await confirm({ title: '确认合并', message: `将 ${label} 合并到 ${repository.branch}？\n\n与合并内容无关的本地修改会保留；如果本地修改会被覆盖，Git 将拒绝合并。如产生冲突，将保留 Git 的冲突状态供后续处理。`, confirmLabel: '开始合并' })) return
@@ -1126,7 +1129,7 @@ export default function App() {
   }
   const handleCherryPickCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('Cherry-pick 需要先打开本地仓库')
-    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${operationLabel(repository.operation.kind, t)}`)
     const parents = commit.parents ?? (commit.parent ? [commit.parent] : [])
     const parentDetails = parents.map((hash) => {
       const parentCommit = activeCommits.find((candidate) => candidate.fullHash === hash || candidate.id === hash)
@@ -1154,14 +1157,14 @@ export default function App() {
   }
   const handleUndoLastCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('撤回提交需要先打开本地仓库')
-    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${operationLabel(repository.operation.kind, t)}`)
     if (!await confirm({ title: '撤回上次提交', message: `撤回提交 ${commit.id}？\n\n该提交的修改会保留在工作区，完整提交信息会带回提交编辑器。`, confirmLabel: '撤回', variant: 'danger' })) return
     await executeRepositoryAction((path) => undoLastCommit(path), `已撤回提交 ${commit.id}，修改已保留在工作区`)
     setWorkspaceView('changes')
   }
   const handleRevertCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('还原提交需要先打开本地仓库')
-    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${operationLabel(repository.operation.kind, t)}`)
     const parents = commit.parents ?? (commit.parent ? [commit.parent] : [])
     const mainline = parents.length > 1 ? 1 : undefined
     const mergeHint = parents.length > 1 ? '\n\n这是合并提交，将按第 1 个父提交作为主线还原。' : ''
@@ -1174,7 +1177,7 @@ export default function App() {
   }
   const handleRebaseCommit = async (commit: Commit) => {
     if (!repository) return setRepositoryNotice('变基操作需要先打开本地仓库')
-    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${repository.operation.label}`)
+    if (repository.operation) return setRepositoryNotice(`请先完成或中止当前${operationLabel(repository.operation.kind, t)}`)
     setRebaseDialog({ commit: commit.fullHash ?? commit.id, label: commit.id })
   }
   const startRebase = async (onto: string) => {
@@ -1557,7 +1560,7 @@ export default function App() {
         </section>}
       </div>
       <footer className="statusbar">
-        <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{repository.operation?.label ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
+        <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{(repository.operation ? operationLabel(repository.operation.kind, t) : undefined) ?? '仓库状态正常'}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{repository.ahead}</span><span>↓{repository.behind}</span></div>
         <div ref={autoFetchRef} className="statusbar-secondary"><button className="status-command-log" onClick={() => setCommandLogOpen(true)} title="查看执行命令日志"><TerminalSquare size={12}/><span>命令日志</span></button><span className="status-separator"/><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" title="配置后台同步"><TimerReset size={12}/><span>自动 Fetch：{autoFetchEnabled ? `每 ${fetchIntervalMinutes} 分钟` : '已停用'}</span></button><span className="status-separator"/><Box size={12}/><span>{repository.submoduleCount} 个 Submodule 已同步</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label="后台同步配置"><div className="auto-fetch-heading"><div><strong>后台同步</strong><small>控制 Fetch、自动快进与本地状态采样</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} title="关闭"><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>启用自动 Fetch</strong><small>仅在仓库已打开时执行</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>获取间隔</span><CompactSelect className="auto-fetch-interval-select" value={fetchIntervalMinutes} options={[1, 5, 10, 15, 30].map((minutes) => ({ value: minutes, label: `${minutes} 分钟` }))} onChange={setFetchIntervalMinutes} ariaLabel="选择自动 Fetch 间隔" disabled={!autoFetchEnabled}/></div><div className="local-polling-settings"><label className="auto-fetch-toggle"><span><strong>本地状态采样</strong><small>定期检测其他工具产生的仓库变更</small></span><input type="checkbox" checked={localPollingEnabled} onChange={(event) => setLocalPollingEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>采样间隔</span><CompactSelect className="auto-fetch-interval-select" value={localPollingIntervalSeconds} options={[2, 5, 10, 30].map((seconds) => ({ value: seconds, label: `${seconds} 秒` }))} onChange={setLocalPollingIntervalSeconds} ariaLabel="选择本地状态采样间隔" disabled={!localPollingEnabled}/></div></div><div className="auto-fetch-meta"><span>最近 Fetch</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '尚未执行'}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? '获取中…' : '立即 Fetch'}</Button></div>}</div>
       </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} resolvedTheme={resolvedTheme} onToggleTheme={() => setTheme(nextThemePreference)} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
     </div>

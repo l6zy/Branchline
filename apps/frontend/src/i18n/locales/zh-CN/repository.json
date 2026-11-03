@@ -1,1 +1,5 @@
-{}
+{
+  "open": {
+    "dialogTitle": "打开 Git 仓库"
+  }
+}

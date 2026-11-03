@@ -1,4 +1,6 @@
 import type { BlameLine, CommandLogEntry, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
+import { ApplicationError } from './errors'
+export * from './errors'
 
 export type {
   RepositoryDetails,
@@ -52,23 +54,23 @@ export async function clearCommandLogs() {
 }
 
 export function isTauriRuntime() {
-  return '__TAURI_INTERNALS__' in window
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
 async function invoke<T>(command: string, args: Record<string, unknown>) {
   if (!isTauriRuntime()) {
-    throw new Error('本地仓库操作需要桌面版。请运行 pnpm desktop:dev。')
+    throw new ApplicationError({ code: 'desktop.required', params: {} })
   }
   const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
-  return tauriInvoke<T>(command, args)
+  try { return await tauriInvoke<T>(command, args) } catch (error) { throw new ApplicationError(error) }
 }
 
 export async function loadRepository(path: string) {
   return invoke<RepositorySnapshot>('load_repository', { path })
 }
 
-export async function pickRepositoryDirectory(title = '选择仓库目录'): Promise<string | null> {
-  if (!isTauriRuntime()) throw new Error('选择本地目录需要桌面版')
+export async function pickRepositoryDirectory(title: string): Promise<string | null> {
+  if (!isTauriRuntime()) throw new ApplicationError({ code: 'desktop.required', params: {} })
   const { open } = await import('@tauri-apps/plugin-dialog')
   const selected = await open({ directory: true, multiple: false, title })
   return (Array.isArray(selected) ? selected[0] : selected) ?? null
@@ -98,12 +100,12 @@ export async function loadRepositoryStateToken(repositoryPath: string) {
   return invoke<string>('load_repository_state_token', { repositoryPath })
 }
 
-export async function pickAndLoadRepository(): Promise<RepositorySnapshot | null> {
+export async function pickAndLoadRepository(title: string): Promise<RepositorySnapshot | null> {
   if (!isTauriRuntime()) {
-    throw new Error('打开本地仓库需要桌面版。请运行 pnpm desktop:dev。')
+    throw new ApplicationError({ code: 'desktop.required', params: {} })
   }
   const { open } = await import('@tauri-apps/plugin-dialog')
-  const selected = await open({ directory: true, multiple: false, title: '打开 Git 仓库' })
+  const selected = await open({ directory: true, multiple: false, title })
   const path = Array.isArray(selected) ? selected[0] : selected
   return path ? loadRepository(path) : null
 }

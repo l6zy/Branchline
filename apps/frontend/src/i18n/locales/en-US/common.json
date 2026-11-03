@@ -1,0 +1,8 @@
+{
+  "appName": "Branchline",
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+  "select": "Select",
+  "fileCount_one": "{{count}} file",
+  "fileCount_other": "{{count}} files"
+}

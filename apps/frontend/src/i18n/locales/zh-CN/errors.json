@@ -1,0 +1,9 @@
+{
+  "unknown": "操作失败",
+  "desktop": {
+    "required": "此操作需要桌面版。请运行 pnpm desktop:dev。"
+  },
+  "repository": {
+    "required": "请先打开本地仓库"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "unknown": "Operation failed",
+  "desktop": {
+    "required": "This action requires the desktop app. Run pnpm desktop:dev."
+  },
+  "repository": {
+    "required": "Open a local repository first"
+  }
+}

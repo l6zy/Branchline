@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
+import { LanguageSelect } from './components/LanguageSelect'
 import { CompactSelect } from './components/CompactSelect'
 import { useConfirmDialog } from './components/ConfirmDialog'
 import { useRepositoryWorkspace, type RecentRepository, type RepositoryParent } from './features/repository/useRepositoryWorkspace'
@@ -1450,6 +1451,7 @@ export default function App() {
     <div className="app-titlebar" data-tauri-drag-region>
       <div className="titlebar-brand" data-tauri-drag-region><AppMark/><span>Branchline</span></div>
       <div className="titlebar-drag-region" data-tauri-drag-region/>
+      <LanguageSelect/>
       <div className="window-controls">
         <button type="button" onClick={minimizeWindow} title="最小化" aria-label="最小化"><Minus size={14}/></button>
         <button type="button" onClick={toggleWindowMaximize} title={windowMaximized ? '还原窗口' : '最大化'} aria-label={windowMaximized ? '还原窗口' : '最大化'}>{windowMaximized ? <Minimize2 size={13}/> : <Maximize2 size={13}/>}</button>

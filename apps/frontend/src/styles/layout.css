@@ -288,3 +288,6 @@
   .conflict-files { border-right: 0; border-bottom: 1px solid var(--line); }
   .conflict-result-actions button span { display: none; }
 }
+.titlebar-language { -webkit-app-region: no-drag; min-width: 0; max-width: 210px; margin-right: 10px; }
+.titlebar-language .compact-select-trigger { max-width: 100%; }
+.titlebar-language .compact-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

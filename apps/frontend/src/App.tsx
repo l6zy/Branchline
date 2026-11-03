@@ -34,6 +34,7 @@ import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_
 import { DEFAULT_HISTORY_LOAD_LIMIT, nextHistoryLoadLimit } from './features/history/historyDepth'
 import { buildCommitFileTree, commitFileContentRows } from './features/history/commitFileTree'
 import { findParentCommit } from './features/history/parentNavigation'
+import { findReferenceCommit } from './features/history/referenceNavigation'
 import { formatLocalDateTime } from './dateTime'
 import { isAutoPullBranchSettings, toggleAutoPullBranch as toggleConfiguredAutoPullBranch } from './features/repository/branchSwitch'
 import { useAutoFastForward } from './features/repository/useAutoFastForward'
@@ -734,6 +735,11 @@ export default function App() {
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
   const historyLoadInProgress = useRef(false)
+  const referenceNavigationRequest = useRef(0)
+  const referenceNavigationIdentity = useRef({ path: repository?.path })
+  if (referenceNavigationIdentity.current.path !== repository?.path) {
+    referenceNavigationIdentity.current = { path: repository?.path }
+  }
 
   useEffect(() => {
     if (!notificationOpen) return
@@ -1296,64 +1302,69 @@ export default function App() {
       setActiveOperation((current) => current?.key === 'history' ? null : current)
     }
   }
-  const handleJumpBranch = async (branch: string) => {
-    let commit = activeCommits.find((item) => item.branches?.includes(branch))
-    if (!commit && repository && !historyLoadInProgress.current) {
-      const nextLimit = nextHistoryLoadLimit(historyLoadLimit)
-      if (nextLimit) {
-        historyLoadInProgress.current = true
-        setActiveOperation({ key: 'history', label: '正在扩大提交图谱…', detail: `正在读取 ${nextLimit.toLocaleString()} 条提交以定位 ${branch}` })
-        try {
-          const snapshot = await loadRepositoryHistory(repository.path, nextLimit)
-          setHistoryLoadLimit(nextLimit)
+  const handleJumpReference = async (reference: string, kind: '分支' | '标签') => {
+    if (!repository) return
+    let commit = activeCommits.find((item) => item.branches?.includes(reference))
+    if (!commit && historyLoadInProgress.current) return
+    const identity = referenceNavigationIdentity.current
+    const request = ++referenceNavigationRequest.current
+    const isSameRepository = () => referenceNavigationIdentity.current === identity
+    const isCurrent = () => isSameRepository() && referenceNavigationRequest.current === request
+    const loadsHistory = !commit
+    if (loadsHistory) historyLoadInProgress.current = true
+    try {
+      if (!commit) {
+        const result = await findReferenceCommit(activeCommits, reference, historyLoadLimit, async (limit) => {
+          setActiveOperation({ key: 'history', label: '正在扩大提交图谱…', detail: `正在读取 ${limit.toLocaleString()} 条提交以定位${kind} ${reference}` })
+          const snapshot = await loadRepositoryHistory(repository.path, limit)
+          if (!isCurrent()) throw new Error('定位目标已变化')
+          setHistoryLoadLimit(limit)
           applySnapshot(snapshot)
-          commit = snapshot.commits.find((item) => item.branches?.includes(branch)) as Commit | undefined
-        } catch (error) {
-          setRepositoryNotice(error instanceof Error ? error.message : String(error))
-        } finally {
-          historyLoadInProgress.current = false
-          setActiveOperation((current) => current?.key === 'history' ? null : current)
-        }
+          return snapshot.commits
+        })
+        commit = result.commit ?? undefined
+      }
+      if (!isCurrent()) return
+      if (!commit) {
+        setRepositoryNotice(`未找到${kind} ${reference} 指向的提交（已达到历史加载上限）`)
+        return
+      }
+      setRepositoryManagerOpen(false)
+      setWorkspaceView('history')
+      setQuery('')
+      setBranchFilter([])
+      setTimeFilter('all')
+      setHistoryRevealSignal((value) => value + 1)
+      setDiffFile(null)
+      setTreeFileView(null)
+      setWideDiff(false)
+      setHistoryTarget(null)
+      setHistoryConflictPath(null)
+      setOperationPath(null)
+      const commitId = commit.id
+      setActiveOperation((current) => current?.key === 'history' ? null : current)
+      setSelected(commitId)
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!isCurrent()) return
+        document.querySelector<HTMLElement>(`[data-commit-id="${commitId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }))
+    } catch (error) {
+      if (isCurrent()) setRepositoryNotice(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (loadsHistory && isSameRepository()) {
+        historyLoadInProgress.current = false
+        setActiveOperation((current) => current?.key === 'history' ? null : current)
       }
     }
-    if (!commit) {
-      setRepositoryNotice(`未找到分支 ${branch} 指向的提交`)
-      return
-    }
-    setRepositoryManagerOpen(false)
-    setWorkspaceView('history')
-    setQuery('')
-    setBranchFilter([])
-    setTimeFilter('all')
-    setSelected(commit.id)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>(`[data-commit-id="${commit.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      })
-    })
   }
+  const handleJumpBranch = (branch: string) => handleJumpReference(branch, '分支')
+  const handleJumpTag = (tag: string) => handleJumpReference(tag, '标签')
 
   useEffect(() => {
     setHistoryLoadLimit(DEFAULT_HISTORY_LOAD_LIMIT)
     historyLoadInProgress.current = false
+    setActiveOperation((current) => current?.key === 'history' ? null : current)
   }, [repository?.path])
-  const handleJumpTag = (tag: string) => {
-    const commit = activeCommits.find((item) => item.branches?.includes(tag))
-    if (!commit) {
-      setRepositoryNotice(`未找到标签 ${tag} 指向的提交`)
-      return
-    }
-    setWorkspaceView('history')
-    setQuery('')
-    setBranchFilter([])
-    setTimeFilter('all')
-    setSelected(commit.id)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>(`[data-commit-id="${commit.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      })
-    })
-  }
   const beginPanelResize = (panel: 'sidebar' | 'inspector', event: React.PointerEvent<HTMLSpanElement>) => {
     event.preventDefault()
     const startX = event.clientX

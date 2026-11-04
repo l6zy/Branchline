@@ -38,13 +38,13 @@
 
 .repo-switcher:hover { border-color: var(--accent-text); background: var(--surface-hover); }
 
-.titlebar-repository-controls .repo-switcher { height: 26px; min-height: 26px; padding: 2px 5px; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 5px; border-radius: 5px; }
+.titlebar-repository-controls .repo-switcher { height: 28px; min-height: 28px; padding: 2px 5px; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 5px; border-radius: 5px; }
 
 .titlebar-repository-controls .repo-icon { width: 18px; height: 18px; border-radius: 4px; }
 
 .titlebar-repository-controls .repo-switcher > div:nth-child(2) { min-width: 0; flex-direction: row; align-items: center; gap: 6px; }
 
-.titlebar-repository-controls .repo-switcher strong { max-width: 48%; flex: 0 1 auto; font-size: 11px; }
+.titlebar-repository-controls .repo-switcher strong { max-width: 70%; flex: 0 1 auto; font-size: 12px; }
 
 .titlebar-repository-controls .repo-switcher span { min-width: 0; flex: 1; font-size: 10px; }
 
@@ -936,4 +936,4 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .line-action-add:disabled, .line-action-del:disabled { opacity: .4; cursor: wait; }
 
-.titlebar-language .compact-select-trigger { max-width: 100%; height: 24px; border-radius: 5px; font-size: 11px; }
+.titlebar-language .compact-select-trigger { max-width: 100%; height: 28px; border-radius: 5px; font-size: 12px; }

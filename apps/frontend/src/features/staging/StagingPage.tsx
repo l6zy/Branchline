@@ -2,11 +2,12 @@ import { Tooltip } from '../../components/tooltip'
 import { message, errorMessage, type MessageContent, type TranslationKey } from '../../i18n/messages'
 import { useAppTranslation, type AppTranslator } from '../../i18n/useAppTranslation'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Archive, ArrowDown, CheckCircle2, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
+import { Archive, ArrowDown, CheckCircle2, ChevronDown, Copy, FileCode2, FileText, GitCommitHorizontal, History, Minus, Pencil, Pilcrow, Plus, RefreshCw, Rows3, Trash2 } from 'lucide-react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { Button } from '../../components/Button'
 import { useConfirmDialog } from '../../components/ConfirmDialog'
 import {
+  ApplicationError,
   commitRepository,
   createScopedRepositoryStash,
   discardRepositoryFiles,
@@ -26,6 +27,7 @@ import {
 import { DiffPanel } from '../diff/DiffPanel'
 import { useResizablePane } from '../../components/useResizablePane'
 import { initialCommitMessage, templateMessage } from './commitMessage'
+import { buildNonWhitespacePatch, isSubmodulePointerChange } from './nonWhitespaceStaging'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
 import { hasStagingChanges, stageSelectionKey, visibleStagingSections, type StageSelection } from './stagingSelection'
 
@@ -47,6 +49,10 @@ function fileName(path: string) {
 function fileDirectory(path: string) {
   const separator = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
   return separator >= 0 ? path.slice(0, separator + 1) : ''
+}
+
+function isBinaryPreviewError(error: unknown) {
+  return error instanceof ApplicationError && error.data.code === 'file.binaryPreview'
 }
 
 function StageFilePath({ path }: { path: string }) {
@@ -195,6 +201,60 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
       setBusy(false)
     }
   }
+  const stageNonWhitespace = async (paths: string[]) => {
+    if (!repository) return onNotice(message('staging:openRequired'))
+    if (!paths.length) return
+    setBusy(true)
+    onOperationChange?.(message('staging:stagingNonWhitespace'))
+    try {
+      const patches: string[] = []
+      const directPaths: string[] = []
+      let skipped = 0
+      for (const path of paths) {
+        const file = files.find((candidate) => candidate.path === path)
+        // With changes on only one side there is no replacement that could be
+        // whitespace-only, and direct staging preserves modes, renames, and
+        // deletions.
+        if (file && (file.unstagedAdd === 0 || file.unstagedDel === 0)) {
+          directPaths.push(path)
+          continue
+        }
+        let rows
+        try {
+          rows = await loadRepositoryUnstagedFileDiff(repository.path, path, false)
+        } catch (error) {
+          if (isBinaryPreviewError(error)) { directPaths.push(path); continue }
+          throw error
+        }
+        // An empty row set means the textual diff cannot describe this change
+        // (binary content or a mode-only change), so fall back to the regular
+        // staging path for it. Gitlink pointer updates are staged the same way
+        // because Git cannot apply them as text patches.
+        if (!rows.length || isSubmodulePointerChange(rows)) { directPaths.push(path); continue }
+        const patch = buildNonWhitespacePatch(path, rows, file?.type)
+        if (!patch) { skipped += 1; continue }
+        patches.push(patch)
+      }
+      if (patches.length) {
+        const updatedFiles = await stageRepositoryPatch(repository.path, patches.join(''))
+        onSnapshot({ ...repository, files: updatedFiles })
+      }
+      if (directPaths.length) await stageRepositoryFiles(repository.path, directPaths)
+      const snapshot = await loadRepository(repository.path)
+      onSnapshot(snapshot)
+      setDiffRevision((value) => value + 1)
+      const staged = paths.length - skipped
+      if (!staged) onNotice(message('staging:nonWhitespaceNone', { count: skipped }))
+      else if (skipped) onNotice(message('staging:nonWhitespaceStagedSkipped', { count: staged, skipped }))
+      else onNotice(message('staging:nonWhitespaceStaged', { count: staged }))
+    } catch (error) {
+      try { onSnapshot(await loadRepository(repository.path)) } catch { /* Keep the current snapshot. */ }
+      onNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+      onOperationChange?.(null)
+    }
+  }
   const stage = (paths: string[], force = false) => updateStaging(paths, 'stage', force)
   const unstage = (paths: string[]) => updateStaging(paths, 'unstage')
   const applySelectedPatch = async (mode: 'stage' | 'restore' | 'unstage', patch: string, description: MessageContent) => {
@@ -279,6 +339,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
       <Tooltip content={t('staging:fileHint', { path: file.path })}><button className={`stage-file-open ${file.incoming ? 'has-incoming' : ''}`} onClick={() => { setSelectedFile(selection); setWidePreview(false) }} ><FileIcon size={15}/><Tooltip content={status.description}><span className={`stage-file-status ${status.className}`} >{status.label}</span></Tooltip><StageFilePath path={file.path}/>{file.incoming && <Tooltip content={t('staging:incomingHint')}><span className="stage-file-incoming" ><ArrowDown size={13}/></span></Tooltip>}<span className="stage-file-stats"><small className="additions">+{displayNumber(additions)}</small><small className="deletions">-{displayNumber(deletions)}</small></span></button></Tooltip>
       <div className="stage-file-actions">
         {scope === 'unstaged' && <Button variant="danger" className="stage-file-action" onClick={() => void discard([file.path])} disabled={busy} tooltip={t('staging:discardUnstaged')} aria-label={t('staging:discardUnstaged')}><Trash2 size={13}/></Button>}
+        {scope === 'unstaged' && <Tooltip content={t('staging:stageFileNonWhitespaceHint')}><button className="stage-file-action" onClick={() => void stageNonWhitespace([file.path])} disabled={busy} aria-label={t('staging:stageFileNonWhitespace')}><Pilcrow size={13}/></button></Tooltip>}
         <Tooltip content={icon === 'add' ? t('staging:stageFile') : t('staging:unstage')}><button className="stage-file-action" onClick={action} disabled={busy} aria-label={icon === 'add' ? t('staging:stageFile') : t('staging:unstage')}><Icon size={13}/></button></Tooltip>
       </div>
     </div>
@@ -310,7 +371,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
             {sectionOpen.staged && <div className="stage-section-files">{stagedFiles.map((file) => fileRow(file, () => unstage([file.path]), 'remove', 'staged'))}</div>}
           </div>}
           {visibleSections.includes('unstaged') && <div className={`stage-section unstaged-section ${sectionOpen.unstaged ? '' : 'collapsed'}`}>
-            <div className="stage-section-header"><Tooltip content={sectionOpen.unstaged ? t('staging:collapseUnstaged') : t('staging:expandUnstaged')}><button type="button" className="stage-section-toggle" onClick={() => setSectionOpen((value) => ({ ...value, unstaged: !value.unstaged }))} aria-expanded={sectionOpen.unstaged} aria-label={sectionOpen.unstaged ? t('staging:collapseUnstaged') : t('staging:expandUnstaged')}><ChevronDown size={14}/></button></Tooltip><div className="stage-section-name"><span className="stage-section-marker"/><strong>{t('staging:unstaged')}</strong><span className="stage-section-count">{displayNumber(unstagedFiles.length)}</span></div><div className="stage-section-actions"><Button variant="danger" className="icon-tool-button" onClick={() => void discard(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy} tooltip={t('staging:discardAll')} aria-label={t('staging:discardAll')}><Trash2 size={14}/></Button><Tooltip content={t('staging:quickStashUnstaged')}><button className="icon-tool-button" onClick={() => quickStash('unstaged', unstagedFiles.length)} disabled={!unstagedFiles.length || busy}  aria-label={t('staging:quickStashUnstaged')}><Archive size={14}/></button></Tooltip><Tooltip content={t('staging:stageAll')}><button className="icon-tool-button" onClick={() => stage(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy}  aria-label={t('staging:stageAll')}><Plus size={14}/></button></Tooltip></div></div>
+            <div className="stage-section-header"><Tooltip content={sectionOpen.unstaged ? t('staging:collapseUnstaged') : t('staging:expandUnstaged')}><button type="button" className="stage-section-toggle" onClick={() => setSectionOpen((value) => ({ ...value, unstaged: !value.unstaged }))} aria-expanded={sectionOpen.unstaged} aria-label={sectionOpen.unstaged ? t('staging:collapseUnstaged') : t('staging:expandUnstaged')}><ChevronDown size={14}/></button></Tooltip><div className="stage-section-name"><span className="stage-section-marker"/><strong>{t('staging:unstaged')}</strong><span className="stage-section-count">{displayNumber(unstagedFiles.length)}</span></div><div className="stage-section-actions"><Button variant="danger" className="icon-tool-button" onClick={() => void discard(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy} tooltip={t('staging:discardAll')} aria-label={t('staging:discardAll')}><Trash2 size={14}/></Button><Tooltip content={t('staging:quickStashUnstaged')}><button className="icon-tool-button" onClick={() => quickStash('unstaged', unstagedFiles.length)} disabled={!unstagedFiles.length || busy}  aria-label={t('staging:quickStashUnstaged')}><Archive size={14}/></button></Tooltip><Tooltip content={t('staging:stageAllNonWhitespaceHint')}><button className="icon-tool-button" onClick={() => void stageNonWhitespace(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy}  aria-label={t('staging:stageAllNonWhitespace')}><Pilcrow size={14}/></button></Tooltip><Tooltip content={t('staging:stageAll')}><button className="icon-tool-button" onClick={() => stage(unstagedFiles.map((file) => file.path))} disabled={!unstagedFiles.length || busy}  aria-label={t('staging:stageAll')}><Plus size={14}/></button></Tooltip></div></div>
             {sectionOpen.unstaged && <div className="stage-section-files">{unstagedFiles.map((file) => fileRow(file, () => stage([file.path]), 'add', 'unstaged'))}</div>}
           </div>}
         </div>
@@ -321,7 +382,7 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
       <div className="staging-preview-pane">{selectedDiffEntry ? <DiffPanel files={[selectedDiffEntry.file]} repositoryPath={repository?.path} loadRows={loadStagingRows} viewKey={stageSelectionKey(selectedFile)} reloadKey={String(diffRevision)} wide={widePreview} onWideChange={setWidePreview} hideFileList actionScope={selectedDiffEntry.scope} actionsBusy={busy} onStagePatch={(_path, patch, description) => void applySelectedPatch('stage', patch, description)} onRestorePatch={(_path, patch, description) => void applySelectedPatch('restore', patch, description)} onUnstagePatch={(_path, patch, description) => void applySelectedPatch('unstage', patch, description)} onOpenLineHistory={(path, line, _side, row) => { if (row.kind === 'add') onNotice(message('staging:noLineHistory')); else onOpenLineHistory(path, row.old ?? line) }}/>: <div className="drawer-preview-empty"><FileCode2 size={30}/><strong>{t('staging:selectFile')}</strong><span>{t('staging:selectFileHint')}</span></div>}</div>
     </div>
     {templateEditorOpen && <div className="template-editor-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) setTemplateEditorOpen(false) }}><section className="template-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="template-editor-title"><header className="template-editor-heading"><div><h2 id="template-editor-title">{t('staging:editCommitTemplate')}</h2><Tooltip content={repository?.commitTemplate?.path}><span >{repository?.commitTemplate?.path ?? t('staging:repositoryTemplate')}</span></Tooltip></div><button type="button" className="template-editor-close" onClick={() => setTemplateEditorOpen(false)} disabled={busy} aria-label={t('staging:closeTemplate')}>×</button></header><div className="template-editor-body"><textarea value={templateDraft} onChange={(event) => setTemplateDraft(event.target.value)} aria-label={t('staging:templateContent')} placeholder={t('staging:templatePlaceholder')} spellCheck={false} autoFocus /></div><footer className="template-editor-actions"><Button variant="secondary" onClick={() => setTemplateEditorOpen(false)} disabled={busy}>{t('common:cancel')}</Button><Button variant="secondary" onClick={() => void restoreGlobalTemplate()} disabled={busy}>{t('staging:restoreGlobal')}</Button><Button variant="primary" onClick={() => void saveRepositoryTemplate()} disabled={busy}>{t('staging:saveTemplate')}</Button></footer></section></div>}
-    {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>{t('staging:fileHistory')}</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>{t('staging:blame')}</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>{t('staging:copyPath')}</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>{t('staging:discardMenu')}</span></Button></>}</ContextMenu>}
+    {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>{t('staging:fileHistory')}</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>{t('staging:blame')}</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>{t('staging:copyPath')}</span></button>{contextFile.scope === 'unstaged' && <><div className="context-menu-separator"/><button onClick={() => { const path = contextFile.file.path; setContextFile(null); void stageNonWhitespace([path]) }}><Pilcrow size={14}/><span>{t('staging:stageFileNonWhitespace')}</span></button><Button variant="danger" onClick={() => { const path = contextFile.file.path; setContextFile(null); void discard([path]) }}><Trash2 size={14}/><span>{t('staging:discardMenu')}</span></Button></>}</ContextMenu>}
     {confirmDialog}
   </section>
 }

@@ -72,8 +72,10 @@ describe('repository localization', () => {
     expect(screen.getByRole('button', { name: '强制移除' })).toBeTruthy()
   })
   it('keeps the switcher search open and translates stable target kinds', async () => {
-    const { i18n } = await renderLocalized(<RepositoryQuickSwitcher repository={snapshot} parentRepository={null} favorites={[]} recentRepositories={[]} openingRepository={false} openSignal={1} onToggleFavorite={vi.fn()} onManageRepositories={vi.fn()} onOpenRepository={vi.fn()} onOpenRepositoryPath={vi.fn()} onOpenSubmodulePath={vi.fn()} onReturnToParentRepository={vi.fn()}/>, 'en-US')
+    const { i18n } = await renderLocalized(<RepositoryQuickSwitcher repository={snapshot} parentRepository={null} favorites={[]} recentRepositories={[]} openingRepository={false} openSignal={1} onToggleFavorite={vi.fn()} onOpenRepository={vi.fn()} onOpenRepositoryPath={vi.fn()} onOpenSubmodulePath={vi.fn()} onReturnToParentRepository={vi.fn()}/>, 'en-US')
     const search = screen.getByPlaceholderText('Search repository name or path')
+    expect(screen.queryByRole('button', { name: 'Repository manager' })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Open local repository/ })).toBeTruthy()
     fireEvent.change(search, { target: { value: 'feature' } })
     expect(screen.getByText('Worktree · feature · E:/code/feature')).toBeTruthy()
     await act(() => i18n.changeLanguage('zh-CN'))

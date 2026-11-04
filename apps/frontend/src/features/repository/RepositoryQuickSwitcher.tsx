@@ -27,7 +27,6 @@ type RepositoryQuickSwitcherProps = {
   parentRepository: RepositoryParent | null
   favorites: FavoriteRepository[]
   onToggleFavorite: (repository: FavoriteRepository) => void
-  onManageRepositories: () => void
   recentRepositories: RecentRepository[]
   openingRepository: boolean
   openSignal: number
@@ -37,7 +36,7 @@ type RepositoryQuickSwitcherProps = {
   onReturnToParentRepository: () => void
 }
 
-export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, onManageRepositories, repository, parentRepository, recentRepositories, openingRepository, openSignal, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onReturnToParentRepository }: RepositoryQuickSwitcherProps) {
+export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repository, parentRepository, recentRepositories, openingRepository, openSignal, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onReturnToParentRepository }: RepositoryQuickSwitcherProps) {
   const { t } = useAppTranslation()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -149,8 +148,7 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, onManageR
       {groups.map((group) => <div className="repository-switch-group" key={group.id}><div className="switcher-label">{group.label}</div>{group.items.map(renderTarget)}</div>)}
       {!filteredTargets.length && <div className="repository-switch-empty">{t('repository:manager.noMatch')}</div>}
     </div>
-    <button type="button" className="open-repository-action" onClick={() => { closeSwitcher(); onManageRepositories() }}><FolderGit2 size={16}/><span>{t('repository:manager.title')}</span></button>
-      <button type="button" className="open-repository-action" disabled={openingRepository} onClick={() => { onOpenRepository(); closeSwitcher() }}><span className="switcher-icon"><FolderOpen size={14}/></span><span><strong>{openingRepository ? t('repository:switcher.reading') : t('repository:welcome.openLocal')}</strong><small>{t('repository:switcher.otherHint')}</small></span></button>
+    <button type="button" className="open-repository-action" disabled={openingRepository} onClick={() => { onOpenRepository(); closeSwitcher() }}><span className="switcher-icon"><FolderOpen size={14}/></span><span><strong>{openingRepository ? t('repository:switcher.reading') : t('repository:welcome.openLocal')}</strong><small>{t('repository:switcher.otherHint')}</small></span></button>
   </div>
 
   return <div className="repo-switcher-wrap" ref={rootRef}>

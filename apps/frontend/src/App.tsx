@@ -4,6 +4,7 @@ import type { AppTranslator } from './i18n/useAppTranslation'
 import type { Locale } from './i18n/localePreference'
 import { operationLabel, operationMessage } from './i18n/operationLabels'
 import { useAppTranslation } from './i18n/useAppTranslation'
+import { getShortcutModifier } from './platformShortcut'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
@@ -12,7 +13,7 @@ import { Button } from './components/Button'
 import { LanguageSelect } from './components/LanguageSelect'
 import { CompactSelect } from './components/CompactSelect'
 import { useConfirmDialog } from './components/ConfirmDialog'
-import { useRepositoryWorkspace, type RecentRepository, type RepositoryParent } from './features/repository/useRepositoryWorkspace'
+import { useRepositoryWorkspace } from './features/repository/useRepositoryWorkspace'
 import { StagingPage } from './features/staging/StagingPage'
 import { HistoryDrawer } from './features/history/HistoryDrawer'
 import { DiffFileList } from './features/diff/DiffFileList'
@@ -26,7 +27,6 @@ import { RepositoryStructurePanel, type StructureView } from './features/reposit
 import { RepositoryStructureTree } from './features/repository/RepositoryStructureTree'
 import { RepositoryManagerPage } from './features/repository/RepositoryManagerPage'
 import { RepositoryStartupScreen } from './features/repository/RepositoryStartupScreen'
-import type { FavoriteRepository } from './features/repository/repositorySwitcher'
 import { RepositoryQuickSwitcher } from './features/repository/RepositoryQuickSwitcher'
 import { resolveRepositoryStructureSelection, type RepositoryStructureSelection } from './features/repository/repositoryTree'
 import { isRepositoryDescendant, sameRepositoryPath } from './features/repository/repositoryPaths'
@@ -80,7 +80,6 @@ import {
   GitFork,
   GitMerge,
   History,
-  LayoutGrid,
   List,
   ListFilter,
   MoreHorizontal,
@@ -143,6 +142,15 @@ const isInspectorWidth = (value: unknown): value is number => typeof value === '
 const isDetailsHeight = (value: unknown): value is number => typeof value === 'number' && value >= 230 && value <= 560
 const isFileMode = (value: unknown): value is 'list' | 'tree' | 'all' => value === 'list' || value === 'tree' || value === 'all'
 
+function getResizeDeltaFromKey(event: { key: string; shiftKey: boolean; preventDefault: () => void }, orientation: 'vertical' | 'horizontal', reverse = false) {
+  const direction = orientation === 'vertical'
+    ? event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0
+    : event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
+  if (!direction) return 0
+  event.preventDefault()
+  return direction * (reverse ? -1 : 1) * (event.shiftKey ? 36 : 12)
+}
+
 const OperationPanel = lazy(async () => ({ default: (await import('./features/operation/OperationPanel')).OperationPanel }))
 
 function AppMark({ className }: { className?: string }) {
@@ -193,6 +201,8 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
   const [open, setOpen] = usePersistentState('branchline.branchTreeOpen.v1', { local: true, feat: true, fix: true, remote: false }, isBooleanRecord)
   const [contextBranch, setContextBranch] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [contextPrefix, setContextPrefix] = useState<{ prefix: string; x: number; y: number } | null>(null)
+  const [branchQuery, setBranchQuery] = useState('')
+  const normalizedBranchQuery = branchQuery.trim().toLocaleLowerCase()
   const toggle = (key: string) => setOpen((value) => ({ ...value, [key]: !value[key] }))
   const openContextMenu = (event: React.MouseEvent, branch: string) => {
     event.preventDefault()
@@ -212,15 +222,18 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
     return count > 0 ? <Tooltip content={t('history:app.branches.incomingForBranch', { "branch": branch, "count": count })}><span className="branch-sync"  aria-label={t('history:app.branches.incoming', { "count": count })}>↓{new Intl.NumberFormat(locale).format(count)}</span></Tooltip> : null
   }
   const branchStatus = (branch: string) => <>{autoPullBranches.includes(branch) && <Tooltip content={t('history:app.branches.autoEnabled')}><span className="branch-auto-pull-mark" ><RefreshCw size={12}/></span></Tooltip>}{pullingBranches.includes(branch) && <Tooltip content={t('history:app.branches.pulling')}><span className="branch-pull-spinner spin" ><RefreshCw size={12}/></span></Tooltip>}</>
+  const matchesBranch = (branch: string) => !normalizedBranchQuery || branch.toLocaleLowerCase().includes(normalizedBranchQuery)
   const branchNames = branches.filter((branch) => !remoteBranchSet.has(branch))
-  const grouped = branchNames.reduce<Record<string, string[]>>((groups, branch) => {
+  const visibleBranchNames = branchNames.filter(matchesBranch)
+  const visibleRemoteBranches = remoteBranches.filter(matchesBranch)
+  const grouped = visibleBranchNames.reduce<Record<string, string[]>>((groups, branch) => {
     const [prefix, ...rest] = branch.split('/')
     const key = rest.length ? prefix : ''
     const value = rest.length ? rest.join('/') : branch
     groups[key] = [...(groups[key] ?? []), value]
     return groups
   }, {})
-  const remoteGroups = remoteBranches.reduce<Record<string, string[]>>((groups, branch) => {
+  const remoteGroups = visibleRemoteBranches.reduce<Record<string, string[]>>((groups, branch) => {
     const [remote, ...nameParts] = branch.split('/')
     if (!remote || !nameParts.length) return groups
     groups[remote] = [...(groups[remote] ?? []), nameParts.join('/')]
@@ -228,13 +241,14 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
   }, {})
   return <div className="nav-section branch-tree">
     <div className="section-title"><span>{t('history:app.branches.heading')}</span><Tooltip content={t('history:app.branches.create')}><button className="section-add" onClick={() => onCreateBranch()} aria-label={t('history:app.branches.create')}><Plus size={14}/></button></Tooltip></div>
-    <button className="tree-row group" onClick={() => toggle('local')}>{open.local ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<GitBranch size={14}/><span>{t('history:app.branches.local')}</span><span className="count">{new Intl.NumberFormat(locale).format(branchNames.length)}</span></button>
-    {open.local && <div className="tree-children">
+    <label className="branch-filter"><Search size={13}/><input type="search" aria-label={t('history:app.branches.filter')} placeholder={t('history:app.branches.filter')} value={branchQuery} onChange={(event) => setBranchQuery(event.target.value)}/>{branchQuery && <button type="button" onClick={() => setBranchQuery('')} aria-label={t('history:app.branches.clearFilter')}><X size={13}/></button>}</label>
+    <button className="tree-row group" onClick={() => toggle('local')}>{open.local || normalizedBranchQuery ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<GitBranch size={14}/><span>{t('history:app.branches.local')}</span><span className="count">{new Intl.NumberFormat(locale).format(normalizedBranchQuery ? visibleBranchNames.length : branchNames.length)}</span></button>
+    {(open.local || normalizedBranchQuery) && <div className="tree-children">
       {(grouped[''] ?? []).map((branch) => <Tooltip content={branch} key={branch}><button className={`tree-row ${branch === currentBranch ? 'active' : ''} ${pullingBranches.includes(branch) ? 'pulling' : ''}`}  onClick={() => onJumpBranch(branch)} onDoubleClick={() => { if (!pullingBranches.includes(branch)) onSwitchBranch(branch) }} onContextMenu={(event) => openContextMenu(event, branch)}  aria-disabled={pullingBranches.includes(branch)}><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{branchStatus(branch)}{worktreeBranches[branch] && <Tooltip content={`Worktree: ${worktreeBranches[branch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[branch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(branch)}</button></Tooltip>)}
-      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><Tooltip content={t('history:app.branches.groupHint')}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} >{open[prefix] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button></Tooltip>{open[prefix] && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''} ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}{worktreeBranches[fullBranch] && <Tooltip content={`Worktree: ${worktreeBranches[fullBranch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[fullBranch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
+      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><Tooltip content={t('history:app.branches.groupHint')}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} >{open[prefix] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button></Tooltip>{(open[prefix] || normalizedBranchQuery) && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''} ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}{worktreeBranches[fullBranch] && <Tooltip content={`Worktree: ${worktreeBranches[fullBranch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[fullBranch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
     </div>}
-    <button className="tree-row group" onClick={() => toggle('remote')}>{open.remote ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<CloudDownload size={14}/><span>{t('history:app.branches.remote')}</span><span className="count">{new Intl.NumberFormat(locale).format(remoteBranches.length)}</span></button>
-    {open.remote && <div className="tree-children remote-tree">{Object.entries(remoteGroups).map(([remote, remoteBranchNames]) => {
+    <button className="tree-row group" onClick={() => toggle('remote')}>{open.remote || normalizedBranchQuery ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<CloudDownload size={14}/><span>{t('history:app.branches.remote')}</span><span className="count">{new Intl.NumberFormat(locale).format(normalizedBranchQuery ? visibleRemoteBranches.length : remoteBranches.length)}</span></button>
+    {(open.remote || normalizedBranchQuery) && <div className="tree-children remote-tree">{Object.entries(remoteGroups).map(([remote, remoteBranchNames]) => {
       const remoteKey = `remote:${remote}`
       const groupedRemoteBranches = remoteBranchNames.reduce<Record<string, string[]>>((groups, branch) => {
         const [prefix, ...rest] = branch.split('/')
@@ -242,11 +256,12 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
         groups[key] = [...(groups[key] ?? []), rest.length ? rest.join('/') : branch]
         return groups
       }, {})
-      return <div key={remote}><button className="tree-row group nested remote-root" onClick={() => toggle(remoteKey)}>{open[remoteKey] ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<CloudDownload size={13}/><span>{remote}</span><span className="count">{new Intl.NumberFormat(locale).format(remoteBranchNames.length)}</span></button>{open[remoteKey] && <div className="tree-children compact remote-children">
+      return <div key={remote}><button className="tree-row group nested remote-root" onClick={() => toggle(remoteKey)}>{open[remoteKey] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<CloudDownload size={13}/><span>{remote}</span><span className="count">{new Intl.NumberFormat(locale).format(remoteBranchNames.length)}</span></button>{(open[remoteKey] || normalizedBranchQuery) && <div className="tree-children compact remote-children">
         {(groupedRemoteBranches[''] ?? []).map((branch) => { const fullBranch = `${remote}/${branch}`; return <Tooltip content={fullBranch} key={fullBranch}><button className={`tree-row ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`}  onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)}  aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}</button></Tooltip> })}
         {Object.entries(groupedRemoteBranches).filter(([prefix]) => prefix).map(([prefix, children]) => { const prefixKey = `${remoteKey}:${prefix}`; return <div key={prefix}><button className="tree-row group remote-prefix" onClick={() => toggle(prefixKey)}>{open[prefixKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<FolderGit2 size={12}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button>{open[prefixKey] && <div className="tree-children compact remote-prefix-children">{children.map((branch) => { const fullBranch = `${remote}/${prefix}/${branch}`; return <button className={`tree-row ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}</button> })}</div>}</div> })}
       </div>}</div>
     })}</div>}
+    {normalizedBranchQuery && !visibleBranchNames.length && !visibleRemoteBranches.length && <div className="branch-filter-empty">{t('history:app.branches.noMatches')}</div>}
     {contextBranch && <ContextMenu x={contextBranch.x} y={contextBranch.y} onClose={() => setContextBranch(null)}>
       <div className="context-menu-title"><GitBranch size={13}/><span>{contextBranch.branch}</span></div>
       {!remoteBranchSet.has(contextBranch.branch) && <button aria-pressed={autoPullBranches.includes(contextBranch.branch)} onClick={() => { onToggleAutoPull(contextBranch.branch); setContextBranch(null) }}><RefreshCw size={14}/><span>{t('history:app.branches.autoFastForward')}</span>{autoPullBranches.includes(contextBranch.branch) && <Check size={13}/>}</button>}
@@ -270,19 +285,12 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
 type SidebarProps = {
   repository: RepositorySnapshot | null
   structureRepository: RepositorySnapshot | null
-  parentRepository: RepositoryParent | null
-  recentRepositories: RecentRepository[]
   openingRepository: boolean
-  activeView: WorkspaceView | 'repositories'
-  favorites: FavoriteRepository[]
-  onToggleFavorite: (repository: FavoriteRepository) => void
-  onManageRepositories: () => void
+  activeView: WorkspaceView
   structureSelection: RepositoryStructureSelection
-  repositorySwitcherSignal: number
   onOpenRepository: () => void
   onOpenRepositoryPath: (path: string) => void
   onOpenSubmodulePath: (path: string) => void
-  onReturnToParentRepository: () => void
   onCreateBranch: (prefix?: string) => void
   onDeleteBranchPrefix: (prefix: string) => void
   onJumpBranch: (branch: string) => void
@@ -297,26 +305,19 @@ type SidebarProps = {
   onSelectView: (view: WorkspaceView) => void
   onSelectStructure: (selection: RepositoryStructureSelection) => void
   onOpenGitConfig: () => void
-  onOpenCommandLog: () => void
-  onToggle: () => void
 }
 
-function Sidebar({ repository, structureRepository, parentRepository, recentRepositories, favorites, onToggleFavorite, onManageRepositories, openingRepository, activeView, structureSelection, repositorySwitcherSignal, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onReturnToParentRepository, onCreateBranch, onDeleteBranchPrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch, autoPullBranches, pullingBranches, onToggleAutoPullBranch, onSelectView, onSelectStructure, onOpenGitConfig, onOpenCommandLog, onToggle }: SidebarProps) {
+function Sidebar({ repository, structureRepository, openingRepository, activeView, structureSelection, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onCreateBranch, onDeleteBranchPrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch, autoPullBranches, pullingBranches, onToggleAutoPullBranch, onSelectView, onSelectStructure, onOpenGitConfig }: SidebarProps) {
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
   return <aside className="sidebar">
-    <div className="sidebar-repository-header">
-      <RepositoryQuickSwitcher favorites={favorites} onToggleFavorite={onToggleFavorite} onManageRepositories={onManageRepositories} repository={repository} parentRepository={parentRepository} recentRepositories={recentRepositories} openingRepository={openingRepository} openSignal={repositorySwitcherSignal} onOpenRepository={onOpenRepository} onOpenRepositoryPath={onOpenRepositoryPath} onOpenSubmodulePath={onOpenSubmodulePath} onReturnToParentRepository={onReturnToParentRepository}/>
-      <Button variant="icon" className="sidebar-toggle" onClick={onToggle} tooltip={t('history:app.sidebar.collapse')} aria-label={t('history:app.sidebar.collapse')}><PanelLeftClose size={16}/></Button>
-    </div>
-    <nav><div className="nav-section"><button className={`nav-row ${activeView === 'repositories' ? 'active' : ''}`} onClick={onManageRepositories}><FolderGit2 size={15}/><span>{t('history:app.sidebar.repositories')}</span></button></div>{repository ? <>
-      <div className="nav-section quick-nav"><button className={`nav-row ${activeView === 'history' ? 'active' : ''}`} onClick={() => onSelectView('history')}><LayoutGrid size={15}/><span>{t('history:app.navigation.history')}</span><span className="key">⌘1</span></button><button className={`nav-row ${activeView === 'changes' ? 'active' : ''}`} onClick={() => onSelectView('changes')}><FileDiff size={15}/><span>{t('history:app.navigation.changes')}</span><span className="nav-badge">{new Intl.NumberFormat(locale).format(repository.files.length)}</span></button><button className={`nav-row ${activeView === 'stash' ? 'active' : ''}`} onClick={() => onSelectView('stash')}><Archive size={15}/><span>{t('history:app.navigation.stashes')}</span></button></div>
+    <nav>{repository ? <>
       <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} worktreeBranches={Object.fromEntries(repository.worktrees.filter((worktree) => worktree.branch && worktree.path.replace(/[\\/]+$/, '').toLocaleLowerCase() !== repository.path.replace(/[\\/]+$/, '').toLocaleLowerCase()).map((worktree) => [worktree.branch as string, worktree.path]))} currentBranch={repository.branch} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPull={onToggleAutoPullBranch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
       <RepositoryStructureTree repository={structureRepository ?? repository} activePath={repository.path} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path) }}/>
       <div className="nav-section structure-tags-section"><button className={`nav-row ${activeView === 'tags' ? 'active' : ''}`} onClick={() => onSelectView('tags')}><Tag size={15}/><span>{t('history:app.navigation.tags')}</span><span className="nav-badge muted">{new Intl.NumberFormat(locale).format(repository.tags.length)}</span></button></div>
     </> : <div className="sidebar-empty-state"><FolderOpen size={24}/><strong>{t('history:app.sidebar.noRepository')}</strong><span>{t('history:app.sidebar.openHint')}</span><button onClick={onOpenRepository} disabled={openingRepository}>{openingRepository ? t('history:app.sidebar.opening') : t('history:app.sidebar.open')}</button></div>}</nav>
-    <div className="sidebar-footer"><Tooltip content={t('history:app.sidebar.openConfig')}><button className="profile" onClick={onOpenGitConfig} ><AppMark className="app-brand-mark"/><div><strong>Branchline</strong><span>{t('history:app.sidebar.gitConfig')}</span></div><Settings2 size={15}/></button></Tooltip><Tooltip content={t('history:app.sidebar.openLog')}><button className="sidebar-command-log" onClick={onOpenCommandLog} ><TerminalSquare size={14}/><span>{t('history:app.sidebar.commandLog')}</span></button></Tooltip></div>
+    <div className="sidebar-footer"><Tooltip content={t('history:app.sidebar.openConfig')}><button className="profile" onClick={onOpenGitConfig}><Settings2 size={15}/><span>{t('history:app.sidebar.gitConfig')}</span><ChevronRight size={14}/></button></Tooltip></div>
   </aside>
 }
 
@@ -659,15 +660,16 @@ function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () => void
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
   if (!open) return null
+  const modifier = getShortcutModifier()
   const shortcuts = [
-    ['⌘ F', t('history:app.shortcuts.search')],
-    ['⌘ ⇧ F', t('history:app.shortcuts.fetch')],
-    ['⌘ ↵', t('history:app.shortcuts.changes')],
+    [`${modifier} F`, t('history:app.shortcuts.search')],
+    [`${modifier} ⇧ F`, t('history:app.shortcuts.fetch')],
+    [`${modifier} ↵`, t('history:app.shortcuts.changes')],
     ['T', t('history:app.shortcuts.fileView')],
     ['W', t('history:app.shortcuts.wideDiff')],
-    ['⌘ + / −', t('history:app.shortcuts.diffFont')],
-    ['⌘ 0', t('history:app.shortcuts.resetFont')],
-    ['⌘ /', t('history:app.shortcuts.theme')],
+    [`${modifier} + / −`, t('history:app.shortcuts.diffFont')],
+    [`${modifier} 0`, t('history:app.shortcuts.resetFont')],
+    [`${modifier} /`, t('history:app.shortcuts.theme')],
     ['?', t('history:app.shortcuts.show')],
   ]
   return <div className="shortcut-backdrop" onClick={onClose}><section className="shortcut-dialog" onClick={(event) => event.stopPropagation()}>
@@ -702,6 +704,7 @@ export default function App() {
   const [notificationOpen, setNotificationOpen] = useState(false)
   const notificationButtonRef = useRef<HTMLButtonElement>(null)
   const notificationPopoverRef = useRef<HTMLDivElement>(null)
+  const [globalMenu, setGlobalMenu] = useState<{ x: number; y: number } | null>(null)
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('history')
   const [structureSelection, setStructureSelection] = useState<RepositoryStructureSelection>({ kind: 'root' })
   const [compareBase, setCompareBase] = useState<string | null>(null)
@@ -1439,7 +1442,6 @@ export default function App() {
         if (repositoryManagerOpen || !repository) {
           document.querySelector<HTMLInputElement>('.repository-catalog-search input')?.focus()
         } else {
-          setSidebarCollapsed(false)
           setRepositorySwitcherSignal((current) => current + 1)
         }
       }
@@ -1471,9 +1473,13 @@ export default function App() {
   const closeWindow = () => { try { void getCurrentWindow().close().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const themeTitle = theme === 'system' ? t('history:app.theme.system', { "resolvedThemedark": t(resolvedTheme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') }) : t('history:app.theme.selected', { "themedark": t(theme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') })
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun
-  return <main className={`app-shell ${resolvedTheme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`}>
+  return <main className={`app-shell ${repository && !repositoryManagerOpen ? 'workbench-active' : ''} ${resolvedTheme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`} style={repository && !repositoryManagerOpen ? { gridTemplateColumns: sidebarCollapsed ? '0px 0px minmax(0, 1fr)' : `${sidebarWidth}px 1px minmax(0, 1fr)` } : undefined}>
     <div className="app-titlebar" data-tauri-drag-region>
       <div className="titlebar-brand" data-tauri-drag-region><AppMark/><span>Branchline</span></div>
+      {repository && !repositoryManagerOpen && <div className="titlebar-repository-controls">
+        <RepositoryQuickSwitcher favorites={favoriteRepositories} onToggleFavorite={toggleFavorite} repository={repository} parentRepository={parentRepository} recentRepositories={recentRepositories} openingRepository={openingRepository} openSignal={repositorySwitcherSignal} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onReturnToParentRepository={handleReturnToParentRepository}/>
+        <Button variant="icon" className="titlebar-manager-button" onClick={() => setRepositoryManagerOpen(true)} tooltip={t('repository:manager.title')} aria-label={t('repository:manager.title')}><FolderGit2 size={16}/></Button>
+      </div>}
       <div className="titlebar-drag-region" data-tauri-drag-region/>
       <LanguageSelect/>
       <div className="window-controls">
@@ -1483,22 +1489,24 @@ export default function App() {
       </div>
     </div>
     {repository && !repositoryManagerOpen && <>
-      <div className={`sidebar-shell ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ width: sidebarCollapsed ? 0 : sidebarWidth, flexBasis: sidebarCollapsed ? 0 : sidebarWidth }}>
-        <Sidebar repository={repository} structureRepository={structureRepository} parentRepository={parentRepository} recentRepositories={recentRepositories} favorites={favoriteRepositories} onToggleFavorite={toggleFavorite} onManageRepositories={() => setRepositoryManagerOpen(true)} openingRepository={openingRepository} activeView={workspaceView} structureSelection={structureSelection} repositorySwitcherSignal={repositorySwitcherSignal} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onReturnToParentRepository={handleReturnToParentRepository} onCreateBranch={openCreateBranchDialog} onDeleteBranchPrefix={(prefix) => void handleDeleteBranchPrefix(prefix)} onJumpBranch={handleJumpBranch} onSwitchBranch={(branch) => void handleSwitchBranch(branch)} onPullBranch={(branch) => void handlePullBranch(branch)} onMergeBranch={(branch) => void handleMergeReference(branch)} onDeleteBranch={(branch) => void handleDeleteBranch(branch)} onCopyBranch={(branch) => void copyText(branch, message('history:app.notice.branchNameCopied', { "branch": branch }))} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPullBranch={toggleAutoPullBranch} onSelectView={(view) => { setRepositoryManagerOpen(false); setWorkspaceView(view) }} onSelectStructure={(selection) => { setRepositoryManagerOpen(false); setStructureSelection(selection); setWorkspaceView('structure') }} onOpenGitConfig={() => setGitConfigOpen(true)} onOpenCommandLog={() => setCommandLogOpen(true)} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}/>
+      <div id="sidebar-panel" className={`sidebar-shell ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ width: sidebarCollapsed ? 0 : sidebarWidth, flexBasis: sidebarCollapsed ? 0 : sidebarWidth }}>
+        <Sidebar repository={repository} structureRepository={structureRepository} openingRepository={openingRepository} activeView={workspaceView} structureSelection={structureSelection} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onCreateBranch={openCreateBranchDialog} onDeleteBranchPrefix={(prefix) => void handleDeleteBranchPrefix(prefix)} onJumpBranch={handleJumpBranch} onSwitchBranch={(branch) => void handleSwitchBranch(branch)} onPullBranch={(branch) => void handlePullBranch(branch)} onMergeBranch={(branch) => void handleMergeReference(branch)} onDeleteBranch={(branch) => void handleDeleteBranch(branch)} onCopyBranch={(branch) => void copyText(branch, message('history:app.notice.branchNameCopied', { "branch": branch }))} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPullBranch={toggleAutoPullBranch} onSelectView={(view) => { setRepositoryManagerOpen(false); setWorkspaceView(view) }} onSelectStructure={(selection) => { setRepositoryManagerOpen(false); setStructureSelection(selection); setWorkspaceView('structure') }} onOpenGitConfig={() => setGitConfigOpen(true)}/>
       </div>
-      <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" aria-label={t('history:app.layout.resizeSidebar')} onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
+      <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={200} aria-valuemax={360} aria-valuenow={Math.round(sidebarWidth)} aria-controls="sidebar-panel" aria-label={t('history:app.layout.resizeSidebar')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'vertical'); if (delta) setSidebarWidth((value) => Math.min(360, Math.max(200, value + delta))) }} onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
     </>}
-    <div className={`workspace ${repository && !repositoryManagerOpen ? '' : 'empty-repository'}`}>
-      {repository && !repositoryManagerOpen && <header className="topbar">
-        <div className="branch-context"><Button variant="icon" tooltip={t('history:app.sidebar.repositories')} aria-label={t('history:app.sidebar.repositories')} onClick={() => setRepositoryManagerOpen(true)}><FolderGit2 size={17}/></Button>{sidebarCollapsed && <Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed(false)} tooltip={t('history:app.sidebar.expand')} aria-label={t('history:app.sidebar.expand')}><PanelLeftOpen size={17}/></Button>}{parentRepository && <Tooltip content={t('history:app.navigation.parentRepo', { "path": parentRepository.path })}><button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} ><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button></Tooltip>}{rootRepository && <Tooltip content={t('history:app.navigation.rootRepo', { "path": rootRepository.path })}><button className="parent-repository-chip root-repository-chip" onClick={() => void handleReturnToRootRepository()} ><FolderGit2 size={13}/><span>{t('history:app.navigation.rootRepoLabel', { "name": rootRepository.name })}</span></button></Tooltip>}{repository ? <GitBranch size={16}/> : <FolderOpen size={16}/>}<strong>{repository?.branch ?? t('history:app.sidebar.notOpen')}</strong></div>
-          <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && workspaceView === 'history') { event.preventDefault(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={workspaceView === 'tags' ? t('history:app.search.tags') : repository ? t('history:app.search.commits') : t('history:app.search.openFirst')} disabled={!repository}/>{query ? <><span className="search-result-count">{workspaceView === 'tags' ? t('history:app.search.tagCount', { "count": tagSearchCount }) : searchSummary.total ? `${new Intl.NumberFormat(locale).format(searchSummary.current || 1)}/${new Intl.NumberFormat(locale).format(searchSummary.total)}` : '0/0'}</span>{workspaceView === 'history' && <><Tooltip content={t('history:app.search.previous')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.previous')}><ChevronUp size={13}/></button></Tooltip><Tooltip content={t('history:app.search.next')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.next')}><ChevronDown size={13}/></button></Tooltip><Tooltip content={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} aria-label={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><ListFilter size={13}/></button></Tooltip></>}<Tooltip content={t('history:app.search.clear')}><button type="button" onClick={() => setQuery('')} aria-label={t('history:app.search.clear')}><X size={13}/></button></Tooltip></> : <kbd>⌘ F</kbd>}</div>
+    {repository && !repositoryManagerOpen && <header className="topbar">
+        <div className="branch-context"><Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} tooltip={t(sidebarCollapsed ? 'history:app.sidebar.expand' : 'history:app.sidebar.collapse')} aria-label={t(sidebarCollapsed ? 'history:app.sidebar.expand' : 'history:app.sidebar.collapse')}>{sidebarCollapsed ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}</Button>{parentRepository && <Tooltip content={t('history:app.navigation.parentRepo', { "path": parentRepository.path })}><button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} ><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button></Tooltip>}{rootRepository && <Tooltip content={t('history:app.navigation.rootRepo', { "path": rootRepository.path })}><button className="parent-repository-chip root-repository-chip" onClick={() => void handleReturnToRootRepository()} ><FolderGit2 size={13}/><span>{t('history:app.navigation.rootRepoLabel', { "name": rootRepository.name })}</span></button></Tooltip>}</div>
+          <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && workspaceView === 'history') { event.preventDefault(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={workspaceView === 'tags' ? t('history:app.search.tags') : repository ? t('history:app.search.commits') : t('history:app.search.openFirst')} disabled={!repository}/>{query ? <><span className="search-result-count">{workspaceView === 'tags' ? t('history:app.search.tagCount', { "count": tagSearchCount }) : searchSummary.total ? `${new Intl.NumberFormat(locale).format(searchSummary.current || 1)}/${new Intl.NumberFormat(locale).format(searchSummary.total)}` : '0/0'}</span>{workspaceView === 'history' && <><Tooltip content={t('history:app.search.previous')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.previous')}><ChevronUp size={13}/></button></Tooltip><Tooltip content={t('history:app.search.next')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.next')}><ChevronDown size={13}/></button></Tooltip><Tooltip content={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} aria-label={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><ListFilter size={13}/></button></Tooltip></>}<Tooltip content={t('history:app.search.clear')}><button type="button" onClick={() => setQuery('')} aria-label={t('history:app.search.clear')}><X size={13}/></button></Tooltip></> : <kbd>{getShortcutModifier()} F</kbd>}</div>
           <div className="top-actions">
-            <Button variant="icon" onClick={() => setShortcutOpen(true)} tooltip={t('history:app.shortcuts.view')} aria-label={t('history:app.shortcuts.view')}><Command size={17}/></Button>
             <Button variant="secondary" className="fetch-button sync-action" aria-label={t('history:app.sync.fetch')} onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} tooltip={t('history:app.sync.fetchHint')}><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? t('history:app.sync.fetching') : t('history:app.sync.fetch')}</span></Button>
             <Button variant="secondary" className="fetch-button sync-action" aria-label={t('history:app.sync.pull')} onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} tooltip={repository?.operation ? t('history:app.sync.finishOperation') : repository?.behind ? t('history:app.sync.pullCount', { "count": repository.behind }) : t('history:app.sync.pullHint')}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? t('history:app.sync.pulling') : t('history:app.sync.pull')}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{new Intl.NumberFormat(locale).format(repository!.behind)}</small>}</Button>
             <Button variant="secondary" className="fetch-button sync-action" aria-label={t('history:app.sync.push')} onClick={() => void handlePush()} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} tooltip={repository?.operation ? t('history:app.sync.finishOperation') : repository?.ahead ? t('history:app.sync.pushCount', { "count": repository.ahead }) : t('history:app.sync.pushHint')}>{activeOperation?.key === 'push' ? <RefreshCw className="spin" size={15}/> : <CloudUpload size={15}/>}<span>{activeOperation?.key === 'push' ? t('history:app.sync.pushing') : t('history:app.sync.push')}</span>{Boolean(repository?.ahead) && <small className="sync-count push-count">{new Intl.NumberFormat(locale).format(repository!.ahead)}</small>}</Button>
-            <Button variant="icon" onClick={() => setTheme(nextThemePreference)} tooltip={t('history:app.theme.switch', { "themeTitle": themeTitle })} aria-label={t('history:app.theme.switch', { "themeTitle": themeTitle })}><ThemeIcon size={17}/></Button>
-            <Button ref={notificationButtonRef} variant="icon" className="notification" active={notificationOpen} onClick={() => setNotificationOpen((value) => !value)} tooltip={t('history:app.notifications.view')} aria-label={t('history:app.notifications.view')}><Bell size={17}/><span/></Button>
+            <Button ref={notificationButtonRef} variant="icon" className="global-actions-menu-button" active={Boolean(globalMenu) || notificationOpen} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setNotificationOpen(false); setGlobalMenu((current) => current ? null : { x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.shortcuts.moreOptions')} aria-label={t('history:app.shortcuts.moreOptions')} aria-expanded={Boolean(globalMenu)}><MoreHorizontal size={17}/></Button>
+            {globalMenu && <ContextMenu x={globalMenu.x} y={globalMenu.y} onClose={() => setGlobalMenu(null)}>
+              <button onClick={() => setShortcutOpen(true)}><Command size={14}/><span>{t('history:app.shortcuts.view')}</span></button>
+              <button onClick={() => setTheme(nextThemePreference)}><ThemeIcon size={14}/><span>{t('history:app.shortcuts.theme')}</span></button>
+              <button onClick={() => setNotificationOpen(true)}><Bell size={14}/><span>{t('history:app.notifications.view')}</span></button>
+            </ContextMenu>}
             {notificationOpen && <div ref={notificationPopoverRef} className="notification-popover">
               <div className="popover-heading"><strong>{t('history:app.notifications.heading')}</strong><Tooltip content={t('history:app.notifications.close')}><button onClick={() => setNotificationOpen(false)} aria-label={t('history:app.notifications.close')}><X size={13}/></button></Tooltip></div>
               <div className="notification-item unread"><span/><div><strong>{repository ? t('history:app.notifications.healthy') : t('history:app.sidebar.noRepository')}</strong><small>{repository ? t('history:app.notifications.tracking', { "branch": repository.branch, "ahead": repository.ahead, "behind": repository.behind }) : t('history:app.notifications.openHint')}</small></div></div>
@@ -1506,8 +1514,9 @@ export default function App() {
               <div className="notification-item"><span/><div><strong>{t('history:app.notifications.submodules')}</strong><small>{repository ? t('history:app.notifications.submoduleCount', { "count": repository.submoduleCount }) : t('history:app.notifications.noData')}</small></div></div>
             </div>}
           </div>
-        </header>
-      }
+      </header>
+    }
+    <div className={`workspace ${repository && !repositoryManagerOpen ? '' : 'empty-repository'}`}>
       {repository && !repositoryManagerOpen ? <><div className="content-tabs"><Tooltip content={t('history:app.navigation.historyHint')}><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} ><GitCommitHorizontal size={14}/><span className="tab-label">{t('history:app.navigation.history')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.changesHint')}><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} ><FileDiff size={14}/><span className="tab-label">{t('history:app.navigation.changes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.stashHint')}><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} ><Archive size={14}/><span className="tab-label">{t('history:app.navigation.stashes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.compareHint')}><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} ><GitCompareArrows size={14}/><span className="tab-label">{t('history:app.navigation.compare')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.mergeHint')}><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} ><GitMerge size={14}/><span className="tab-label">{t('history:app.navigation.merge')}</span></button></Tooltip>{repository.operation && <Tooltip content={t('history:app.navigation.operationHint')}><button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} ><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? t('history:app.navigation.rebase') : repository.operation.conflicts.length ? t('history:app.navigation.conflicts') : repository.operation.kind === 'merge' ? t('history:app.navigation.mergeOperation') : repository.operation.kind === 'cherry-pick' ? t('history:app.navigation.cherryPick') : t('history:app.navigation.operation')}</span><span className="tab-badge">{repository.operation.conflicts.length ? new Intl.NumberFormat(locale).format(repository.operation.conflicts.length) : repository.operation.currentStep || '!'}</span></button></Tooltip>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" aria-label={t('history:app.confirm.undoHeading')} disabledAnchorClassName="history-undo-anchor" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} tooltip={t('history:app.actions.undoHint')}><Undo2 size={14}/><span>{t('history:app.confirm.undoHeading')}</span></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.branchHint', { branchFilterLabel })} active={branchFilter.length > 0} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.branchHint', { "branchFilterLabel": branchFilterLabel })}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.timeHint', { timeFilterLabelstimeFilter: timeFilterLabels[timeFilter] })} active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.timeHint', { "timeFilterLabelstimeFilter": timeFilterLabels[timeFilter] })}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>{t('history:app.filters.branchHeading')}</span></div><div className="context-menu-options"><button className={branchFilter.length === 0 ? 'selected-option' : ''} onClick={() => { setBranchFilter([]); setFilterMenu(null) }}><Check size={14}/><span>{t('history:app.filters.allBranches')}</span></button>{availableBranches.map((branch) => <label className="history-filter-option" key={branch}><input type="checkbox" checked={branchFilter.includes(branch)} onChange={() => setBranchFilter((values) => toggleFilterValue(values, branch))}/><GitBranch size={14}/><span>{branch}</span></label>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>{t('history:app.filters.timeHeading')}</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
@@ -1556,10 +1565,10 @@ export default function App() {
             onNotice={setRepositoryNotice}
           />
         )}
-        <span className={`panel-resizer inspector-resizer ${inspectorVisible ? '' : 'hidden'} ${panelResizing === 'inspector' ? 'active' : ''}`} role="separator" aria-label={t('history:app.layout.resizeInspector')} onPointerDown={(event) => beginPanelResize('inspector', event)}/>
-        {workspaceView === 'history' && !inspectorCollapsed && <section className="inspector-pane" style={{ gridTemplateRows: `${detailsHeight}px 1px minmax(0, 1fr)` }}>
+        <span className={`panel-resizer inspector-resizer ${inspectorVisible ? '' : 'hidden'} ${panelResizing === 'inspector' ? 'active' : ''}`} role="separator" tabIndex={inspectorVisible ? 0 : -1} aria-hidden={!inspectorVisible} aria-orientation="vertical" aria-valuemin={300} aria-valuemax={520} aria-valuenow={Math.round(inspectorWidth)} aria-controls="inspector-pane" aria-label={t('history:app.layout.resizeInspector')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'vertical', true); if (delta) setInspectorWidth((value) => Math.min(520, Math.max(300, value + delta))) }} onPointerDown={(event) => beginPanelResize('inspector', event)}/>
+        {workspaceView === 'history' && !inspectorCollapsed && <section id="inspector-pane" className="inspector-pane" style={{ gridTemplateRows: `${detailsHeight}px 1px minmax(0, 1fr)` }}>
           <CommitDetails commit={selectedCommit} stashReference={selectedStashReference} onOpenParent={(hash) => void handleOpenParent(hash)} onClose={() => setInspectorCollapsed(true)}/>
-          <span className={`panel-resizer inspector-vertical-resizer ${panelResizing === 'details' ? 'active' : ''}`} role="separator" aria-label={t('history:app.layout.resizeDetails')} onPointerDown={beginDetailsResize}/>
+          <span className={`panel-resizer inspector-vertical-resizer ${panelResizing === 'details' ? 'active' : ''}`} role="separator" tabIndex={0} aria-orientation="horizontal" aria-valuemin={230} aria-valuemax={560} aria-valuenow={Math.round(detailsHeight)} aria-label={t('history:app.layout.resizeDetails')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'horizontal'); if (delta) setDetailsHeight((value) => Math.min(560, Math.max(230, value + delta))) }} onPointerDown={beginDetailsResize}/>
           <ChangedFilesPanel key={selectedTreeKey} files={selectedCommitFiles} treePaths={usesCommitTree ? selectedTree?.paths : undefined} treeError={selectedTree?.error} loading={selectedCommitFilesLoading || (usesCommitTree && !selectedTree)} activeFile={diffFile} onOpenFile={(index, file) => {
             if (index === null) {
               setDiffFile(null)

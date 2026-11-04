@@ -53,6 +53,9 @@
       "autoEnabled": "Automatic fast-forward enabled",
       "pulling": "Pulling this branch",
       "heading": "Branches",
+      "filter": "Filter branches",
+      "clearFilter": "Clear branch filter",
+      "noMatches": "No branches match",
       "create": "Create branch",
       "local": "Local",
       "groupHint": "Click to expand or collapse; right-click to manage this branch group",
@@ -234,7 +237,8 @@
       "show": "Show keyboard shortcuts",
       "navigation": "Navigation",
       "heading": "Keyboard shortcuts",
-      "view": "View keyboard shortcuts"
+      "view": "View keyboard shortcuts",
+      "moreOptions": "More options"
     },
     "progress": {
       "expandHistory": "Expanding commit graph…",
@@ -372,9 +376,9 @@
       "close": "Close window"
     },
     "layout": {
-      "resizeSidebar": "Drag to resize left panel",
-      "resizeInspector": "Drag to resize right panel",
-      "resizeDetails": "Drag to resize commit information and changed files"
+      "resizeSidebar": "Resize left panel",
+      "resizeInspector": "Resize right panel",
+      "resizeDetails": "Resize commit information and changed files"
     },
     "search": {
       "tags": "Search tag names…",

@@ -53,6 +53,14 @@ pub struct RepositoryFile {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepositoryImage {
+    pub mime: String,
+    pub data: String,
+    pub byte_length: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryOperationStep {
     pub hash: String,
     pub short_hash: String,

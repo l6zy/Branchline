@@ -25,6 +25,7 @@ pub fn run() {
             commands::load_file_diff,
             commands::load_unstaged_file_diff,
             commands::load_staged_file_diff,
+            commands::load_file_image,
             commands::load_commit_stats,
             commands::load_commit_files,
             commands::load_commit_tree_files,

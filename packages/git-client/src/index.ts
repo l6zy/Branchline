@@ -1,4 +1,4 @@
-import type { BlameLine, CommandLogEntry, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositorySnapshot } from '@branchline/git-models'
+import type { BlameLine, CommandLogEntry, ConflictFileContent, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommitStats, RepositoryComparison, RepositoryDiffLine, RepositoryFile, RepositoryImage, RepositorySnapshot } from '@branchline/git-models'
 import { ApplicationError } from './errors'
 export * from './errors'
 
@@ -19,6 +19,7 @@ export type {
   RepositoryCommitTemplate,
   RepositoryDiffLine,
   RepositoryFile,
+  RepositoryImage,
   RepositoryComparison,
   RepositorySnapshot,
   RepositoryOperationState,
@@ -120,6 +121,12 @@ export async function loadRepositoryUnstagedFileDiff(repositoryPath: string, fil
 
 export async function loadRepositoryStagedFileDiff(repositoryPath: string, filePath: string, showWhitespace = true) {
   return invoke<RepositoryDiffLine[]>('load_staged_file_diff', { repositoryPath, filePath, showWhitespace })
+}
+
+export type RepositoryImageSource = 'worktree' | 'index' | 'commit'
+
+export async function loadRepositoryFileImage(repositoryPath: string, filePath: string, source: RepositoryImageSource, revision?: string | null) {
+  return invoke<RepositoryImage | null>('load_file_image', { repositoryPath, filePath, source, revision: revision ?? null })
 }
 
 export async function fetchRepository(repositoryPath: string) {

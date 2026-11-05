@@ -61,7 +61,10 @@
     "selectionRequired": "没有选择文件",
     "outsideRepositoryPath": "文件路径超出仓库范围：{{file_path}}",
     "commitPathInvalid": "提交文件路径无效",
-    "locate": "无法定位文件路径"
+    "locate": "无法定位文件路径",
+    "imageRead": "无法读取图片",
+    "imageTooLarge": "图片超过 20 MB，无法预览",
+    "imageSourceInvalid": "不支持的图片来源"
   },
   "reference": {
     "invalid": "无效的提交或分支：{{reference}}"
@@ -208,6 +211,7 @@
     "stage_files": "暂存文件失败",
     "fetch_repository": "操作失败：fetch repository",
     "load_staged_file_diff": "读取已暂存 Diff失败",
+    "load_file_image": "读取图片预览失败",
     "load_unstaged_file_diff": "读取未暂存 Diff失败",
     "load_file_diff": "读取 Diff失败",
     "load_repository_state_token": "检查仓库状态失败",

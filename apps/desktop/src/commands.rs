@@ -3,7 +3,8 @@ use crate::{
     git,
     models::{
         BlameLine, DiffLine, FileHistoryEntry, GitUserConfig, MergeQueueSnapshot,
-        RepositoryCommitStats, RepositoryComparison, RepositoryFile, RepositorySnapshot,
+        RepositoryCommitStats, RepositoryComparison, RepositoryFile, RepositoryImage,
+        RepositorySnapshot,
     },
 };
 use std::path::Path;
@@ -202,6 +203,20 @@ pub async fn load_staged_file_diff(
     })
     .await
     .map_err(|error| task_error("load_staged_file_diff", error))?
+}
+
+#[tauri::command]
+pub async fn load_file_image(
+    repository_path: String,
+    file_path: String,
+    source: String,
+    revision: Option<String>,
+) -> Result<Option<RepositoryImage>, ApplicationError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::load_file_image(&repository_path, &file_path, &source, revision.as_deref())
+    })
+    .await
+    .map_err(|error| task_error("load_file_image", error))?
 }
 
 #[tauri::command]

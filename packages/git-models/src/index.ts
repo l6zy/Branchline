@@ -65,6 +65,12 @@ export type RepositoryFile = {
   incoming?: boolean
 }
 
+export type RepositoryImage = {
+  mime: string
+  data: string
+  byteLength: number
+}
+
 export type RepositoryOperationStep = {
   hash: string
   shortHash: string

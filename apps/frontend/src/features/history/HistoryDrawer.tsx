@@ -4,7 +4,7 @@ import { GitCommitHorizontal, History, Rows3, X } from 'lucide-react'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { errorMessage, renderMessage, type MessageContent } from '../../i18n/messages'
 import { Button } from '../../components/Button'
-import { loadFileBlame, loadFileCommitDiff, loadFileHistory, loadLineHistory, type BlameLine, type FileHistoryEntry } from '../../repository'
+import { loadFileBlame, loadFileCommitDiff, loadFileHistory, loadLineHistory, loadRepositoryFileImage, type BlameLine, type FileHistoryEntry } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
 import { BLAME_VIRTUALIZATION_THRESHOLD, getBlameVirtualRange } from './blameVirtualization'
@@ -159,6 +159,14 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
     if (!repositoryPath || !displayedEntry) return Promise.resolve([])
     return loadFileCommitDiff(repositoryPath, displayedEntry.hash, path, showWhitespace)
   }, [displayedEntry?.hash, repositoryPath])
+  const loadSelectedImage = useCallback((path: string, side: 'old' | 'new') => {
+    if (!repositoryPath || !displayedEntry) return Promise.resolve(null)
+    if (side === 'old') {
+      const parent = displayedEntry.parents[0]
+      return parent ? loadRepositoryFileImage(repositoryPath, path, 'commit', parent) : Promise.resolve(null)
+    }
+    return loadRepositoryFileImage(repositoryPath, path, 'commit', displayedEntry.hash)
+  }, [displayedEntry?.hash, displayedEntry?.parents[0], repositoryPath])
 
   if (!filePath) return null
   const fileName = filePath.split(/[\\/]/).pop() || filePath
@@ -175,7 +183,7 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
       </div>
       {selectedEntry ? <section className="file-history-detail">
         <div className="file-history-commit"><div><strong>{selectedEntry.title}</strong><code>{selectedEntry.hash}</code></div><dl><div><dt>{t('history:metadata.author')}</dt><dd>{selectedEntry.author} &lt;{selectedEntry.email}&gt;</dd></div><div><dt>{t('history:metadata.committer')}</dt><dd>{selectedEntry.committer} &lt;{selectedEntry.committerEmail}&gt;</dd></div><div><dt>{t('history:metadata.commitTime')}</dt><dd>{formatLocalDateTime(selectedEntry.commitTime || selectedEntry.time, true, locale)}</dd></div><div><dt>{t('history:metadata.parents')}</dt><dd>{selectedEntry.parents.length ? selectedEntry.parents.join(', ') : t('history:metadata.rootCommit')}</dd></div></dl><pre>{selectedEntry.message}</pre></div>
-        <div className="file-history-diff"><DiffPanel key={selectedEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff}/></div>
+        <div className="file-history-diff"><DiffPanel key={selectedEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff} loadImage={loadSelectedImage}/></div>
       </section> : <div className="history-empty">{t('history:drawer.selectCommit')}</div>}
     </div>}
     {!loading && tab === 'blame' && <div className={`blame-workspace ${wideDiff ? 'wide' : ''} ${blameResizing ? 'resizing' : ''}`} style={{ gridTemplateColumns: wideDiff ? undefined : `${blameListWidth}% 7px minmax(360px, 1fr)` }}>
@@ -190,7 +198,7 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
       {selectedBlame ? <section className="file-history-detail blame-detail">
         {blameLineLoading && !selectedBlameEntry ? <div className="history-empty">{t('history:blame.loadingCommit', { line: selectedBlame.line })}</div> : selectedBlameEntry ? <>
           <div className="file-history-commit"><div><strong>{selectedBlameEntry.title}</strong><code>{selectedBlameEntry.hash}</code></div><dl><div><dt>{t('history:metadata.author')}</dt><dd>{selectedBlameEntry.author} &lt;{selectedBlameEntry.email}&gt;</dd></div><div><dt>{t('history:metadata.committer')}</dt><dd>{selectedBlameEntry.committer} &lt;{selectedBlameEntry.committerEmail}&gt;</dd></div><div><dt>{t('history:metadata.commitTime')}</dt><dd>{formatLocalDateTime(selectedBlameEntry.commitTime || selectedBlameEntry.time, true, locale)}</dd></div><div><dt>{t('history:metadata.parents')}</dt><dd>{selectedBlameEntry.parents.length ? selectedBlameEntry.parents.join(', ') : t('history:metadata.rootCommit')}</dd></div></dl><pre>{selectedBlameEntry.message}</pre><button className="line-history-button" disabled={blameLineLoading || !lineHistory.length} onClick={() => { setSelectedHash(lineHistory.find((entry) => entry.hash === selectedBlame.hash)?.hash ?? lineHistory[0]?.hash ?? null); changeTab('line') }}><History size={14}/>{t('history:blame.fullHistory', { line: selectedBlame.line })} <span>{numbers.format(lineHistory.length)}</span></button></div>
-          <div className="file-history-diff"><DiffPanel key={selectedBlameEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff}/></div>
+          <div className="file-history-diff"><DiffPanel key={selectedBlameEntry.hash} files={selectedFile} wide={wideDiff} onWideChange={setWideDiff} hideFileList loadRows={loadSelectedDiff} loadImage={loadSelectedImage}/></div>
         </> : <div className="history-empty error">{lineHistoryError ? renderMessage(lineHistoryError, t) : t('history:blame.uncommitted')}</div>}
       </section> : <div className="history-empty blame-detail-empty"><Rows3 size={28}/><strong>{t('history:blame.selectLine')}</strong><span>{t('history:blame.selectDescription')}</span></div>}
     </div>}

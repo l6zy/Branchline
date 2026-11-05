@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check, ChevronDown, GitBranch, GitCompareArrows, Play, RefreshCw, Search } from 'lucide-react'
-import { compareRepositoryRefs, loadRepositoryCompareFileDiff, type RepositoryComparison, type RepositorySnapshot } from '../../repository'
+import { compareRepositoryRefs, loadRepositoryCompareFileDiff, loadRepositoryFileImage, type RepositoryComparison, type RepositorySnapshot } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { errorMessage, message, type MessageContent } from '../../i18n/messages'
@@ -113,6 +113,10 @@ export function ComparePanel({ repository, initialBase, initialTarget, onNotice 
     if (!repository || !comparison) return Promise.resolve([])
     return loadRepositoryCompareFileDiff(repository.path, comparison.base, comparison.target, filePath, showWhitespace)
   }, [comparison, repository?.path])
+  const loadImage = useCallback((filePath: string, side: 'old' | 'new') => {
+    if (!repository || !comparison) return Promise.resolve(null)
+    return loadRepositoryFileImage(repository.path, filePath, 'commit', side === 'old' ? comparison.base : comparison.target)
+  }, [comparison?.base, comparison?.target, repository?.path])
 
   if (!repository) return <section className="workspace-empty"><GitCompareArrows size={34}/><strong>{t('diff:compare.emptyTitle')}</strong><span>{t('diff:compare.emptyDescription')}</span></section>
   return <section className="compare-panel workspace-page">
@@ -127,7 +131,7 @@ export function ComparePanel({ repository, initialBase, initialTarget, onNotice 
     {comparison && <div className="comparison-result">
       <div className="comparison-summary"><div><strong>{numbers.format(comparison.files.length)}</strong><span>{t('diff:compare.changedFiles')}</span></div><div><strong>{numbers.format(comparison.ahead)}</strong><span>{t('diff:compare.ahead')}</span></div><div><strong>{numbers.format(comparison.behind)}</strong><span>{t('diff:compare.behind')}</span></div><code>{comparison.base} → {comparison.target}</code></div>
       {comparison.files.length > 0
-        ? <DiffPanel files={comparison.files} repositoryPath={repository.path} wide={wide} onWideChange={setWide} loadRows={loadRows} defaultFontSize={13} fontSizeStorageKey="branchline.compareDiffFontSize.v1"/>
+        ? <DiffPanel files={comparison.files} repositoryPath={repository.path} wide={wide} onWideChange={setWide} loadRows={loadRows} loadImage={loadImage} defaultFontSize={13} fontSizeStorageKey="branchline.compareDiffFontSize.v1"/>
         : <div className="comparison-empty"><GitCompareArrows size={30}/><strong>{t('diff:compare.identicalTitle')}</strong><span>{comparison.ahead === 0 && comparison.behind === 0 ? t('diff:compare.identicalSnapshot') : t('diff:compare.identicalContent')}</span></div>}
     </div>}
   </section>

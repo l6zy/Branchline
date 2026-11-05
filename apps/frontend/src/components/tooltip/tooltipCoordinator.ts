@@ -20,6 +20,9 @@ export function createTooltipCoordinator(): TooltipCoordinator {
   const listeners = new Set<() => void>()
   const publish = (next: TooltipSnapshot) => { snapshot = next; listeners.forEach(listener => listener()) }
   const dismiss = (reason: TooltipCloseReason) => {
+    // Scroll and pointer activation call this continuously. Publishing an
+    // unchanged snapshot would re-render every subscribed tooltip for no reason.
+    if (!snapshot.ownerId && !snapshot.openId) return
     publish({ ...snapshot, ownerId: null, openId: null, generation: snapshot.generation + 1,
       lastClosedId: snapshot.openId ?? snapshot.ownerId ?? snapshot.lastClosedId, closeReason: reason })
   }

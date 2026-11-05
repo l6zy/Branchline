@@ -3,8 +3,8 @@ use crate::models::{
     BlameLine, CommandLogEntry, ConflictFileContent, DiffLine, FileHistoryEntry, GitUserConfig,
     MergeCandidate, MergeQueueSnapshot, RebasePreview, RepositoryBranchTracking, RepositoryCommit,
     RepositoryCommitStats, RepositoryCommitTemplate, RepositoryComparison, RepositoryFile,
-    RepositoryOperationState, RepositoryOperationStep, RepositorySnapshot, RepositoryStash,
-    RepositorySubmodule, RepositoryWorktree,
+    RepositoryImage, RepositoryOperationState, RepositoryOperationStep, RepositorySnapshot,
+    RepositoryStash, RepositorySubmodule, RepositoryWorktree,
 };
 use std::sync::{Mutex, OnceLock};
 use std::{
@@ -3528,6 +3528,135 @@ pub fn load_commit_file_content(
     )
 }
 
+const MAX_IMAGE_PREVIEW_BYTES: usize = 20 * 1024 * 1024;
+
+fn image_mime(file_path: &str) -> Option<&'static str> {
+    let extension = Path::new(file_path)
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" | "jfif" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        "avif" => Some("image/avif"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0] as u32;
+        let second = chunk.get(1).copied().unwrap_or(0) as u32;
+        let third = chunk.get(2).copied().unwrap_or(0) as u32;
+        let value = (first << 16) | (second << 8) | third;
+        encoded.push(ALPHABET[((value >> 18) & 63) as usize] as char);
+        encoded.push(ALPHABET[((value >> 12) & 63) as usize] as char);
+        encoded.push(if chunk.len() > 1 {
+            ALPHABET[((value >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            ALPHABET[(value & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    encoded
+}
+
+pub fn load_file_image(
+    repository_path: &str,
+    file_path: &str,
+    source: &str,
+    revision: Option<&str>,
+) -> Result<Option<RepositoryImage>, ApplicationError> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    if file_path.is_empty() {
+        return Ok(None);
+    }
+    let git_path = file_path.replace('\\', "/");
+    let mime = match image_mime(&git_path) {
+        Some(mime) => mime,
+        None => return Ok(None),
+    };
+    let bytes = match source {
+        "worktree" => {
+            let target = match repository_file_target(&root, &file_path) {
+                Ok(target) => target,
+                Err(_) => return Ok(None),
+            };
+            let canonical_root = match root.canonicalize() {
+                Ok(path) => path,
+                Err(_) => return Ok(None),
+            };
+            let resolved = match target.canonicalize() {
+                Ok(path) => path,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(ApplicationError::new("file.imageRead").cause(error)),
+            };
+            if !resolved.starts_with(&canonical_root) {
+                return Ok(None);
+            }
+            let metadata = match fs::metadata(&resolved) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(ApplicationError::new("file.imageRead").cause(error)),
+            };
+            if metadata.len() > MAX_IMAGE_PREVIEW_BYTES as u64 {
+                return Err(ApplicationError::new("file.imageTooLarge"));
+            }
+            match fs::read(&resolved) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(ApplicationError::new("file.imageRead").cause(error)),
+            }
+        }
+        "index" => {
+            let reference = format!(":0:{git_path}");
+            match command_output_bytes(&root, ["show", reference.as_str()]) {
+                Ok(bytes) => bytes,
+                Err(_) => return Ok(None),
+            }
+        }
+        "commit" => {
+            let revision = revision.map(str::trim).filter(|value| !value.is_empty());
+            let Some(revision) = revision else {
+                return Ok(None);
+            };
+            let hash = match resolve_commit(&root, revision) {
+                Ok(hash) => hash,
+                Err(_) => return Ok(None),
+            };
+            let reference = format!("{hash}:{git_path}");
+            match command_output_bytes(&root, ["show", reference.as_str()]) {
+                Ok(bytes) => bytes,
+                Err(_) => return Ok(None),
+            }
+        }
+        _ => return Err(ApplicationError::new("file.imageSourceInvalid")),
+    };
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_IMAGE_PREVIEW_BYTES {
+        return Err(ApplicationError::new("file.imageTooLarge"));
+    }
+    Ok(Some(RepositoryImage {
+        mime: mime.into(),
+        data: base64_encode(&bytes),
+        byte_length: bytes.len(),
+    }))
+}
+
 pub fn commit_repository(
     repository_path: &str,
     message: &str,
@@ -5124,6 +5253,68 @@ mod tests {
         }
         assert!(!paths.iter().any(|path| path == "src/new.ts"));
         assert!(load_commit_tree_files(&path, "--all").is_err());
+    }
+
+    #[test]
+    fn loads_image_versions_and_encodes_base64() {
+        let repository = test_repository();
+        let root = &repository.0;
+        let path = root.to_string_lossy().to_string();
+        let bytes = vec![0x89, b'P', b'N', b'G', 0, 1, 2, 255];
+        fs::write(root.join("image.png"), &bytes).unwrap();
+
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"hello"), "aGVsbG8=");
+        assert_eq!(base64_encode(&[0, 1, 2]), "AAEC");
+
+        let worktree = load_file_image(&path, "image.png", "worktree", None)
+            .expect("load worktree image")
+            .expect("worktree image exists");
+        assert_eq!(worktree.mime, "image/png");
+        assert_eq!(worktree.byte_length, bytes.len());
+        assert_eq!(worktree.data, base64_encode(&bytes));
+        assert!(load_file_image(&path, "image.png", "index", None)
+            .expect("load missing index image")
+            .is_none());
+
+        git_output(root, &["add", "image.png"]).unwrap();
+        let index = load_file_image(&path, "image.png", "index", None)
+            .expect("load index image")
+            .expect("index image exists");
+        assert_eq!(index.data, base64_encode(&bytes));
+
+        git_output(root, &["commit", "-m", "image fixture"]).unwrap();
+        let commit = load_file_image(&path, "image.png", "commit", Some("HEAD"))
+            .expect("load commit image")
+            .expect("commit image exists");
+        assert_eq!(commit.data, base64_encode(&bytes));
+        assert!(load_file_image(&path, "image.png", "commit", None)
+            .expect("load commit image without revision")
+            .is_none());
+        assert!(
+            load_file_image(&path, "image.png", "commit", Some("missing-revision"))
+                .expect("ignore missing commit revision")
+                .is_none()
+        );
+
+        fs::write(
+            root.join("diagram.svg"),
+            br#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#,
+        )
+        .unwrap();
+        let svg = load_file_image(&path, "diagram.svg", "worktree", None)
+            .expect("load svg")
+            .expect("svg exists");
+        assert_eq!(svg.mime, "image/svg+xml");
+
+        assert!(load_file_image(&path, "README.md", "worktree", None)
+            .expect("ignore non-image")
+            .is_none());
+        assert!(load_file_image(&path, "missing.png", "worktree", None)
+            .expect("ignore missing image")
+            .is_none());
+        assert!(load_file_image(&path, "../outside.png", "worktree", None).is_err());
+        assert!(load_file_image(&path, "image.png", "unsupported", None).is_err());
     }
 
     #[test]

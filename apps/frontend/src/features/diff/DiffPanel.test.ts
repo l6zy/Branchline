@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildStagePatch, changeBlock, changeLine, diffActionEdgeSpace, diffOverviewBounds, diffOverviewMarkers, diffOverviewViewport, diffSplitRowHeight, shouldJumpToFirstChange, shouldRenderLoadedRows, shouldShowDiffOverviewViewport } from './DiffPanel'
+import { buildStagePatch, changeBlock, changeLine, diffActionEdgeSpace, diffOverviewBounds, diffOverviewMarkers, diffOverviewThumb, diffOverviewViewport, diffSplitRowHeight, shouldJumpToFirstChange, shouldRenderLoadedRows, shouldShowDiffOverviewViewport } from './DiffPanel'
 
 describe('diffOverviewBounds', () => {
   it('ends above the horizontal scrollbar when it consumes viewport height', () => {
@@ -75,6 +75,23 @@ describe('diffOverviewViewport', () => {
 	it('fills the overview when the diff content does not scroll', () => {
 		expect(diffOverviewViewport(0, 400, 400, 34)).toEqual({ top: 0, height: 100 })
 	})
+})
+
+describe('diffOverviewThumb', () => {
+  it('maps a large file thumb between the track edges with a usable minimum height', () => {
+    const thumb = diffOverviewThumb(634, 1034, 400, 600)
+    expect(thumb.top).toBeCloseTo(367.9, 1)
+    expect(thumb.height).toBeCloseTo(232.1, 1)
+    const huge = diffOverviewThumb(5000, 100000, 400, 600)
+    expect(huge.height).toBe(28)
+    expect(huge.top).toBeCloseTo(28.7, 1)
+    expect(diffOverviewThumb(99600, 100000, 400, 600).top).toBe(572)
+  })
+
+  it('fills the track when there is no scrollable content', () => {
+    expect(diffOverviewThumb(0, 400, 400, 600)).toEqual({ top: 0, height: 600 })
+    expect(diffOverviewThumb(0, 400, 400, 0)).toEqual({ top: 0, height: 0 })
+  })
 })
 
 describe('diffSplitRowHeight', () => {

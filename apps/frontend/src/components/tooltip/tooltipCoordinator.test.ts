@@ -42,6 +42,17 @@ describe('tooltip ownership', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
+  it('ignores dismissals when no tooltip is pending or open', () => {
+    const state = createTooltipCoordinator()
+    const listener = vi.fn()
+    state.subscribe(listener)
+    const initial = state.getSnapshot()
+    state.dismiss('scroll')
+    state.dismiss('activation')
+    expect(state.getSnapshot()).toBe(initial)
+    expect(listener).not.toHaveBeenCalled()
+  })
+
   it('invalidates stale callbacks on leave and on reentry into the same trigger', () => {
     const state = createTooltipCoordinator()
     const first = state.claim('same')

@@ -1,5 +1,5 @@
 import { cloneElement, Fragment, isValidElement, useEffect, useId, useRef, useSyncExternalStore, type CSSProperties, type HTMLAttributes, type ReactElement, type Ref } from 'react'
-import { arrow, autoUpdate, flip, FloatingArrow, FloatingPortal, offset, safePolygon, shift, useFloating, useFocus, useHover, useInteractions, useMergeRefs, useRole, useTransitionStyles, type Placement } from '@floating-ui/react'
+import { arrow, autoUpdate, flip, FloatingArrow, FloatingPortal, offset, safePolygon, shift, useFloating, useFocus, useHover, useInteractions, useMergeRefs, useRole, useTransitionStyles, type Placement, type VirtualElement } from '@floating-ui/react'
 import { useTooltipContext } from './TooltipProvider'
 import { createTooltipCoordinator } from './tooltipCoordinator'
 import { DisabledTooltipAnchor } from './DisabledTooltipAnchor'
@@ -8,6 +8,7 @@ export type TooltipProps = {
   content?: string | null
   children: ReactElement
   placement?: Placement
+  followCursor?: boolean
   disabledAnchorClassName?: string
   disabledAnchorStyle?: CSSProperties
 }
@@ -26,7 +27,7 @@ function nearestTrigger(target: EventTarget | null, reference: Element | null) {
   return target instanceof Element && target.closest('[data-tooltip-trigger]') === reference
 }
 
-export function Tooltip({ content, children, placement = 'top', disabledAnchorClassName, disabledAnchorStyle }: TooltipProps) {
+export function Tooltip({ content, children, placement = 'top', followCursor = false, disabledAnchorClassName, disabledAnchorStyle }: TooltipProps) {
   if (!isValidElement(children) || children.type === Fragment || !supportsRef(children.type)) {
     throw new Error('Tooltip requires one DOM element or forwardRef component as its child')
   }
@@ -36,6 +37,19 @@ export function Tooltip({ content, children, placement = 'top', disabledAnchorCl
   const snapshot = useSyncExternalStore(coordinator.subscribe, coordinator.getSnapshot, coordinator.getSnapshot)
   const id = useId()
   const generation = useRef<number | null>(null)
+  const cursor = useRef({ x: 0, y: 0 })
+  const cursorReference = useRef<VirtualElement>({
+    getBoundingClientRect: () => ({
+      x: cursor.current.x,
+      y: cursor.current.y,
+      width: 0,
+      height: 0,
+      top: cursor.current.y,
+      right: cursor.current.x,
+      bottom: cursor.current.y,
+      left: cursor.current.x,
+    }),
+  })
   const hoverReadyAt = useRef(0)
   const hoverOpenTimer = useRef<number | null>(null)
   const hiddenExit = useRef(false)
@@ -69,6 +83,11 @@ export function Tooltip({ content, children, placement = 'top', disabledAnchorCl
     whileElementsMounted: autoUpdate,
     middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 }), arrow({ element: arrowRef })],
   })
+  useEffect(() => {
+    if (!followCursor) return
+    floating.refs.setPositionReference(cursorReference.current)
+    return () => floating.refs.setPositionReference(null)
+  }, [floating.refs, followCursor])
   const hover = useHover(floating.context, { enabled: !!content, delay: { open: 300, close: 100 }, handleClose: safePolygon(), move: false })
   const focus = useFocus(floating.context, { enabled: !!content, visibleOnly: true })
   const role = useRole(floating.context, { role: 'tooltip' })
@@ -102,7 +121,11 @@ export function Tooltip({ content, children, placement = 'top', disabledAnchorCl
       if (coordinator.getSnapshot().generation === claimedGeneration) floating.context.onOpenChange(true, event, 'hover')
     }, delay)
   }
+  function updateCursor(event: { clientX: number; clientY: number }) {
+    cursor.current = { x: event.clientX, y: event.clientY }
+  }
   const claimOnEnter = (event: React.MouseEvent<HTMLElement>) => {
+    if (followCursor) updateCursor(event)
     if (nearestTrigger(event.target, event.currentTarget)) {
       window.clearTimeout(hoverOpenTimer.current ?? undefined)
       hoverReadyAt.current = Date.now() + 300
@@ -127,8 +150,13 @@ export function Tooltip({ content, children, placement = 'top', disabledAnchorCl
       claimOnEnter(event)
     },
     onMouseOver(event: React.MouseEvent<HTMLElement>) {
+      if (followCursor) updateCursor(event)
       child.props.onMouseOver?.(event)
       reclaimFromNestedTrigger(event)
+    },
+    onMouseMove(event: React.MouseEvent<HTMLElement>) {
+      child.props.onMouseMove?.(event)
+      if (followCursor) updateCursor(event)
     },
     onMouseLeave(event: React.MouseEvent<HTMLElement>) {
       child.props.onMouseLeave?.(event)

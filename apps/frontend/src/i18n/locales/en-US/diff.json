@@ -32,6 +32,24 @@
     "hide": "Hide whitespace differences",
     "show": "Show whitespace differences"
   },
+  "image": {
+    "preview": "Image preview",
+    "previewHint": "Show image preview",
+    "source": "Source diff",
+    "sourceHint": "Show text diff",
+    "old": "Old version",
+    "new": "New version",
+    "file": "File preview",
+    "loading": "Loading image preview…",
+    "unavailable": "No image version is available for this file",
+    "zoomOut": "Zoom out",
+    "zoomOutHint": "Zoom out the image preview",
+    "zoomIn": "Zoom in",
+    "zoomInHint": "Zoom in the image preview",
+    "zoomReset": "Reset image zoom",
+    "zoomResetHint": "Reset the image preview to fit",
+    "alt": "{{side}}: {{path}}"
+  },
   "navigation": {
     "previousHint": "Previous change (across files)",
     "previous": "Previous change",

@@ -468,13 +468,22 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .change-sign { padding-top: 4px; color: #63727a; text-align: center; user-select: none; }
 
-.split-diff-panes { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: hidden; }
+.split-diff-panes { position: relative; min-width: 0; min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-width: none; background: var(--code-surface); }
 
-.split-diff-pane { min-width: 0; min-height: 0; overflow-x: scroll; overflow-y: auto; background: var(--code-surface); }
+.split-diff-panes::-webkit-scrollbar { width: 0; height: 0; }
 
-.split-diff-pane + .split-diff-pane { border-left: 1px solid var(--code-border); }
-.split-diff-actions { min-width: 0; overflow: hidden; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
-.split-diff-panes:has(.split-diff-actions) { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); }
+.split-diff-viewport { position: sticky; top: 0; z-index: 1; height: 100%; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: hidden; background: var(--code-surface); }
+
+.split-diff-pane { min-width: 0; min-height: 0; height: 100%; overflow-x: scroll; overflow-y: hidden; overscroll-behavior-x: contain; background: var(--code-surface); }
+
+.split-diff-viewport > .split-diff-pane:last-child { border-left: 1px solid var(--code-border); }
+
+.split-diff-actions { min-width: 0; height: 100%; overflow: hidden; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
+
+.split-diff-panes:has(.split-diff-actions) .split-diff-viewport { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); }
+
+.split-diff-spacer { width: 1px; pointer-events: none; }
+
 .split-action-row { min-width: 0; min-height: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
 .split-action-row .diff-stage-slot.split { position: relative; width: 100%; height: 100%; }
 .diff-whitespace-toggle { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
@@ -485,7 +494,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 .line-action-add:hover, .line-action-add:focus-visible { border-color: color-mix(in srgb, var(--success) 40%, transparent); color: var(--success); background: color-mix(in srgb, var(--success) 15%, transparent); }
 .line-action-del:hover, .line-action-del:focus-visible { border-color: color-mix(in srgb, var(--danger) 40%, transparent); color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, transparent); }
 
-.split-diff-content { width: max-content; min-width: 100%; min-height: 100%; }
+.split-diff-content { width: max-content; min-width: 100%; min-height: 100%; transform: translateY(calc(-1 * var(--split-scroll-top, 0px))); }
 
 /* The virtual rows are offset with padding, and the global border-box reset would fold that padding
    into `min-height` — leaving the pane with no scrollable overflow at all. */

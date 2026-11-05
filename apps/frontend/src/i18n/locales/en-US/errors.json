@@ -61,7 +61,10 @@
     "selectionRequired": "No files selected",
     "outsideRepositoryPath": "The file path is outside the repository: {{file_path}}",
     "commitPathInvalid": "Invalid commit file path",
-    "locate": "Unable to locate the file path"
+    "locate": "Unable to locate the file path",
+    "imageRead": "Unable to read the image",
+    "imageTooLarge": "Image exceeds 20 MB and cannot be previewed",
+    "imageSourceInvalid": "Unsupported image source"
   },
   "reference": {
     "invalid": "Invalid commit or branch: {{reference}}"
@@ -208,6 +211,7 @@
     "stage_files": "Operation failed: stage files",
     "fetch_repository": "Operation failed: fetch repository",
     "load_staged_file_diff": "Operation failed: load staged file diff",
+    "load_file_image": "Operation failed: load image preview",
     "load_unstaged_file_diff": "Operation failed: load unstaged file diff",
     "load_file_diff": "Operation failed: load file diff",
     "load_repository_state_token": "Operation failed: load repository state token",

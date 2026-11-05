@@ -33,6 +33,34 @@ const replacements: RepositoryDiffLine[] = [
 
 describe('selected diff patches applied by Git', () => {
   for (const operation of ['stage', 'restore', 'unstage'] as const) {
+    for (const target of ['insertion', 'replacement', 'deletion'] as const) {
+      it(`applies the aligned ${target} without selecting a neighboring line for ${operation}`, () => {
+        const hasDeletion = target === 'deletion'
+        const before = `const a = 1;\n${hasDeletion ? '// removed\n' : ''}const b = 2;\n`
+        const after = `// inserted\nconst a = 10;\nconst b = 20;\n`
+        const beforeLines = before.trimEnd().split('\n')
+        const afterLines = after.trimEnd().split('\n')
+        const rows: RepositoryDiffLine[] = [
+          ...beforeLines.map((code, index) => ({ kind: 'del' as const, old: index + 1, next: null, code })),
+          ...afterLines.map((code, index) => ({ kind: 'add' as const, old: null, next: index + 1, code })),
+        ]
+        const selectedIndex = target === 'insertion' ? beforeLines.length : target === 'replacement' ? beforeLines.length + 2 : 1
+        const selected = changeLine(rows, selectedIndex)
+        expect(selected.map((row) => row.code)).toEqual(target === 'insertion' ? ['// inserted'] : target === 'replacement' ? ['const b = 2;', 'const b = 20;'] : ['// removed'])
+        repository(before, after, (git, path) => {
+          if (operation === 'unstage') git('add', '.')
+          apply(path, buildStagePatch('file.txt', selected, undefined, operation, rows), operation !== 'stage', operation !== 'restore')
+          const expected = operation === 'stage'
+            ? target === 'insertion' ? '// inserted\n' + before : target === 'replacement' ? 'const a = 1;\nconst b = 20;\n' : 'const a = 1;\nconst b = 2;\n'
+            : target === 'insertion' ? 'const a = 10;\nconst b = 20;\n' : target === 'replacement' ? '// inserted\nconst a = 10;\nconst b = 2;\n' : '// inserted\nconst a = 10;\n// removed\nconst b = 20;\n'
+          expect(operation === 'restore' ? readFileSync(join(path, 'file.txt'), 'utf8') : git('show', ':file.txt')).toBe(expected)
+          if (operation !== 'restore') expect(readFileSync(join(path, 'file.txt'), 'utf8')).toBe(after)
+        })
+      })
+    }
+  }
+
+  for (const operation of ['stage', 'restore', 'unstage'] as const) {
     for (const selection of ['line', 'block'] as const) {
       it(`preserves CRLF when applying a selected ${selection} for ${operation}`, () => {
         const before = 'before\r\nold one\r\nold two\r\nafter\r\n'

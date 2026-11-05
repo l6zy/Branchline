@@ -101,6 +101,8 @@ it('keeps nested line help separate from its stage and history actions', async (
   expect(screen.queryByRole('tooltip')).toBeNull()
   const row = container.querySelector('.code-row')!
   await hover(row)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  await hover(row.querySelector('.line-no')!)
   expect(screen.getByRole('tooltip').textContent).toBe('Right-click to view line history')
   fireEvent.contextMenu(row)
   expect(screen.queryByRole('tooltip')).toBeNull()
@@ -108,6 +110,16 @@ it('keeps nested line help separate from its stage and history actions', async (
   await act(() => vi.advanceTimersByTime(120))
   expect(onOpenLineHistory).toHaveBeenCalledWith(files[0].path, 1, 'new', rows[0])
   expect(onStagePatch).toHaveBeenCalledTimes(1)
+})
+
+it('does not advertise line history in a diff without a history action', async () => {
+  const { container } = await mount(<DiffPanel files={files} wide={false} onWideChange={vi.fn()} fallbackChangeRows={rows}/>)
+  vi.useFakeTimers()
+  const row = container.querySelector('.code-row')!
+  await hover(row)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  await hover(row.querySelector('.line-no')!)
+  expect(screen.queryByRole('tooltip')).toBeNull()
 })
 
 it('clears a virtual file hint after its keyed row scrolls out of the render range', async () => {

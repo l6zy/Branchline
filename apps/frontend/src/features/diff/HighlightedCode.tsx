@@ -1,4 +1,5 @@
-import { memo, useMemo } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
+import type { InlineDiffRange } from './inlineDiff'
 
 type Token = { value: string; kind?: string }
 
@@ -68,15 +69,40 @@ function tokenize(code: string, language: string): Token[] {
       index += operator[0].length
       continue
     }
-    if ('{}[](),.;'.includes(code[index])) push(code[index], 'punctuation')
-    else push(code[index])
-    index += 1
+    const character = String.fromCodePoint(code.codePointAt(index)!)
+    if ('{}[](),.;'.includes(character)) push(character, 'punctuation')
+    else push(character)
+    index += character.length
   }
   return tokens
 }
 
-export const HighlightedCode = memo(function HighlightedCode({ code, filePath }: { code: string; filePath: string }) {
+export const HighlightedCode = memo(function HighlightedCode({ code, filePath, changedRanges }: { code: string; filePath: string; changedRanges?: readonly InlineDiffRange[] }) {
   const language = languageForPath(filePath)
   const tokens = useMemo(() => tokenize(code || ' ', language), [code, language])
-  return <code className={`syntax syntax-${language}`}>{tokens.map((token, index) => <span className={token.kind ? `token ${token.kind}` : undefined} key={index}>{token.value}</span>)}</code>
+  let offset = 0
+  let rangeIndex = 0
+  return <code className={`syntax syntax-${language}`}>{tokens.map((token, index) => {
+    const start = offset
+    offset += token.value.length
+    let content: ReactNode = token.value
+    if (changedRanges?.length) {
+      const parts: ReactNode[] = []
+      let cursor = start
+      while (rangeIndex < changedRanges.length && changedRanges[rangeIndex].to <= start) rangeIndex += 1
+      for (let next = rangeIndex; next < changedRanges.length && changedRanges[next].from < offset; next += 1) {
+        const from = Math.max(cursor, changedRanges[next].from)
+        const to = Math.min(offset, changedRanges[next].to)
+        if (from >= to) continue
+        if (from > cursor) parts.push(token.value.slice(cursor - start, from - start))
+        parts.push(<span className="diff-inline-change" key={next}>{token.value.slice(from - start, to - start)}</span>)
+        cursor = to
+      }
+      if (parts.length) {
+        if (cursor < offset) parts.push(token.value.slice(cursor - start))
+        content = parts
+      }
+    }
+    return <span className={token.kind ? `token ${token.kind}` : undefined} key={index}>{content}</span>
+  })}</code>
 })

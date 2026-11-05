@@ -112,6 +112,9 @@ importers:
       vite:
         specifier: latest
         version: 8.3.5(@types/node@26.2.0)
+      vscode-diff:
+        specifier: 3.0.1
+        version: 3.0.1
     devDependencies:
       '@testing-library/react':
         specifier: ^16.3.3
@@ -1380,6 +1383,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  vscode-diff@3.0.1:
+    resolution: {integrity: sha512-0rRDmIuGsuQMIIhbWsILSMxG4k5x8unNvkD7P+yn5cA7O6bKg28P/dhvgABRvP5ksYmGE9UKHonk/Z4PBMdojA==}
 
   w3c-keyname@2.2.8:
     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
@@ -2873,6 +2879,8 @@ snapshots:
       jsdom: 26.1.0
     transitivePeerDependencies:
       - msw
+
+  vscode-diff@3.0.1: {}
 
   w3c-keyname@2.2.8: {}
 

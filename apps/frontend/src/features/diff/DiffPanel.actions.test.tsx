@@ -44,6 +44,44 @@ describe('diff patch actions', () => {
   })
 
   for (const view of ['unified', 'split']) {
+    for (const scope of ['file', 'changes']) {
+      it(`keeps a leading insertion above the matching modified lines in ${view}/${scope}`, () => {
+        vi.stubGlobal('window', { localStorage: { getItem: (key: string) => key === 'branchline.diffView.v1' ? JSON.stringify(view) : key === 'branchline.diffScope.v1' ? JSON.stringify(scope) : null } })
+        const html = renderToStaticMarkup(<DiffPanel files={[{ path: 'file.ts', type: 'M', add: 3, del: 2 }]} wide={false} onWideChange={() => {}} fallbackChangeRows={[
+          { old: 1, next: null, kind: 'del', code: 'const a = 1;' },
+          { old: 2, next: null, kind: 'del', code: 'const b = 2;' },
+          { old: null, next: 1, kind: 'add', code: '// inserted' },
+          { old: null, next: 2, kind: 'add', code: 'const a = 10;' },
+          { old: null, next: 3, kind: 'add', code: 'const b = 20;' },
+        ]} />)
+        const textRows = [...html.matchAll(/data-diff-row-index="(\d+)"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/code><\/div>/g)]
+          .map((match) => ({ index: Number(match[1]), kind: match[2], text: match[3].replace(/<[^>]+>/g, '') }))
+        if (view === 'split') {
+          expect(textRows[0].kind).toContain('empty')
+          expect(textRows[1].index).toBe(1)
+          expect(textRows[1].text).toContain('const a = 1;')
+          expect(textRows.find((row) => row.text.includes('const a = 10;'))?.index).toBe(1)
+          expect(textRows.find((row) => row.text.includes('const b = 20;'))?.index).toBe(2)
+        } else {
+          expect(textRows).toHaveLength(5)
+          expect(textRows[0].text).toContain('const a = 1;')
+          expect(textRows[2].text).toContain('// inserted')
+        }
+      })
+    }
+
+    it('highlights changed content while keeping shared code unmarked in ' + view, () => {
+      vi.stubGlobal('window', { localStorage: { getItem: (key: string) => key === 'branchline.diffView.v1' ? JSON.stringify(view) : null } })
+      const html = renderToStaticMarkup(<DiffPanel files={[{ path: 'file.ts', type: 'M', add: 1, del: 1 }]} wide={false} onWideChange={() => {}} fallbackChangeRows={[
+        { old: 1, next: null, kind: 'del', code: 'const count = 100;' },
+        { old: null, next: 1, kind: 'add', code: 'const count = 200;' },
+      ]} />)
+      expect(html).toContain('<span class="diff-inline-change">100</span>')
+      expect(html).toContain('<span class="diff-inline-change">200</span>')
+      expect(html).toContain('class="token keyword">const</span>')
+      expect(html).not.toContain('class="diff-inline-change">const')
+    })
+
     it('renders expandable omissions with aligned row heights in ' + view, () => {
       vi.stubGlobal('window', { localStorage: { getItem: (key: string) => key === 'branchline.diffView.v1' ? JSON.stringify(view) : null } })
       const rows = Array.from({ length: 60 }, (_, index) => ({ old: index + 1, next: index + 1, kind: 'same' as 'same' | 'add', code: 'line ' + index }))

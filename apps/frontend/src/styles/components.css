@@ -478,7 +478,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-diff-viewport > .split-diff-pane:last-child { border-left: 1px solid var(--code-border); }
 
-.split-diff-actions { min-width: 0; height: 100%; overflow: hidden; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
+.split-diff-actions { min-width: 0; height: 100%; overflow: hidden; border-left: 1px solid var(--code-border); background: var(--code-surface); }
 
 .split-diff-panes:has(.split-diff-actions) .split-diff-viewport { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); }
 

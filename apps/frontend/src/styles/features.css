@@ -420,6 +420,18 @@
 
 .syntax { min-width: max-content; color: inherit; }
 
+.code-row code, .split-code-side code { padding-block: 0; line-height: max(22px, var(--diff-row-height)); overflow: clip; }
+
+.split-code-side code { line-height: max(24px, var(--diff-row-height)); }
+
+/* Keep text inline so highlighted tabs use the code line's tab stops. Extend only
+   the background vertically; the code cell clips it at the row edges. */
+.diff-inline-change { background: var(--diff-inline-background); box-shadow: 0 0 0 var(--diff-row-height) var(--diff-inline-background); clip-path: inset(calc(-1 * var(--diff-row-height)) -1px); }
+
+.add .diff-inline-change { --diff-inline-background: var(--code-inline-add); }
+
+.del .diff-inline-change { --diff-inline-background: var(--code-inline-del); }
+
 .token.comment { color: var(--syntax-comment); font-style: italic; }
 
 .token.keyword { color: var(--syntax-keyword); }

@@ -8,18 +8,19 @@ import { Button } from '../../components/Button'
 import { loadRepositoryFileDiff, type RepositoryDiffLine, type RepositoryFile, type RepositoryImage } from '../../repository'
 import { DiffFileList } from './DiffFileList'
 import { HighlightedCode } from './HighlightedCode'
+import { buildDiffPresentation } from './inlineDiff'
+import type { SplitDiffRow } from './diffAlignment'
 import { buildDiffContextEntries, diffContextExpansionKey, expandDiffContextOmissionBySteps, type DiffContextEntry } from './diffContext'
 import { fittedImageSize, imageDataUrl, isImagePath, isSvgPath } from './imagePreview'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
 
-type SplitDiffRow = { left?: RepositoryDiffLine; right?: RepositoryDiffLine }
 type SplitDiffEntry = { kind: 'row'; row: SplitDiffRow } | Extract<DiffContextEntry, { kind: 'omitted' }>
 export type DiffLineSide = 'old' | 'new'
 export type DiffImageSide = 'old' | 'new'
 export type DiffImageLoader = (filePath: string, side: DiffImageSide) => Promise<RepositoryImage | null>
 type PendingDiffJump = { edge: 'first' | 'last'; direction: -1 | 1; remaining: number }
 
-export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string, operation: 'stage' | 'restore' | 'unstage' = 'stage', sourceRows?: RepositoryDiffLine[]) {
+export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string, operation: 'stage' | 'restore' | 'unstage' = 'stage', sourceRows?: RepositoryDiffLine[], alignedRows?: readonly SplitDiffRow[]) {
   if (sourceRows) {
     // A large unchanged interval may be omitted by Git. Preserve those gaps
     // as separate hunks rather than concatenating distant file coordinates.
@@ -37,7 +38,8 @@ export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fi
       const selectedRows = new Set(rows.filter((row) => row.kind !== 'same'))
       const patches: string[] = segments.flatMap((segment) => {
         const selected = segment.filter((row) => selectedRows.has(row))
-        return selected.length ? [buildStagePatch(filePath, selected, undefined, operation, segment)] : []
+        const segmentRows = new Set(segment)
+        return selected.length ? [buildStagePatch(filePath, selected, undefined, operation, segment, alignedRows?.filter((pair) => (pair.left && segmentRows.has(pair.left)) || (pair.right && segmentRows.has(pair.right))))] : []
       })
       return patches.map((patch, index) => index ? patch.slice(patch.indexOf('\n@@') + 1) : patch).join('')
     }
@@ -52,22 +54,12 @@ export function buildStagePatch(filePath: string, rows: RepositoryDiffLine[], fi
       newNoNewline: reverse ? row.newNoNewline : row.oldNoNewline,
     })
     const patchRows: RepositoryDiffLine[] = []
-    for (let index = 0; index < sourceRows.length;) {
-      if (sourceRows[index].kind === 'same') { patchRows.push(context(sourceRows[index++])); continue }
-      const removed: RepositoryDiffLine[] = []
-      const added: RepositoryDiffLine[] = []
-      while (index < sourceRows.length && sourceRows[index].kind !== 'same') {
-        const row = sourceRows[index++]
-        ;(row.kind === 'del' ? removed : added).push(row)
-      }
-      for (let offset = 0; offset < Math.max(removed.length, added.length); offset++) {
-        const oldRow = removed[offset]
-        const newRow = added[offset]
-        if (oldRow && selected.has(oldRow)) patchRows.push(oldRow)
-        else if (oldRow && !reverse) patchRows.push(context(oldRow))
-        if (newRow && selected.has(newRow)) patchRows.push(newRow)
-        else if (newRow && reverse) patchRows.push(context(newRow))
-      }
+    for (const { left: oldRow, right: newRow } of alignedRows ?? buildDiffPresentation(sourceRows).splitRows) {
+      if (oldRow?.kind === 'same') { patchRows.push(context(oldRow)); continue }
+      if (oldRow && selected.has(oldRow)) patchRows.push(oldRow)
+      else if (oldRow && !reverse) patchRows.push(context(oldRow))
+      if (newRow && selected.has(newRow)) patchRows.push(newRow)
+      else if (newRow && reverse) patchRows.push(context(newRow))
     }
     let lastOld = -1
     let lastNew = -1
@@ -139,7 +131,7 @@ export function changeBlock(rows: RepositoryDiffLine[], index: number) {
   return rows.slice(contextStart, contextEnd + 1)
 }
 
-export function changeLine(rows: RepositoryDiffLine[], index: number) {
+export function changeLine(rows: RepositoryDiffLine[], index: number, counterparts?: ReadonlyMap<RepositoryDiffLine, RepositoryDiffLine | undefined>) {
   const changed = rows[index]
   if (!changed || changed.kind === 'same') return []
   let changeStart = index
@@ -148,11 +140,7 @@ export function changeLine(rows: RepositoryDiffLine[], index: number) {
   while (changeEnd + 1 < rows.length && rows[changeEnd + 1].kind !== 'same') changeEnd += 1
 
   const changedRows = rows.slice(changeStart, changeEnd + 1)
-  const deletedRows = changedRows.filter((row) => row.kind === 'del')
-  const addedRows = changedRows.filter((row) => row.kind === 'add')
-  const matchingRows = changed.kind === 'del' ? deletedRows : addedRows
-  const matchingIndex = matchingRows.indexOf(changed)
-  const counterpart = changed.kind === 'del' ? addedRows[matchingIndex] : deletedRows[matchingIndex]
+  const counterpart = (counterparts ?? buildDiffPresentation(rows).counterparts).get(changed)
   const selected = new Set([changed, counterpart].filter((row): row is RepositoryDiffLine => Boolean(row)))
 
   // A multi-line change needs a precise row patch. Add context only when the
@@ -324,44 +312,27 @@ function formatImageBytes(bytes: number, locale: string | undefined) {
   return `${new Intl.NumberFormat(locale).format(bytes)} B`
 }
 
-function buildSplitRows(rows: RepositoryDiffLine[]): SplitDiffRow[] {
-  const result: SplitDiffRow[] = []
-  let index = 0
-  while (index < rows.length) {
-    const row = rows[index]
-    if (row.kind === 'same') {
-      result.push({ left: row, right: row })
-      index += 1
-      continue
-    }
-    const deleted: RepositoryDiffLine[] = []
-    const added: RepositoryDiffLine[] = []
-    while (index < rows.length && rows[index].kind !== 'same') {
-      if (rows[index].kind === 'del') deleted.push(rows[index])
-      else added.push(rows[index])
-      index += 1
-    }
-    for (let offset = 0; offset < Math.max(deleted.length, added.length); offset += 1) {
-      result.push({ left: deleted[offset], right: added[offset] })
-    }
-  }
-  return result
-}
-
-function buildSplitEntries(entries: DiffContextEntry[]): SplitDiffEntry[] {
+function buildSplitEntries(entries: DiffContextEntry[], alignedRows: SplitDiffRow[]): SplitDiffEntry[] {
   const result: SplitDiffEntry[] = []
-  let buffer: RepositoryDiffLine[] = []
+  const positions = new Map<RepositoryDiffLine, number>()
+  alignedRows.forEach((pair, index) => {
+    if (pair.left) positions.set(pair.left, index)
+    if (pair.right) positions.set(pair.right, index)
+  })
+  let first = Infinity
+  let last = -1
   const flush = () => {
-    if (!buffer.length) return
-    buildSplitRows(buffer).forEach((row) => result.push({ kind: 'row', row }))
-    buffer = []
+    for (let index = first; index <= last; index += 1) result.push({ kind: 'row', row: alignedRows[index] })
+    first = Infinity
+    last = -1
   }
   entries.forEach((entry) => {
     if (entry.kind === 'omitted') {
       flush()
       result.push(entry)
     } else {
-      buffer.push(entry.row)
+      const position = positions.get(entry.row)
+      if (position != null) { first = Math.min(first, position); last = Math.max(last, position) }
     }
   })
   flush()
@@ -593,6 +564,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const expectedRowsKey = [activeFileIdentity, reloadKey, showWhitespace].join('\0')
   const actionsDisabled = actionsBusy || diffLoading || (usesLoader && loadedRowsKey !== expectedRowsKey)
   const sourceIndexMap = useMemo(() => new Map(sourceRows.map((row, index) => [row, index] as const)), [sourceRows])
+  const diffPresentation = useMemo(() => buildDiffPresentation(sourceRows, showWhitespace), [sourceRows, showWhitespace])
+  const { inlineRanges: inlineDiffRanges, splitRows: sourceSplitRows, counterparts } = diffPresentation
   const lineNumberDigits = useMemo(() => sourceRows.reduce((digits, row) => Math.max(digits, String(Math.max(row.old ?? 0, row.next ?? 0)).length), 1), [sourceRows])
   const contextEntries = useMemo(() => buildDiffContextEntries(sourceRows, contextLineCount), [sourceRows, contextLineCount])
   const expandedContextEntries = useMemo(() => {
@@ -605,10 +578,9 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const unifiedEntries = useMemo<DiffContextEntry[]>(() => activeScope === 'file'
     ? sourceRows.map((row, sourceIndex) => ({ kind: 'line', row, sourceIndex }))
     : expandedContextEntries, [activeScope, expandedContextEntries, sourceRows])
-  const sourceSplitRows = useMemo(() => buildSplitRows(sourceRows), [sourceRows])
   const splitEntries = useMemo<SplitDiffEntry[]>(() => activeScope === 'file'
     ? sourceSplitRows.map((row) => ({ kind: 'row', row }))
-    : buildSplitEntries(expandedContextEntries), [activeScope, expandedContextEntries, sourceSplitRows])
+    : buildSplitEntries(expandedContextEntries, sourceSplitRows), [activeScope, expandedContextEntries, sourceSplitRows])
   const changeIndices = useMemo(() => {
     const targets: number[] = []
     if (view === 'unified') {
@@ -1028,11 +1000,11 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     autoJumpIdentity.current = identity
     scrollToChange(changeIndices[0])
   }, [activeFileIdentity, activeFileInfo, canRenderLoadedRows, changeIndices, diffLoading, pendingJump, activeScope])
-  const diffStyle = { '--diff-font-size': `${t('diff:font.size', { size: numbers.format(diffFontSize) })}`, '--diff-line-number-width': `${Math.max(2, lineNumberDigits + 1.8)}ch` } as CSSProperties
+  const diffStyle = { '--diff-font-size': `${t('diff:font.size', { size: numbers.format(diffFontSize) })}`, '--diff-row-height': `${virtualRowHeight}px`, '--diff-line-number-width': `${Math.max(2, lineNumberDigits + 1.8)}ch` } as CSSProperties
   const applyPatch = (operation: 'stage' | 'restore' | 'unstage', rows: RepositoryDiffLine[], description: MessageContent) => {
     if (actionsDisabled || !activeFileInfo) return
     const callback = operation === 'stage' ? onStagePatch : operation === 'restore' ? onRestorePatch : onUnstagePatch
-    callback?.(activeFileInfo.path, buildStagePatch(activeFileInfo.path, rows, activeFileInfo.type, operation, sourceRows), description)
+    callback?.(activeFileInfo.path, buildStagePatch(activeFileInfo.path, rows, activeFileInfo.type, operation, sourceRows, sourceSplitRows), description)
   }
   const expandOmission = (entry: Extract<DiffContextEntry, { kind: 'omitted' }>) => {
     const key = diffContextExpansionKey(activeFileIdentity, contextLineCount, entry)
@@ -1056,16 +1028,20 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const operation = canUnstage ? 'unstage' : canStage && row.kind === 'add' && onStagePatch ? 'stage' : canStage && row.kind === 'del' && onRestorePatch ? 'restore' : null
     if (!operation) return <span className="change-sign">{sign}</span>
     const label = operation === 'unstage' ? t('diff:actions.unstageLine') : operation === 'stage' ? t('diff:actions.stageLine') : t('diff:actions.restoreLine')
-    return <Tooltip content={t('diff:actions.lineHint', { action: label })} disabledAnchorStyle={{ width: 20, height: 20, margin: 'auto' }}><button type="button" disabled={actionsDisabled} className={'change-sign line-action-' + row.kind} onClick={(event) => { event.stopPropagation(); applyPatch(operation, changeLine(sourceRows, sourceIndex), message('diff:scope.line')) }} aria-label={label}>{sign}</button></Tooltip>
+    return <Tooltip content={t('diff:actions.lineHint', { action: label })} disabledAnchorStyle={{ width: 20, height: 20, margin: 'auto' }}><button type="button" disabled={actionsDisabled} className={'change-sign line-action-' + row.kind} onClick={(event) => { event.stopPropagation(); applyPatch(operation, changeLine(sourceRows, sourceIndex, counterparts), message('diff:scope.line')) }} aria-label={label}>{sign}</button></Tooltip>
+  }
+  const renderLineNumber = (line: number | null | undefined) => {
+    const number = <span className="line-no">{line ?? ''}</span>
+    return <Tooltip content={onOpenLineHistory && line != null ? t('diff:actions.lineHistoryHint') : undefined}>{number}</Tooltip>
   }
   const renderUnifiedEntry = (entry: DiffContextEntry, index: number) => entry.kind === 'omitted'
     ? <Tooltip content={t('diff:context.expandHint', { count: Math.min(20, entry.count), remaining: numbers.format(entry.count) })} key={`omitted-${index}`}><button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} onClick={() => expandOmission(entry)} aria-label={t('diff:context.expand', { count: Math.min(20, entry.count) })}><ChevronDown size={14} aria-hidden="true"/></button></Tooltip>
-    : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' && blockActionAnchors.has(index) ? changeBlock(sourceRows, entry.sourceIndex) : []; return <Tooltip content={t('diff:actions.lineHistoryHint')} followCursor key={index}><div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`code-row ${row.kind} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, entry.sourceIndex)}>
-      {renderStageActions(block, blockActionAnchors.get(index))}<span className="line-no">{row.old ?? row.next ?? ''}</span>{renderLineAction(row, entry.sourceIndex)}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/>
-    </div></Tooltip> })()
+    : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' && blockActionAnchors.has(index) ? changeBlock(sourceRows, entry.sourceIndex) : []; return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`code-row ${row.kind} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, entry.sourceIndex)}>
+      {renderStageActions(block, blockActionAnchors.get(index))}{renderLineNumber(row.old ?? row.next)}{renderLineAction(row, entry.sourceIndex)}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/>
+    </div> })()
   const renderSplitEntry = (entry: SplitDiffEntry, index: number, side: DiffLineSide) => entry.kind === 'omitted'
     ? <Tooltip content={t('diff:context.expandHint', { count: Math.min(20, entry.count), remaining: numbers.format(entry.count) })} key={`omitted-${side}-${index}`}><button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} onClick={() => expandOmission(entry)} aria-label={t('diff:context.expand', { count: Math.min(20, entry.count) })}><ChevronDown size={14} aria-hidden="true"/></button></Tooltip>
-    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1; const action = renderLineAction(row, sourceIndex); return <Tooltip content={row ? t('diff:actions.lineHistoryHint') : undefined} followCursor key={`${side}-${index}`}><div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)}><span className="line-no">{side === 'old' ? row?.old ?? '' : row?.next ?? ''}</span>{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''}/> : <code/>}</div></Tooltip> })()
+    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1; const action = renderLineAction(row, sourceIndex); return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)}>{renderLineNumber(side === 'old' ? row?.old : row?.next)}{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/> : <code/>}</div> })()
   const renderSplitActions = (entry: SplitDiffEntry, index: number) => {
     if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: virtualRowHeight }} key={`actions-${index}`}/>
     const row = entry.row.left ?? entry.row.right
@@ -1081,7 +1057,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)
       : splitEntryRow(splitEntries, lineMenu.rowIndex, lineMenu.side)
     : undefined
-  const contextMenuActionRows = lineMenu && lineMenu.sourceIndex >= 0 ? changeLine(sourceRows, lineMenu.sourceIndex) : []
+  const contextMenuActionRows = lineMenu && lineMenu.sourceIndex >= 0 ? changeLine(sourceRows, lineMenu.sourceIndex, counterparts) : []
   const renderImagePreview = () => {
     if (imageLoading) return <div className="diff-image-state"><ImageIcon size={26}/><span>{t('diff:image.loading')}</span></div>
     if (imageError) return <div className="diff-image-state error">{renderMessage(imageError, t)}</div>

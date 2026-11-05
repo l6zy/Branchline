@@ -12,7 +12,7 @@ use std::{
     ffi::OsStr,
     fs,
     hash::{Hash, Hasher},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -739,6 +739,42 @@ fn porcelain_file_type(code: &str) -> &'static str {
     }
 }
 
+fn count_added_lines(mut reader: impl Read) -> std::io::Result<usize> {
+    // Match Git's default binary detection without requiring UTF-8 text.
+    const BINARY_CHECK_BYTES: usize = 8000;
+    let mut buffer = [0u8; 8192];
+    let mut checked_bytes = 0;
+    let mut lines = 0;
+    let mut last_byte = None;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let check = read.min(BINARY_CHECK_BYTES - checked_bytes);
+        if buffer[..check].contains(&0) {
+            return Ok(0);
+        }
+        checked_bytes += check;
+        lines += buffer[..read].iter().filter(|byte| **byte == b'\n').count();
+        last_byte = Some(buffer[read - 1]);
+    }
+    Ok(lines + usize::from(last_byte.is_some_and(|byte| byte != b'\n')))
+}
+
+fn untracked_added_lines(path: &Path) -> std::io::Result<usize> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        // Git stores the link target itself, rather than the referenced file.
+        let target = fs::read_link(path)?;
+        return count_added_lines(target.as_os_str().as_encoded_bytes());
+    }
+    if metadata.is_file() {
+        return count_added_lines(fs::File::open(path)?);
+    }
+    Ok(0)
+}
+
 fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
     let mut unstaged_stats: HashMap<String, (usize, usize)> = HashMap::new();
     collect_numstat(
@@ -790,8 +826,14 @@ fn parse_changed_files(path: &Path) -> Vec<RepositoryFile> {
             let unstaged = code == "??" || bytes.get(1).is_some_and(|value| *value != b' ');
             let (staged_add, staged_del) =
                 staged_stats.get(&file_path).copied().unwrap_or_default();
-            let (unstaged_add, unstaged_del) =
-                unstaged_stats.get(&file_path).copied().unwrap_or_default();
+            let (unstaged_add, unstaged_del) = if code == "??" {
+                (
+                    untracked_added_lines(&path.join(&file_path)).unwrap_or(0),
+                    0,
+                )
+            } else {
+                unstaged_stats.get(&file_path).copied().unwrap_or_default()
+            };
             Some(RepositoryFile {
                 path: file_path,
                 r#type: file_type.into(),
@@ -4883,6 +4925,47 @@ mod tests {
         assert!(preview_branch_prefix(&path, "feat")
             .expect("preview deleted prefix")
             .is_empty());
+    }
+
+    #[test]
+    fn untracked_file_stats_count_content_before_and_after_staging() {
+        let repository = test_repository();
+        let fixtures: &[(&str, &[u8], usize)] = &[
+            ("新增 文件.txt", "第一行\n第二行\n".as_bytes(), 2),
+            ("empty.txt", b"", 0),
+            ("no-final-newline.txt", b"first\nsecond", 2),
+            ("crlf.txt", b"first\r\nsecond\r\n", 2),
+            ("blank-lines.txt", b"\n\n", 2),
+            ("legacy-encoding.txt", b"\xff\xfe\ntext", 2),
+            ("binary.dat", b"first\n\0second\n", 0),
+        ];
+        for (name, content, _) in fixtures {
+            fs::write(repository.0.join(name), content).expect("write untracked fixture");
+        }
+
+        let files = parse_changed_files(&repository.0);
+        for (name, _, expected) in fixtures {
+            let file = files.iter().find(|file| file.path == *name).expect(name);
+            assert_eq!((file.add, file.del), (*expected, 0), "{name}");
+            assert_eq!(
+                (file.unstaged_add, file.unstaged_del),
+                (*expected, 0),
+                "{name}"
+            );
+            assert_eq!((file.staged_add, file.staged_del), (0, 0), "{name}");
+            assert!(!file.staged && file.unstaged, "{name}");
+            assert_eq!(file.r#type, "A", "{name}");
+        }
+
+        git_output(&repository.0, &["add", "--all"]).expect("stage new files");
+        let files = parse_changed_files(&repository.0);
+        for (name, _, expected) in fixtures {
+            let file = files.iter().find(|file| file.path == *name).expect(name);
+            assert_eq!((file.add, file.del), (*expected, 0), "{name}");
+            assert_eq!((file.staged_add, file.staged_del), (*expected, 0), "{name}");
+            assert_eq!((file.unstaged_add, file.unstaged_del), (0, 0), "{name}");
+            assert!(file.staged && !file.unstaged, "{name}");
+        }
     }
 
     #[test]

@@ -72,6 +72,8 @@
   --code-add-hover: #214c33;
   --code-del: #4b2026;
   --code-del-hover: #612a32;
+  --code-inline-add: #34734a;
+  --code-inline-del: #81434a;
   --code-hunk: #264f78;
   --code-hunk-text: #d7eaff;
   --selection-surface: var(--accent-dim);
@@ -145,6 +147,8 @@
   --code-add-hover: #cdebd5;
   --code-del: #f8dddd;
   --code-del-hover: #f3caca;
+  --code-inline-add: #bce5c5;
+  --code-inline-del: #efbfc2;
   --code-hunk: #d7ebf8;
   --code-hunk-text: #123b5d;
   --selection-surface: #d9ebff;

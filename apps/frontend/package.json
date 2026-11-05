@@ -40,7 +40,8 @@
     "react-i18next": "^17.1.11",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "vite": "latest"
+    "vite": "latest",
+    "vscode-diff": "3.0.1"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.3",

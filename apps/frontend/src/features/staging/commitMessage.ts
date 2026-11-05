@@ -11,8 +11,9 @@ export function initialCommitMessage(
   templateContent: string,
   operation?: Pick<RepositoryOperationState, 'kind' | 'message'>,
 ) {
-  const content = operation?.kind === 'merge' && operation.message?.trim()
-    ? operation.message
-    : templateContent
-  return templateMessage(content)
+  const operationMessage = operation && operation.kind !== 'conflict' ? operation.message : undefined
+  if (!operationMessage?.trim()) return templateMessage(templateContent)
+  // Git adds explanatory comments to MERGE_MSG; a cherry-pick or rebase message is the
+  // original commit text and must be preserved verbatim.
+  return operation?.kind === 'merge' ? templateMessage(operationMessage) : operationMessage
 }

@@ -34,7 +34,7 @@ import { StashPage } from './features/stash/StashPage'
 import { RebaseDialog } from './features/operation/RebaseDialog'
 import { CherryPickDialog } from './features/operation/CherryPickDialog'
 import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './features/graph/commitGraphLayout'
-import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
+import { captureCommitAnchor, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { trackedRemoteReference, visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits, type HistorySearchMode, type HistorySearchSummary } from './features/history/historySearch'
 import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
@@ -770,6 +770,7 @@ export default function App() {
   const expandedRepositoryPath = useRef<string | null>(null)
   const structureRepositoryPath = useRef<string | null>(null)
   const previousCommits = useRef<Commit[]>([])
+  const selectionBeforeOperation = useRef<string | null>(null)
   const historyLoadInProgress = useRef(false)
   const referenceNavigationRequest = useRef(0)
   const referenceNavigationIdentity = useRef({ path: repository?.path })
@@ -973,6 +974,7 @@ export default function App() {
     setCommitStats({})
     setCommitFiles({})
     setSelected(snapshot.files.length ? WORKING_TREE_COMMIT_ID : snapshot.commits[0]?.id ?? '')
+    selectionBeforeOperation.current = null
     setDiffFile(null)
     setWideDiff(false)
     setQuery('')
@@ -1021,9 +1023,16 @@ export default function App() {
   const handleSnapshot = (snapshot: RepositorySnapshot) => {
     setUndoCommitMessage(snapshot.undoCommitMessage ?? null)
     applySnapshot(snapshot)
-    setSelected((current) => current === WORKING_TREE_COMMIT_ID && (snapshot.files.length || snapshot.operation)
-      ? current
-      : resolveCommitSelection(activeCommits, snapshot.commits, current))
+    const preferredSelection = snapshot.operation ? null : selectionBeforeOperation.current
+    if (!snapshot.operation) selectionBeforeOperation.current = null
+    setSelected((current) => resolveCommitSelectionAfterRefresh(
+      activeCommits,
+      snapshot.commits,
+      current,
+      current === WORKING_TREE_COMMIT_ID,
+      Boolean(snapshot.files.length || snapshot.operation),
+      preferredSelection,
+    ))
     if (!snapshot.operation) {
       setHistoryConflictPath(null)
       setOperationPath(null)
@@ -1129,6 +1138,7 @@ export default function App() {
       setRepositoryNotice(message('history:app.notice.waitOperation', { "label": activeOperation.label }))
       return
     }
+    selectionBeforeOperation.current = selected !== WORKING_TREE_COMMIT_ID ? selected : null
     if (operation) setActiveOperation(operation)
     try {
       const snapshot = await action(repository.path)
@@ -1151,6 +1161,7 @@ export default function App() {
       try {
         const snapshot = await loadRepository(repository.path)
         applySnapshot(snapshot)
+        if (!snapshot.operation) selectionBeforeOperation.current = null
       } catch {
         // 保留原始 Git 操作错误，仓库可通过下一次刷新重新同步。
       }

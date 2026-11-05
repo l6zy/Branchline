@@ -144,13 +144,14 @@ export function StagingPage({ repository, undoCommitMessage, onSnapshot, onNotic
 
   useEffect(() => {
     const template = repository?.commitTemplate
-    const mergeOperation = repository?.operation?.kind === 'merge' ? repository.operation : undefined
-    const key = mergeOperation
-      ? `${repository?.path ?? 'empty'}\u0000merge\u0000${mergeOperation.currentCommit ?? mergeOperation.message ?? ''}`
+    const operation = repository?.operation
+    const operationWithMessage = operation && operation.kind !== 'conflict' && operation.message?.trim() ? operation : undefined
+    const key = operationWithMessage
+      ? `${repository?.path ?? 'empty'}\u0000${operationWithMessage.kind}\u0000${operationWithMessage.currentCommit ?? operationWithMessage.message ?? ''}`
       : `${repository?.path ?? 'empty'}\u0000template\u0000${template?.path ?? ''}\u0000${template?.content ?? ''}`
     if (appliedTemplateKey.current === key) return
     appliedTemplateKey.current = key
-    setFullMessage(initialCommitMessage(template?.content ?? '', mergeOperation))
+    setFullMessage(initialCommitMessage(template?.content ?? '', operationWithMessage))
     setTemplateDraft(template?.content ?? '')
   }, [repository?.commitTemplate?.content, repository?.commitTemplate?.path, repository?.operation?.currentCommit, repository?.operation?.kind, repository?.operation?.message, repository?.path])
 

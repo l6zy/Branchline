@@ -1891,7 +1891,7 @@ fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
                     &[
                         "show".into(),
                         "-s".into(),
-                        "--format=%s".into(),
+                        "--format=%B".into(),
                         hash.clone(),
                     ],
                 )
@@ -1929,7 +1929,7 @@ fn repository_operation(root: &Path) -> Option<RepositoryOperationState> {
                     &[
                         "show".into(),
                         "-s".into(),
-                        "--format=%s".into(),
+                        "--format=%B".into(),
                         hash.clone(),
                     ],
                 )
@@ -5632,7 +5632,7 @@ mod tests {
             .expect("create cherry conflict branch");
         fs::write(repository.0.join("README.md"), "feature version\n")
             .expect("write feature version");
-        git_output(&repository.0, &["commit", "-am", "feature conflict"])
+        git_output(&repository.0, &["commit", "-am", "feature conflict", "-m", "picked body"])
             .expect("commit feature conflict");
         let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
             .expect("read conflict cherry hash")
@@ -5649,6 +5649,7 @@ mod tests {
         assert!(snapshot.files.iter().any(|file| file.path == "README.md"));
         let operation = snapshot.operation.expect("cherry-pick operation");
         assert_eq!(operation.kind, "cherry-pick");
+        assert_eq!(operation.message.as_deref(), Some("feature conflict\n\npicked body"));
         assert_eq!(operation.conflicts, vec!["README.md"]);
         abort_repository_operation(&path).expect("abort cherry-pick conflict");
     }

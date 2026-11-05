@@ -197,6 +197,24 @@ describe('workflow localization', () => {
     expect(screen.getByLabelText('notice').textContent).toBe('Commit created and working tree refreshed')
   })
 
+  it('uses the pending cherry-pick message instead of the configured template', async () => {
+    const cherryPickRepository = {
+      ...repository,
+      files: [{ path: 'Conflict 原文.txt', type: 'M' as const, add: 1, del: 0, staged: true }],
+      operation: {
+        kind: 'cherry-pick' as const,
+        currentStep: 1,
+        totalSteps: 1,
+        currentCommit: 'abc',
+        message: 'Picked commit 原文\n\nBody 原文',
+        conflicts: [],
+        steps: [],
+      },
+    }
+    await renderLocalized(<StagingPage repository={cherryPickRepository} onSnapshot={vi.fn()} onNotice={vi.fn()} onOpenHistory={vi.fn()} onOpenLineHistory={vi.fn()}/>, 'en-US')
+    expect((screen.getByRole('textbox', { name: 'Full commit message' }) as HTMLTextAreaElement).value).toBe('Picked commit 原文\n\nBody 原文')
+  })
+
   it('preserves refresh diagnostics when force staging succeeds but repository refresh fails', async () => {
     const conflictRepository = { ...repository, files: [{ path: 'Conflict 原文.txt', type: 'U', add: 1, del: 0 }], operation: { kind: 'conflict' as const, currentStep: 0, totalSteps: 0, conflicts: ['Conflict 原文.txt'], steps: [] } }
     vi.mocked(stageRepositoryFiles).mockResolvedValueOnce([])

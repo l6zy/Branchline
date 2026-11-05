@@ -37,3 +37,18 @@ export function resolveCommitSelection(previous: readonly CommitIdentity[], next
 
   return next[0].id
 }
+
+export function resolveCommitSelectionAfterRefresh(
+  previous: readonly CommitIdentity[],
+  next: readonly CommitIdentity[],
+  selected: string,
+  selectedWorkingTree: boolean,
+  keepWorkingTree: boolean,
+  preferred: string | null,
+) {
+  if (selectedWorkingTree) {
+    if (keepWorkingTree) return selected
+    if (preferred && next.some((commit) => commit.id === preferred)) return preferred
+  }
+  return resolveCommitSelection(previous, next, selected)
+}

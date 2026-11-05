@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { captureCommitAnchor, resolveCommitSelection, restoreCommitAnchor } from './historyRefresh'
+import { captureCommitAnchor, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor } from './historyRefresh'
 
 const commits = (...ids: string[]) => ids.map((id) => ({ id }))
 
@@ -17,6 +17,50 @@ describe('history refresh position', () => {
       commits('c6', 'c5', 'c3', 'c2', 'c1'),
       'c4',
     )).toBe('c5')
+  })
+
+  it('keeps the working tree selected while a conflicted operation is active', () => {
+    expect(resolveCommitSelectionAfterRefresh(
+      commits('working', 'c3', 'c2', 'c1'),
+      commits('c3', 'c2', 'c1'),
+      'working',
+      true,
+      true,
+      null,
+    )).toBe('working')
+  })
+
+  it('restores the commit selected before a conflicted operation when it ends', () => {
+    expect(resolveCommitSelectionAfterRefresh(
+      commits('working', 'c3', 'c2', 'c1'),
+      commits('new', 'c3', 'c2', 'c1'),
+      'working',
+      true,
+      false,
+      'c2',
+    )).toBe('c2')
+  })
+
+  it('falls back to the nearest surviving commit when the remembered commit disappears', () => {
+    expect(resolveCommitSelectionAfterRefresh(
+      commits('working', 'c3', 'c2', 'c1'),
+      commits('new', 'c3', 'c1'),
+      'working',
+      true,
+      false,
+      'c2',
+    )).toBe('c3')
+  })
+
+  it('does not override a commit the user selected during the operation', () => {
+    expect(resolveCommitSelectionAfterRefresh(
+      commits('working', 'c3', 'c2', 'c1'),
+      commits('new', 'c3', 'c2', 'c1'),
+      'c1',
+      false,
+      false,
+      'c2',
+    )).toBe('c1')
   })
 
   it('retains the bounded numeric position when the viewport anchor disappears', () => {

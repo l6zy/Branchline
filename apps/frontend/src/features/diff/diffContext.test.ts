@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RepositoryDiffLine } from '../../repository'
-import { buildDiffContextEntries, diffContextExpansionKey, expandDiffContextOmission, expandDiffContextOmissionBySteps } from './diffContext'
+import { buildDiffContextEntries, diffContextExpansionKey, expandDiffContextOmission, expandDiffContextOmissionByDirections, expandDiffContextOmissionBySteps } from './diffContext'
 
 function row(index: number, kind: RepositoryDiffLine['kind'] = 'same'): RepositoryDiffLine {
   return { old: index, next: index, kind, code: `line ${index}` }
@@ -78,6 +78,30 @@ describe('buildDiffContextEntries', () => {
 
     expect(entries.filter((entry) => entry.kind === 'line')).toHaveLength(40)
     expect(entries.find((entry) => entry.kind === 'omitted')).toEqual({ kind: 'omitted', count: 30, sourceStart: 45, sourceEnd: 74 })
+  })
+
+  it('keeps source order when revealing several steps from the bottom', () => {
+    const rows = Array.from({ length: 80 }, (_, index) => row(index + 1))
+    const omission = { kind: 'omitted' as const, count: 70, sourceStart: 0, sourceEnd: 69 }
+
+    const entries = expandDiffContextOmissionBySteps(rows, omission, 2, 'end')
+
+    expect(entries[0]).toEqual({ kind: 'omitted', count: 30, sourceStart: 0, sourceEnd: 29 })
+    expect(entries.filter((entry) => entry.kind === 'line').map((entry) => entry.sourceIndex)).toEqual(Array.from({ length: 40 }, (_, index) => index + 30))
+  })
+
+  it('expands both ends of an omitted range and keeps each direction anchored', () => {
+    const rows = Array.from({ length: 100 }, (_, index) => row(index + 1))
+    const original = { kind: 'omitted' as const, count: 70, sourceStart: 5, sourceEnd: 74, gapKey: '5:74' }
+    const entries = expandDiffContextOmissionByDirections(rows, original, 1, 1)
+    const remaining = entries.find((entry) => entry.kind === 'omitted')
+
+    expect(entries.filter((entry) => entry.kind === 'line')).toHaveLength(40)
+    expect(remaining).toEqual({ kind: 'omitted', count: 30, sourceStart: 25, sourceEnd: 54, gapKey: '5:74' })
+    expect(remaining?.kind).toBe('omitted')
+    if (remaining?.kind !== 'omitted') return
+    expect(diffContextExpansionKey('file-a', 3, original, 'start')).toBe(diffContextExpansionKey('file-a', 3, remaining, 'start'))
+    expect(diffContextExpansionKey('file-a', 3, original, 'end')).toBe(diffContextExpansionKey('file-a', 3, remaining, 'end'))
   })
 
   it('can reveal the last 20 lines of an omitted range', () => {

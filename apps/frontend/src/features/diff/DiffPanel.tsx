@@ -1,6 +1,6 @@
 import { Tooltip } from '../../components/tooltip'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
-import { AlignJustify, ArrowDown, ArrowRight, ArrowUp, ChevronDown, Columns2, Copy, FileCode2, FileText, FolderOpen, History, Image as ImageIcon, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, Undo2, ScanText, Search, X, Pilcrow, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlignJustify, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, Image as ImageIcon, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, Undo2, ScanText, Search, X, Pilcrow, WrapText, ZoomIn, ZoomOut } from 'lucide-react'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { errorMessage, message, renderMessage, type MessageContent } from '../../i18n/messages'
 import { ContextMenu } from '../../components/ContextMenu'
@@ -10,7 +10,7 @@ import { DiffFileList } from './DiffFileList'
 import { HighlightedCode } from './HighlightedCode'
 import { buildDiffPresentation } from './inlineDiff'
 import type { SplitDiffRow } from './diffAlignment'
-import { buildDiffContextEntries, diffContextExpansionKey, expandDiffContextOmissionBySteps, type DiffContextEntry } from './diffContext'
+import { buildDiffContextEntries, diffContextExpansionKey, expandDiffContextOmissionByDirections, type DiffContextEntry } from './diffContext'
 import { fittedImageSize, imageDataUrl, isImagePath, isSvgPath } from './imagePreview'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
 
@@ -312,6 +312,17 @@ function formatImageBytes(bytes: number, locale: string | undefined) {
   return `${new Intl.NumberFormat(locale).format(bytes)} B`
 }
 
+function entryIndexAtOffset(offsets: readonly number[], top: number) {
+  let low = 0
+  let high = Math.max(0, offsets.length - 2)
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (offsets[middle] <= top) low = middle
+    else high = middle - 1
+  }
+  return low
+}
+
 function buildSplitEntries(entries: DiffContextEntry[], alignedRows: SplitDiffRow[]): SplitDiffEntry[] {
   const result: SplitDiffEntry[] = []
   const positions = new Map<RepositoryDiffLine, number>()
@@ -425,6 +436,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [activeFile, setActiveFile] = useState(initialFile)
   const [view, setView] = usePersistentState('branchline.diffView.v1', 'unified', isDiffView)
   const [showWhitespace, setShowWhitespace] = usePersistentState('branchline.diffShowWhitespace.v1', true, (value): value is boolean => typeof value === 'boolean')
+  const [wrap, setWrap] = usePersistentState('branchline.diffWrap.v1', false, (value): value is boolean => typeof value === 'boolean')
   const [scope, setScope] = usePersistentState('branchline.diffScope.v1', 'changes', isDiffScope)
   const activeScope = fileContentOnly ? 'file' : scope
   const [contextLineCount, setContextLineCount] = useState(3)
@@ -571,8 +583,10 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const expandedContextEntries = useMemo(() => {
     return contextEntries.flatMap((entry) => {
       if (entry.kind !== 'omitted') return [entry]
-      const steps = expandedContext[diffContextExpansionKey(activeFileIdentity, contextLineCount, entry)] ?? 0
-      return steps ? expandDiffContextOmissionBySteps(sourceRows, entry, steps) : [entry]
+      const keyed = { ...entry, gapKey: `${entry.sourceStart}:${entry.sourceEnd}` }
+      const startSteps = expandedContext[diffContextExpansionKey(activeFileIdentity, contextLineCount, keyed, 'start')] ?? 0
+      const endSteps = expandedContext[diffContextExpansionKey(activeFileIdentity, contextLineCount, keyed, 'end')] ?? 0
+      return startSteps || endSteps ? expandDiffContextOmissionByDirections(sourceRows, keyed, startSteps, endSteps) : [keyed]
     })
   }, [activeFileIdentity, contextEntries, contextLineCount, expandedContext, sourceRows])
   const unifiedEntries = useMemo<DiffContextEntry[]>(() => activeScope === 'file'
@@ -599,12 +613,21 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     return targets
   }, [sourceRows, splitEntries, unifiedEntries, view])
   const visibleEntryCount = view === 'unified' ? unifiedEntries.length : splitEntries.length
-  const virtualized = visibleEntryCount > DIFF_VIRTUALIZATION_THRESHOLD
+  const virtualized = !wrap && visibleEntryCount > DIFF_VIRTUALIZATION_THRESHOLD
   const virtualRowHeight = view === 'split'
     ? diffSplitRowHeight(diffFontSize, stageActionsEnabled)
     : Math.max(stageActionsEnabled ? 24 : 20, Math.ceil(diffFontSize * 1.5 + 6))
   const blockActionCount = Number(canStage && Boolean(onStagePatch)) + Number(canStage && Boolean(onRestorePatch)) + Number(canUnstage)
   const actionEdgeSpace = blockActionCount ? diffActionEdgeSpace(virtualRowHeight, DIFF_BLOCK_ACTION_HEIGHT) : 0
+  const entryMetrics = useMemo(() => {
+    const entries = view === 'unified' ? unifiedEntries : splitEntries
+    const heights = entries.map((entry, index) => entry.kind === 'omitted' && index > 0 && index + 1 < entries.length
+      ? virtualRowHeight * 2
+      : virtualRowHeight)
+    const offsets = [0]
+    heights.forEach((height) => offsets.push(offsets[offsets.length - 1] + height))
+    return { heights, offsets, total: offsets[offsets.length - 1] ?? 0 }
+  }, [splitEntries, unifiedEntries, view, virtualRowHeight])
   // Anchor each action stack at the visual center of its whole change block.
   // The stack is positioned outside row flow, so larger buttons never stretch code.
   const blockActionAnchors = useMemo(() => {
@@ -614,9 +637,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       : entry.kind === 'row' && Boolean((entry.row.left && entry.row.left.kind !== 'same') || (entry.row.right && entry.row.right.kind !== 'same')))
     const anchors = new Map<number, { center: number; toolbarCenter: number; height: number }>()
     const toolbarHalfHeight = blockActionCount * 20 / 2
-    const entryHeight = (_index: number) => virtualRowHeight
-    const offsets = [0]
-    entries.forEach((_, index) => offsets.push(offsets[index] + entryHeight(index)))
+    const offsets = entryMetrics.offsets
     for (let start = 0; start < changed.length; start++) {
       if (!changed[start]) continue
       let end = start
@@ -630,23 +651,23 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       start = end
     }
     return anchors
-  }, [unifiedEntries, splitEntries, view, virtualRowHeight, virtualized, blockActionCount, actionEdgeSpace])
+  }, [unifiedEntries, splitEntries, view, virtualRowHeight, virtualized, blockActionCount, actionEdgeSpace, entryMetrics])
   const canRenderLoadedRows = shouldRenderLoadedRows(usesLoader, loadedFileIdentity, activeFileIdentity)
-  const virtualStart = virtualized ? Math.max(0, Math.floor(virtualScrollTop / virtualRowHeight) - DIFF_VIRTUAL_OVERSCAN) : 0
+  const virtualStart = virtualized ? Math.max(0, entryIndexAtOffset(entryMetrics.offsets, virtualScrollTop) - DIFF_VIRTUAL_OVERSCAN) : 0
   const virtualEnd = virtualized ? Math.min(visibleEntryCount, virtualStart + DIFF_VIRTUAL_OVERSCAN * 2 + 80) : visibleEntryCount
-  const virtualTopHeight = virtualStart * virtualRowHeight
-  const virtualBottomHeight = Math.max(0, (visibleEntryCount - virtualEnd) * virtualRowHeight) + actionEdgeSpace
-  const splitTotalHeight = visibleEntryCount * virtualRowHeight + actionEdgeSpace
+  const virtualTopHeight = virtualized ? entryMetrics.offsets[virtualStart] : 0
+  const virtualBottomHeight = Math.max(0, entryMetrics.total - (entryMetrics.offsets[virtualEnd] ?? entryMetrics.total)) + actionEdgeSpace
+  const splitTotalHeight = entryMetrics.total + actionEdgeSpace
   const overviewEntries = useMemo<DiffOverviewEntry[]>(() => {
     if (view === 'unified') {
-      return [...(activeScope === 'changes' && !usesLoader ? [{ kind: 'same' as const, height: 24 }] : []), ...unifiedEntries.map((entry) => ({ kind: entry.kind === 'line' ? entry.row.kind : 'same' as const, height: virtualRowHeight })), ...(actionEdgeSpace ? [{ kind: 'same' as const, height: actionEdgeSpace }] : [])]
+      return [...(activeScope === 'changes' && !usesLoader ? [{ kind: 'same' as const, height: 24 }] : []), ...unifiedEntries.map((entry, index) => ({ kind: entry.kind === 'line' ? entry.row.kind : 'same' as const, height: entryMetrics.heights[index] ?? virtualRowHeight })), ...(actionEdgeSpace ? [{ kind: 'same' as const, height: actionEdgeSpace }] : [])]
     }
-    const entries: DiffOverviewEntry[] = splitEntries.map((entry) => entry.kind === 'row'
-      ? { oldKind: entry.row.left?.kind ?? 'same', newKind: entry.row.right?.kind ?? 'same', height: virtualRowHeight }
-      : { oldKind: 'same', newKind: 'same', height: virtualRowHeight })
+    const entries: DiffOverviewEntry[] = splitEntries.map((entry, index) => entry.kind === 'row'
+      ? { oldKind: entry.row.left?.kind ?? 'same', newKind: entry.row.right?.kind ?? 'same', height: entryMetrics.heights[index] ?? virtualRowHeight }
+      : { oldKind: 'same', newKind: 'same', height: entryMetrics.heights[index] ?? virtualRowHeight })
     if (actionEdgeSpace) entries.push({ oldKind: 'same', newKind: 'same', height: actionEdgeSpace })
     return entries
-  }, [activeScope, splitEntries, unifiedEntries, usesLoader, view, virtualRowHeight, virtualized, actionEdgeSpace])
+  }, [activeScope, splitEntries, unifiedEntries, usesLoader, view, virtualRowHeight, virtualized, actionEdgeSpace, entryMetrics])
   const overviewMarkers = useMemo(() => diffOverviewMarkers(overviewEntries, view), [overviewEntries, view])
   const searchMatches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -692,6 +713,14 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     })
   }, [activeFile])
   useEffect(() => {
+    const top = view === 'split'
+      ? splitScrollerRef.current?.scrollTop ?? 0
+      : codeDiffRef.current?.scrollTop ?? 0
+    if (view === 'split') splitScrollerRef.current?.style.setProperty('--split-scroll-top', `${top}px`)
+    virtualScrollTopRef.current = top
+    setVirtualScrollTop(top)
+  }, [view, wrap])
+  useEffect(() => {
     if (view !== 'split') return
     const scroller = splitScrollerRef.current
     if (!scroller) return
@@ -719,7 +748,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     observer.observe(scroller)
     if (pane) observer.observe(pane)
     return () => observer.disconnect()
-  }, [view, canRenderLoadedRows, diffError, showImagePreview])
+  }, [view, canRenderLoadedRows, diffError, showImagePreview, wrap])
   useEffect(() => () => {
     if (virtualScrollFrame.current) cancelAnimationFrame(virtualScrollFrame.current)
     if (overviewFrame.current) cancelAnimationFrame(overviewFrame.current)
@@ -912,13 +941,13 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       for (const child of Array.from(pane.children)) observer.observe(child)
     }
     return () => observer.disconnect()
-  }, [activeFile, diffLoading, diffError, visibleEntryCount, view, virtualized, diffFontSize, activeScope, showWhitespace, canRenderLoadedRows, overviewCanScroll, showImagePreview])
+  }, [activeFile, diffLoading, diffError, visibleEntryCount, view, virtualized, diffFontSize, activeScope, showWhitespace, canRenderLoadedRows, overviewCanScroll, showImagePreview, wrap])
   const handleCodeDiffScroll = (event: UIEvent<HTMLDivElement>) => {
     queueVirtualScrollTop(event.currentTarget.scrollTop)
     queueOverviewViewport()
   }
   const scrollToVirtualEntry = (rowIndex: number) => {
-    const offset = rowIndex * virtualRowHeight
+    const offset = entryMetrics.offsets[rowIndex] ?? rowIndex * virtualRowHeight
     if (view === 'split') {
       const top = Math.max(0, offset - (splitScrollerRef.current?.clientHeight ?? 400) / 2)
       applySplitScrollTop(top, true)
@@ -933,7 +962,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }
   const scrollToChange = (rowIndex: number) => {
     setActiveChange({ fileIndex: activeFile, rowIndex })
-    if (view === 'split' || virtualized) {
+    if (virtualized) {
       scrollToVirtualEntry(rowIndex)
       return
     }
@@ -942,7 +971,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     }))
   }
   const scrollToSearch = (rowIndex: number) => {
-    if (view === 'split' || virtualized) {
+    if (virtualized) {
       scrollToVirtualEntry(rowIndex)
       return
     }
@@ -1006,9 +1035,30 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const callback = operation === 'stage' ? onStagePatch : operation === 'restore' ? onRestorePatch : onUnstagePatch
     callback?.(activeFileInfo.path, buildStagePatch(activeFileInfo.path, rows, activeFileInfo.type, operation, sourceRows, sourceSplitRows), description)
   }
-  const expandOmission = (entry: Extract<DiffContextEntry, { kind: 'omitted' }>) => {
-    const key = diffContextExpansionKey(activeFileIdentity, contextLineCount, entry)
+  const expandOmission = (entry: Extract<DiffContextEntry, { kind: 'omitted' }>, direction: 'start' | 'end', anchorSourceIndex?: number) => {
+    const key = diffContextExpansionKey(activeFileIdentity, contextLineCount, entry, direction)
+    const scroller = view === 'split' ? splitScrollerRef.current : codeDiffRef.current
+    const anchor = anchorSourceIndex !== undefined && anchorSourceIndex >= 0
+      ? panelRef.current?.querySelector<HTMLElement>(`[data-diff-source-index="${anchorSourceIndex}"]`)
+      : null
+    const anchorRect = anchor?.getBoundingClientRect()
+    const scrollerRect = scroller?.getBoundingClientRect()
+    const anchorTop = anchorRect && scrollerRect && anchorRect.bottom > scrollerRect.top && anchorRect.top < scrollerRect.bottom
+      ? anchorRect.top
+      : null
     setExpandedContext((previous) => ({ ...previous, [key]: (previous[key] ?? 0) + 1 }))
+    if (anchorTop === null || anchorSourceIndex === undefined || anchorSourceIndex < 0) return
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const currentScroller = view === 'split' ? splitScrollerRef.current : codeDiffRef.current
+        const currentAnchor = panelRef.current?.querySelector<HTMLElement>(`[data-diff-source-index="${anchorSourceIndex}"]`)
+        if (!currentScroller || !currentAnchor) return
+        const delta = currentAnchor.getBoundingClientRect().top - anchorTop
+        if (Math.abs(delta) < 0.5) return
+        currentScroller.scrollTop += delta
+        if (view === 'split') currentScroller.style.setProperty('--split-scroll-top', `${currentScroller.scrollTop}px`)
+      })
+    })
   }
   const renderStageActions = (block: RepositoryDiffLine[], anchor: { center: number; toolbarCenter: number; height: number } | undefined, layout: 'unified' | 'split' = 'unified') => {
     return <span className={'diff-stage-slot ' + (layout === 'split' ? 'split' : '')}>
@@ -1034,16 +1084,34 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const number = <span className="line-no">{line ?? ''}</span>
     return <Tooltip content={onOpenLineHistory && line != null ? t('diff:actions.lineHistoryHint') : undefined}>{number}</Tooltip>
   }
+  const renderWrapBlockActions = (block: RepositoryDiffLine[]) => block.length ? <div className="diff-wrap-block-actions">
+    {canStage && onRestorePatch && <button type="button" disabled={actionsDisabled} className="diff-restore-action" onClick={(event) => { event.stopPropagation(); applyPatch('restore', block, message('diff:scope.block')) }} aria-label={t('diff:actions.restoreBlock')}><ArrowRight size={15}/></button>}
+    {canStage && onStagePatch && <button type="button" disabled={actionsDisabled} className="diff-stage-action" onClick={(event) => { event.stopPropagation(); applyPatch('stage', block, message('diff:scope.block')) }} aria-label={t('diff:actions.stageBlock')}><Plus size={15}/></button>}
+    {canUnstage && <button type="button" disabled={actionsDisabled} className="diff-stage-action" onClick={(event) => { event.stopPropagation(); applyPatch('unstage', block, message('diff:scope.block')) }} aria-label={t('diff:actions.unstageBlock')}><Minus size={15}/></button>}
+  </div> : null
+  const renderOmission = (entry: Extract<DiffContextEntry, { kind: 'omitted' }>, key: string, canExpandUp: boolean, canExpandDown: boolean, anchorSourceIndex?: number) => {
+    const count = Math.min(20, entry.count)
+    const remaining = numbers.format(entry.count)
+    const actions = Number(canExpandUp) + Number(canExpandDown)
+    return <div className={`hunk diff-omitted ${actions === 2 ? 'two-actions' : 'one-action'}`} key={key} style={wrap ? undefined : { height: virtualRowHeight * (actions === 2 ? 2 : 1) }}>
+      {canExpandDown && <Tooltip content={t('diff:context.expandDownHint', { count, remaining })}>
+        <button type="button" className="diff-omitted-action" onClick={() => expandOmission(entry, 'start', anchorSourceIndex)} aria-label={t('diff:context.expandDown', { count })}><ChevronDown size={14}/></button>
+      </Tooltip>}
+      {canExpandUp && <Tooltip content={t('diff:context.expandUpHint', { count, remaining })}>
+        <button type="button" className="diff-omitted-action" onClick={() => expandOmission(entry, 'end', anchorSourceIndex)} aria-label={t('diff:context.expandUp', { count })}><ChevronUp size={14}/></button>
+      </Tooltip>}
+    </div>
+  }
   const renderUnifiedEntry = (entry: DiffContextEntry, index: number) => entry.kind === 'omitted'
-    ? <Tooltip content={t('diff:context.expandHint', { count: Math.min(20, entry.count), remaining: numbers.format(entry.count) })} key={`omitted-${index}`}><button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} onClick={() => expandOmission(entry)} aria-label={t('diff:context.expand', { count: Math.min(20, entry.count) })}><ChevronDown size={14} aria-hidden="true"/></button></Tooltip>
-    : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' && blockActionAnchors.has(index) ? changeBlock(sourceRows, entry.sourceIndex) : []; return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`code-row ${row.kind} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, entry.sourceIndex)}>
-      {renderStageActions(block, blockActionAnchors.get(index))}{renderLineNumber(row.old ?? row.next)}{renderLineAction(row, entry.sourceIndex)}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/>
+    ? (() => { const next = unifiedEntries[index + 1]; return renderOmission(entry, `omitted-${index}`, next?.kind === 'line', unifiedEntries[index - 1]?.kind === 'line', next?.kind === 'line' ? next.sourceIndex : undefined) })()
+    : (() => { const row = entry.row; const side: DiffLineSide = row.kind === 'del' ? 'old' : 'new'; const block = row.kind !== 'same' && blockActionAnchors.has(index) ? changeBlock(sourceRows, entry.sourceIndex) : []; return <div key={index} data-diff-row-index={index} data-diff-source-index={entry.sourceIndex} style={wrap ? undefined : { height: virtualRowHeight }} className={`code-row${wrap ? ' wrap' : ''} ${row.kind} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, entry.sourceIndex)}>
+      {wrap ? (stageActionsEnabled ? <span className="diff-stage-slot diff-stage-slot-wrap">{renderWrapBlockActions(block)}</span> : null) : renderStageActions(block, blockActionAnchors.get(index))}{renderLineNumber(row.old ?? row.next)}{renderLineAction(row, entry.sourceIndex)}<HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/>
     </div> })()
   const renderSplitEntry = (entry: SplitDiffEntry, index: number, side: DiffLineSide) => entry.kind === 'omitted'
-    ? <Tooltip content={t('diff:context.expandHint', { count: Math.min(20, entry.count), remaining: numbers.format(entry.count) })} key={`omitted-${side}-${index}`}><button type="button" className="hunk diff-omitted" style={{ height: virtualRowHeight }} onClick={() => expandOmission(entry)} aria-label={t('diff:context.expand', { count: Math.min(20, entry.count) })}><ChevronDown size={14} aria-hidden="true"/></button></Tooltip>
-    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1; const action = renderLineAction(row, sourceIndex); return <div data-diff-row-index={index} style={{ height: virtualRowHeight }} className={`split-code-side ${row?.kind ?? 'empty'} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)}>{renderLineNumber(side === 'old' ? row?.old : row?.next)}{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/> : <code/>}</div> })()
+    ? (() => { const next = splitEntries[index + 1]; const nextRow = next?.kind === 'row' ? next.row.left ?? next.row.right : undefined; return renderOmission(entry, `omitted-${side}-${index}`, next?.kind === 'row', splitEntries[index - 1]?.kind === 'row', nextRow ? sourceIndexMap.get(nextRow) : undefined) })()
+    : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1; const action = renderLineAction(row, sourceIndex); return <div key={`${side}-${index}`} data-diff-row-index={index} data-diff-source-index={sourceIndex} style={wrap ? undefined : { height: virtualRowHeight }} className={`split-code-side${wrap ? ' wrap' : ''} ${row?.kind ?? 'empty'} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)}>{renderLineNumber(side === 'old' ? row?.old : row?.next)}{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/> : <code/>}</div> })()
   const renderSplitActions = (entry: SplitDiffEntry, index: number) => {
-    if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: virtualRowHeight }} key={`actions-${index}`}/>
+    if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: virtualRowHeight * (index > 0 && index + 1 < splitEntries.length ? 2 : 1) }} key={`actions-${index}`}/>
     const row = entry.row.left ?? entry.row.right
     const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1
     const blockStart = blockActionAnchors.has(index)
@@ -1052,6 +1120,21 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {blockStart && renderStageActions(block, blockActionAnchors.get(index), 'split')}
     </div>
   }
+  const renderWrapSplit = () => <div ref={setSplitScroller} className="split-diff-panes split-wrap-panes" onScroll={handleSplitScroll}>
+    <div className={`split-wrap-list${stageActionsEnabled ? ' with-actions' : ''}`}>
+      {splitEntries.map((entry, index) => {
+        if (entry.kind === 'omitted') return <div className="split-wrap-omission" key={`wrap-omitted-${index}`}>{(() => { const next = splitEntries[index + 1]; const nextRow = next?.kind === 'row' ? next.row.left ?? next.row.right : undefined; return renderOmission(entry, `wrap-omitted-${index}`, next?.kind === 'row', splitEntries[index - 1]?.kind === 'row', nextRow ? sourceIndexMap.get(nextRow) : undefined) })()}</div>
+        const row = entry.row.left ?? entry.row.right
+        const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1
+        const block = blockActionAnchors.has(index) && sourceIndex >= 0 ? changeBlock(sourceRows, sourceIndex) : []
+        return <div className="split-wrap-row" key={`wrap-${index}`}>
+          <div className="split-wrap-cell">{renderSplitEntry(entry, index, 'old')}</div>
+          {stageActionsEnabled && <div className="split-wrap-actions">{renderWrapBlockActions(block)}</div>}
+          <div className="split-wrap-cell">{renderSplitEntry(entry, index, 'new')}</div>
+        </div>
+      })}
+    </div>
+  </div>
   const contextMenuRow = lineMenu
     ? view === 'unified'
       ? unifiedEntryRow(unifiedEntries, lineMenu.rowIndex)
@@ -1090,6 +1173,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {!fileContentOnly && !showImagePreview && <div className="segmented icon-segmented diff-scope"><Tooltip content={t('diff:view.fullFile')}><button className={activeScope === 'file' ? 'active' : ''} onClick={() => setScope('file')} aria-label={t('diff:view.fullFile')}><FileText size={14}/></button></Tooltip><Tooltip content={t('diff:view.changes')}><button className={activeScope === 'changes' ? 'active' : ''} onClick={() => setScope('changes')} aria-label={t('diff:view.changes')}><ScanText size={14}/></button></Tooltip></div>}
       {!fileContentOnly && !showImagePreview && activeScope === 'changes' && <Tooltip content={t('diff:context.hint')}><label className="diff-context-control"><span>{t('diff:context.label')}</span><input type="number" min={0} max={100} step={1} value={contextLineCount} aria-label={t('diff:context.lines')} onChange={(event) => setContextLineCount(Math.trunc(Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0))))}/></label></Tooltip>}
       {!fileContentOnly && !showImagePreview && <Tooltip content={showWhitespace ? t('diff:whitespace.hide') : t('diff:whitespace.show')}><button type="button" className={`diff-whitespace-toggle ${showWhitespace ? 'active' : ''}`} onClick={() => setShowWhitespace((value) => !value)} aria-label={t('diff:whitespace.show')} aria-pressed={showWhitespace}><Pilcrow size={13}/></button></Tooltip>}
+      {!fileContentOnly && !showImagePreview && <Tooltip content={wrap ? t('diff:wrap.disable') : t('diff:wrap.enable')}><button type="button" className={`diff-whitespace-toggle diff-wrap-toggle ${wrap ? 'active' : ''}`} onClick={() => setWrap((value) => !value)} aria-label={wrap ? t('diff:wrap.disable') : t('diff:wrap.enable')} aria-pressed={wrap}><WrapText size={13}/></button></Tooltip>}
       {!showImagePreview && <div className="segmented icon-segmented"><Tooltip content={t('diff:view.unified')}><button className={view === 'unified' ? 'active' : ''} onClick={() => setView('unified')} aria-label={t('diff:view.unified')}><AlignJustify size={14}/></button></Tooltip><Tooltip content={t('diff:view.split')}><button className={view === 'split' ? 'active' : ''} onClick={() => setView('split')} aria-label={t('diff:view.split')}><Columns2 size={14}/></button></Tooltip></div>}
       {activeIsSvg && imagePreviewAvailable && <div className="segmented icon-segmented diff-image-view"><Tooltip content={t('diff:image.previewHint')}><button type="button" className={imageMode === 'preview' ? 'active' : ''} onClick={() => setImageMode('preview')} aria-label={t('diff:image.preview')} aria-pressed={imageMode === 'preview'}><ImageIcon size={14}/></button></Tooltip><Tooltip content={t('diff:image.sourceHint')}><button type="button" className={imageMode === 'source' ? 'active' : ''} onClick={() => setImageMode('source')} aria-label={t('diff:image.source')} aria-pressed={imageMode === 'source'}><FileCode2 size={14}/></button></Tooltip></div>}
       {showImagePreview && <div className="diff-font-controls diff-image-zoom-controls"><Tooltip content={t('diff:image.zoomOutHint')}><button type="button" onClick={() => setImageZoom((value) => Math.max(MIN_IMAGE_ZOOM, value - IMAGE_ZOOM_STEP))} disabled={imageZoom <= MIN_IMAGE_ZOOM} aria-label={t('diff:image.zoomOut')}><ZoomOut size={13}/></button></Tooltip><Tooltip content={t('diff:image.zoomResetHint')}><button type="button" className="diff-font-size" onClick={() => setImageZoom(100)} aria-label={t('diff:image.zoomReset')}>{numbers.format(imageZoom)}%</button></Tooltip><Tooltip content={t('diff:image.zoomInHint')}><button type="button" onClick={() => setImageZoom((value) => Math.min(MAX_IMAGE_ZOOM, value + IMAGE_ZOOM_STEP))} disabled={imageZoom >= MAX_IMAGE_ZOOM} aria-label={t('diff:image.zoomIn')}><ZoomIn size={13}/></button></Tooltip></div>}
@@ -1102,22 +1186,22 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     <div className={`diff-body ${hideFileList ? 'code-only' : ''}`}>
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
       <div className="diff-viewer" ref={overviewRef}>
-      <div className={`code-diff ${view}`}>
+      <div className={`code-diff ${view}${wrap ? ' wrap' : ''}`}>
         <div className="file-header"><Tooltip content={activeFileInfo?.path}><div className="file-header-path"><Tooltip content={activeFileInfo?.path}><code>{activeFileInfo?.path ?? t('diff:panel.noFiles')}</code></Tooltip></div></Tooltip>{activeFileInfo && !fileContentOnly && !showImagePreview && <span className="file-header-stats"><i>+{numbers.format(activeFileInfo.add)}</i> <b>-{numbers.format(activeFileInfo.del)}</b></span>}</div>
         {showImagePreview ? renderImagePreview() : <>
           {activeScope === 'changes' && !usesLoader && <div className="hunk">{t('diff:panel.fullChange')}</div>}
           {diffLoading && !canRenderLoadedRows && <div className="diff-message">{t('diff:panel.loading')}</div>}
           {diffError && <div className="diff-message error">{renderMessage(diffError, t)}</div>}
           {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">{t('diff:panel.noTextDiff')}</div>}
-          {canRenderLoadedRows && !diffError && view === 'unified' && <div className="unified-diff-pane" ref={codeDiffRef} onScroll={handleCodeDiffScroll}><div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div></div>}
-          {canRenderLoadedRows && !diffError && view === 'split' && <div ref={setSplitScroller} className="split-diff-panes" onScroll={handleSplitScroll}>
+          {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-pane${wrap ? ' wrap' : ''}`} ref={codeDiffRef} onScroll={handleCodeDiffScroll}><div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div></div>}
+          {canRenderLoadedRows && !diffError && view === 'split' && (wrap ? renderWrapSplit() : <div ref={setSplitScroller} className="split-diff-panes" onScroll={handleSplitScroll}>
             <div className="split-diff-viewport">
               <div className="split-diff-pane split-left" aria-label={t('diff:code.old')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))}</div></div>
               {stageActionsEnabled && <div className="split-diff-actions" aria-label={t('diff:actions.label')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitActions(entry, index + virtualStart))}</div></div>}
               <div className="split-diff-pane split-right" aria-label={t('diff:code.new')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'new'))}</div></div>
             </div>
             <div className="split-diff-spacer" style={{ height: `max(0px, calc(${splitTotalHeight}px - var(--split-content-height, 0px)))` }}/>
-          </div>}
+          </div>)}
         </>}
       </div>
       {!showImagePreview && (overviewCanScroll || overviewMarkers.length > 0) && <Tooltip content={t('diff:overview.hint')}><div className={`diff-overview ${view === 'split' ? 'split' : ''}`} style={overviewBounds} role="scrollbar" aria-orientation="vertical" aria-valuemin={0} aria-valuemax={100} aria-label={t('diff:overview.label')} tabIndex={0} onPointerDown={beginOverviewDrag} onPointerMove={moveOverviewDrag} onPointerUp={endOverviewDrag} onPointerCancel={endOverviewDrag} onKeyDown={handleOverviewKeyDown}>

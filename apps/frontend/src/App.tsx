@@ -194,7 +194,7 @@ function formatCommitListTime(commit: Commit, locale: Locale) {
   return timestamp === null ? commit.time : new Intl.DateTimeFormat(locale, { year: new Date(timestamp).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(timestamp)
 }
 
-function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktreeBranches = {}, currentBranch, autoPullBranches = [], pullingBranches = [], onToggleAutoPull, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; worktreeBranches?: Record<string, string>; currentBranch?: string; autoPullBranches?: string[]; pullingBranches?: string[]; onToggleAutoPull: (branch: string) => void; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
+export function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktreeBranches = {}, currentBranch, autoPullBranches = [], pullingBranches = [], onToggleAutoPull, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; worktreeBranches?: Record<string, string>; currentBranch?: string; autoPullBranches?: string[]; pullingBranches?: string[]; onToggleAutoPull: (branch: string) => void; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
@@ -221,7 +221,11 @@ function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktr
     const count = branchTracking[branch]?.behind ?? 0
     return count > 0 ? <Tooltip content={t('history:app.branches.incomingForBranch', { "branch": branch, "count": count })}><span className="branch-sync"  aria-label={t('history:app.branches.incoming', { "count": count })}>↓{new Intl.NumberFormat(locale).format(count)}</span></Tooltip> : null
   }
-  const branchStatus = (branch: string) => <>{autoPullBranches.includes(branch) && <Tooltip content={t('history:app.branches.autoEnabled')}><span className="branch-auto-pull-mark" ><RefreshCw size={12}/></span></Tooltip>}{pullingBranches.includes(branch) && <Tooltip content={t('history:app.branches.pulling')}><span className="branch-pull-spinner spin" ><RefreshCw size={12}/></span></Tooltip>}</>
+  const branchStatus = (branch: string) => {
+    if (pullingBranches.includes(branch)) return <Tooltip content={t('history:app.branches.pulling')}><span className="branch-pull-spinner" aria-label={t('history:app.branches.pulling')}><RefreshCw className="spin" size={12}/></span></Tooltip>
+    if (autoPullBranches.includes(branch)) return <Tooltip content={t('history:app.branches.autoEnabled')}><span className="branch-auto-pull-mark" aria-label={t('history:app.branches.autoEnabled')}><RefreshCw size={12}/></span></Tooltip>
+    return null
+  }
   const matchesBranch = (branch: string) => !normalizedBranchQuery || branch.toLocaleLowerCase().includes(normalizedBranchQuery)
   const branchNames = branches.filter((branch) => !remoteBranchSet.has(branch))
   const visibleBranchNames = branchNames.filter(matchesBranch)

@@ -32,10 +32,10 @@ describe('diff and history localization', () => {
     const i18n = await createAppI18n('en-US')
     const rows = Array.from({ length: 5 }, (_, index) => ({ old: index + 1, next: index + 1, kind: index === 4 ? 'add' as const : 'same' as const, code: `line ${index}` }))
     render(<I18nextProvider i18n={i18n}><DiffPanel files={[{ path: 'a', type: 'M', add: 1, del: 0 }]} wide={false} onWideChange={() => {}} fallbackChangeRows={rows}/></I18nextProvider>)
-    const omission = screen.getByRole('button', { name: 'Expand 1 unchanged line' })
+    const omission = screen.getByRole('button', { name: 'Expand 1 unchanged line above' })
     expect(omission.hasAttribute('title')).toBe(false)
     await act(() => omission.focus())
-    expect(screen.getByRole('tooltip').textContent).toBe('Expand 1 unchanged line (1 remaining)')
+    expect(screen.getByRole('tooltip').textContent).toBe('Expand 1 unchanged line above (1 remaining)')
   })
 
   it('preserves source line coordinates without display grouping', async () => {

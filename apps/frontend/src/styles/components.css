@@ -500,7 +500,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
    into `min-height` — leaving the pane with no scrollable overflow at all. */
 .split-diff-content.virtual-diff-list, .unified-diff-content.virtual-diff-list { box-sizing: content-box; }
 
-.split-code-side { position: relative; width: max-content; min-width: 100%; min-height: 24px; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 22px minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
+.split-code-side { position: relative; width: max-content; min-width: 100%; display: grid; grid-template-columns: var(--diff-line-number-width, 5ch) 22px minmax(max-content, 1fr); align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
 .diff-panel.stage-actions-enabled .split-code-side { grid-template-columns: var(--diff-line-number-width, 5ch) 26px minmax(max-content, 1fr); }
 

@@ -26,11 +26,25 @@
     "expand_one": "展开 {{count}} 行未修改源码",
     "expand_other": "展开 {{count}} 行未修改源码",
     "expandHint_one": "展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
-    "expandHint_other": "展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）"
+    "expandHint_other": "展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
+    "expandUp": "向上展开 {{count}} 行未修改源码",
+    "expandUp_one": "向上展开 {{count}} 行未修改源码",
+    "expandUp_other": "向上展开 {{count}} 行未修改源码",
+    "expandDown": "向下展开 {{count}} 行未修改源码",
+    "expandDown_one": "向下展开 {{count}} 行未修改源码",
+    "expandDown_other": "向下展开 {{count}} 行未修改源码",
+    "expandUpHint_one": "向上展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
+    "expandUpHint_other": "向上展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
+    "expandDownHint_one": "向下展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）",
+    "expandDownHint_other": "向下展开 {{count}} 行未修改源码（剩余 {{remaining}} 行）"
   },
   "whitespace": {
     "hide": "隐藏空白差异",
     "show": "显示空白差异"
+  },
+  "wrap": {
+    "enable": "自动换行",
+    "disable": "关闭自动换行"
   },
   "image": {
     "preview": "图片预览",

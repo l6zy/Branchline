@@ -87,13 +87,18 @@ describe('diff patch actions', () => {
       const rows = Array.from({ length: 60 }, (_, index) => ({ old: index + 1, next: index + 1, kind: 'same' as 'same' | 'add', code: 'line ' + index }))
       rows[30].kind = 'add'
       const html = renderToStaticMarkup(<DiffPanel files={[{ path: 'file.txt', type: 'M', add: 1, del: 0, staged: false }]} wide={false} onWideChange={() => {}} defaultFontSize={22} allowStage onStagePatch={() => {}} fallbackChangeRows={rows} />)
-      const omissions = html.match(/<button[^>]*class="hunk diff-omitted"[^>]*>/g) ?? []
+      const omissions = html.match(/<div[^>]*class="hunk diff-omitted[^"]*"[^>]*>/g) ?? []
       expect(omissions).toHaveLength(view === 'unified' ? 2 : 4)
-      omissions.forEach((button) => expect(button).toContain('height:39px'))
-      expect(html).toContain('aria-label="展开 20 行未修改源码"')
-      expect(omissions.every((button) => button.includes('data-tooltip-trigger='))).toBe(true)
+      omissions.forEach((row) => expect(row).toContain('height:39px'))
+      const omissionButtons = html.match(/<button[^>]*class="diff-omitted-action"[^>]*>/g) ?? []
+      expect(omissionButtons).toHaveLength(view === 'unified' ? 2 : 4)
+      omissionButtons.forEach((button) => expect(button).toContain('data-tooltip-trigger='))
+      expect(html).toContain('aria-label="向上展开 20 行未修改源码"')
+      expect(html).toContain('aria-label="向下展开 20 行未修改源码"')
+      expect(html).toContain('lucide-chevron-up')
+      expect(html).toContain('lucide-chevron-down')
       expect(html).not.toMatch(/\btitle=/)
-      expect(html).not.toContain('>展开 20 行未修改源码')
+      expect(html).not.toContain('>向上展开 20 行未修改源码')
       if (view === 'split') expect(html).toMatch(/split-action-row" style="height:39px"/)
     })
 

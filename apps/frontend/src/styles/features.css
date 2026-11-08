@@ -358,11 +358,23 @@
 
 .diff-message.error { color: var(--danger); }
 
-.hunk { width: max-content; min-width: 100%; height: 24px; padding: 5px 11px; color: var(--code-hunk-text); background: var(--code-hunk); font-size: 10px; }
+.hunk { width: max-content; min-width: 100%; height: 24px; color: var(--code-hunk-text); background: var(--code-hunk); font-size: 10px; }
 
-.diff-omitted { min-height: 24px; display: flex; align-items: center; justify-content: center; border: 0; color: var(--text-secondary); letter-spacing: 0; text-align: center; cursor: pointer; }
+.diff-omitted { min-height: 24px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; border: 0; color: var(--text-secondary); letter-spacing: 0; text-align: left; cursor: default; }
 
-.diff-omitted:hover, .diff-omitted:focus-visible { color: var(--text); background: color-mix(in srgb, var(--code-hunk) 75%, var(--surface-hover)); }
+.diff-omitted:hover { color: var(--text); background: color-mix(in srgb, var(--code-hunk) 75%, var(--surface-hover)); }
+
+.diff-omitted-action { flex: 1 1 0; width: var(--diff-line-number-width); min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--muted); background: color-mix(in srgb, var(--code-surface) 72%, var(--code-hunk)); font: inherit; cursor: pointer; }
+
+.diff-omitted-action svg { width: 12px; height: 12px; }
+
+.diff-omitted.two-actions .diff-omitted-action svg { width: 15px; height: 15px; }
+
+.diff-omitted.one-action .diff-omitted-action svg { width: 12px; height: 12px; }
+
+.diff-omitted-action:hover, .diff-omitted-action:focus-visible { color: var(--accent-text); border-color: var(--accent); background: var(--accent-dim); outline: none; }
+
+.diff-omitted-action:active { background: color-mix(in srgb, var(--accent) 24%, var(--code-surface)); }
 
 .code-row { position: relative; width: max-content; min-width: max(660px, 100%); min-height: 22px; display: grid; grid-template-columns: 9.5ch 4.5ch 2ch 1fr; align-items: stretch; color: var(--code-text); background: var(--code-surface); font-size: var(--diff-font-size, 12px); }
 
@@ -1166,8 +1178,9 @@
 .file-tree-mode { height: 24px; padding: 2px; display: inline-flex; gap: 1px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-control); }
 .file-tree-mode button { width: 26px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 3px; color: var(--muted); background: transparent; cursor: pointer; }
 .file-tree-mode button.active { color: var(--accent-text); background: var(--accent-dim); }
-.branch-auto-pull-mark { flex: 0 0 auto; color: var(--accent); }
-.branch-pull-spinner { flex: 0 0 auto; color: var(--success); }
+.branch-auto-pull-mark { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; color: var(--accent); }
+.branch-pull-spinner { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; color: var(--success); }
+.branch-auto-pull-mark svg, .branch-pull-spinner svg { display: block; }
 .tree-row.pulling { color: var(--success); }
 .commit-file-backdrop { position: fixed; inset: 30px 0 0; display: grid; place-items: center; padding: 28px; background: rgba(3,7,10,.62); z-index: 45; }
 .commit-file-viewer { width: min(1100px, 92vw); height: min(780px, 86vh); min-width: 0; display: grid; grid-template-rows: 40px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
@@ -1550,3 +1563,71 @@
 .operation-page .conflict-editor-toolbar .icon-tool-button { width: 24px; height: 24px; border-color: var(--line); border-radius: 5px; color: var(--muted); background: var(--panel-2); }
 
 .operation-page .conflict-editor-toolbar .icon-tool-button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+/* Wrapped diff rows keep the logical line number in one cell while code text
+   continues on additional visual lines. */
+.unified-diff-pane.wrap { overflow-x: hidden; }
+
+.code-diff.wrap .unified-diff-content { width: 100%; min-width: 0; }
+
+.code-row.wrap { width: 100%; min-width: 0; height: auto; }
+
+.diff-panel:not(.stage-actions-enabled) .code-row.wrap { grid-template-columns: var(--diff-line-number-width, 5ch) 2ch minmax(0, 1fr); }
+
+.diff-panel.stage-actions-enabled .code-row.wrap { grid-template-columns: 32px var(--diff-line-number-width, 5ch) 26px minmax(0, 1fr); }
+
+.code-row.wrap code, .split-wrap-cell .split-code-side code { min-width: 0; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; line-height: var(--diff-row-height); }
+
+.code-row.wrap .syntax, .split-wrap-cell .syntax { min-width: 0; }
+
+.code-row.wrap .diff-inline-change, .split-wrap-cell .diff-inline-change {
+  box-shadow: none;
+  clip-path: none;
+  padding-block: 5px;
+  padding-block: calc((1lh - 1.2em) / 2);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.diff-stage-slot-wrap { display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; }
+
+.diff-wrap-block-actions { display: flex; flex-direction: column; gap: 2px; }
+
+.diff-wrap-block-actions button { width: 24px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; color: var(--code-text); background: color-mix(in srgb, var(--accent) 14%, var(--code-surface)); cursor: pointer; }
+
+.diff-wrap-block-actions button:hover { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 24%, var(--code-surface)); }
+
+.diff-wrap-block-actions button.diff-restore-action:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 15%, var(--code-surface)); }
+
+.diff-wrap-block-actions button:disabled { opacity: .4; cursor: wait; }
+
+.split-wrap-panes { display: block; }
+
+.split-wrap-list { min-width: 0; }
+
+.split-wrap-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; }
+
+.split-wrap-list.with-actions .split-wrap-row { grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr); }
+
+.split-wrap-cell { min-width: 0; display: flex; align-items: stretch; background: var(--code-surface); }
+
+.split-wrap-cell > .split-code-side { width: 100%; min-width: 0; height: 100%; grid-template-columns: var(--diff-line-number-width, 5ch) 22px minmax(0, 1fr); }
+
+.split-wrap-list.with-actions .split-wrap-cell > .split-code-side { grid-template-columns: var(--diff-line-number-width, 5ch) 26px minmax(0, 1fr); }
+
+.split-wrap-cell + .split-wrap-cell { border-left: 1px solid var(--code-border); }
+
+.split-wrap-actions { min-width: 0; display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; border-left: 1px solid var(--code-border); border-right: 1px solid var(--code-border); background: var(--code-surface); }
+
+.split-wrap-omission { grid-column: 1 / -1; min-width: 0; }
+
+.split-wrap-omission .diff-omitted { width: 100%; min-width: 0; }
+
+.code-diff.wrap .diff-omitted.one-action, .split-wrap-omission .diff-omitted.one-action { min-height: 24px; }
+
+.code-diff.wrap .diff-omitted.two-actions, .split-wrap-omission .diff-omitted.two-actions { min-height: 48px; }
+
+.code-diff.wrap .diff-omitted-action, .split-wrap-omission .diff-omitted-action { width: var(--diff-line-number-width); border-radius: 5px; }
+
+.code-diff.wrap .diff-omitted-action svg, .split-wrap-omission .diff-omitted-action svg { width: 15px; height: 15px; }
+
+.code-diff.wrap .diff-omitted.one-action .diff-omitted-action svg, .split-wrap-omission .diff-omitted.one-action .diff-omitted-action svg { width: 13px; height: 13px; }

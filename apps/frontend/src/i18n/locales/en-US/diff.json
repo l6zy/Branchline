@@ -26,11 +26,25 @@
     "expand_one": "Expand {{count}} unchanged line",
     "expand_other": "Expand {{count}} unchanged lines",
     "expandHint_one": "Expand {{count}} unchanged line ({{remaining}} remaining)",
-    "expandHint_other": "Expand {{count}} unchanged lines ({{remaining}} remaining)"
+    "expandHint_other": "Expand {{count}} unchanged lines ({{remaining}} remaining)",
+    "expandUp": "Expand {{count}} unchanged line above",
+    "expandUp_one": "Expand {{count}} unchanged line above",
+    "expandUp_other": "Expand {{count}} unchanged lines above",
+    "expandDown": "Expand {{count}} unchanged line below",
+    "expandDown_one": "Expand {{count}} unchanged line below",
+    "expandDown_other": "Expand {{count}} unchanged lines below",
+    "expandUpHint_one": "Expand {{count}} unchanged line above ({{remaining}} remaining)",
+    "expandUpHint_other": "Expand {{count}} unchanged lines above ({{remaining}} remaining)",
+    "expandDownHint_one": "Expand {{count}} unchanged line below ({{remaining}} remaining)",
+    "expandDownHint_other": "Expand {{count}} unchanged lines below ({{remaining}} remaining)"
   },
   "whitespace": {
     "hide": "Hide whitespace differences",
     "show": "Show whitespace differences"
+  },
+  "wrap": {
+    "enable": "Wrap long lines",
+    "disable": "Disable line wrapping"
   },
   "image": {
     "preview": "Image preview",

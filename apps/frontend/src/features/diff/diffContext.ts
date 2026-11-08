@@ -2,7 +2,7 @@ import type { RepositoryDiffLine } from '../../repository'
 
 export type DiffContextEntry =
   | { kind: 'line'; row: RepositoryDiffLine; sourceIndex: number }
-  | { kind: 'omitted'; count: number; sourceStart: number; sourceEnd: number }
+  | { kind: 'omitted'; count: number; sourceStart: number; sourceEnd: number; gapKey?: string }
 
 type DiffWindow = { start: number; end: number }
 
@@ -65,6 +65,7 @@ export function expandDiffContextOmission(
     count: omission.count - count,
     sourceStart: direction === 'start' ? end + 1 : omission.sourceStart,
     sourceEnd: direction === 'start' ? omission.sourceEnd : start - 1,
+    ...(omission.gapKey ? { gapKey: omission.gapKey } : {}),
   }
   return direction === 'start' ? [...lines, remaining] : [remaining, ...lines]
 }
@@ -75,7 +76,7 @@ export function diffContextExpansionKey(
   omission: Extract<DiffContextEntry, { kind: 'omitted' }>,
   direction: 'start' | 'end' = 'start',
 ) {
-  const stableBound = direction === 'start' ? omission.sourceEnd : omission.sourceStart
+  const stableBound = omission.gapKey ?? (direction === 'start' ? omission.sourceEnd : omission.sourceStart)
   return `${fileIdentity}:${contextLines}:${direction}:${stableBound}`
 }
 
@@ -89,11 +90,34 @@ export function expandDiffContextOmissionBySteps(
   let remaining: DiffContextEntry = omission
   for (let step = 0; step < steps && remaining.kind === 'omitted'; step += 1) {
     const expanded = expandDiffContextOmission(rows, remaining, direction)
-    entries.push(...expanded.filter((entry) => entry.kind === 'line'))
+    const lines = expanded.filter((entry) => entry.kind === 'line')
+    if (direction === 'end') entries.unshift(...lines)
+    else entries.push(...lines)
     remaining = expanded.find((entry) => entry.kind === 'omitted') ?? {
       kind: 'omitted', count: 0, sourceStart: 0, sourceEnd: -1,
+      ...(omission.gapKey ? { gapKey: omission.gapKey } : {}),
     }
   }
-  if (remaining.kind === 'omitted' && remaining.count > 0) entries.push(remaining)
+  if (remaining.kind === 'omitted' && remaining.count > 0) {
+    if (direction === 'end') entries.unshift(remaining)
+    else entries.push(remaining)
+  }
+  return entries
+}
+
+export function expandDiffContextOmissionByDirections(
+  rows: readonly RepositoryDiffLine[],
+  omission: Extract<DiffContextEntry, { kind: 'omitted' }>,
+  startSteps: number,
+  endSteps: number,
+): DiffContextEntry[] {
+  let entries: DiffContextEntry[] = [omission]
+  if (startSteps > 0) entries = expandDiffContextOmissionBySteps(rows, omission, startSteps, 'start')
+  if (endSteps > 0) {
+    const remainingIndex = entries.findIndex((entry) => entry.kind === 'omitted')
+    if (remainingIndex < 0) return entries
+    const remaining = entries[remainingIndex] as Extract<DiffContextEntry, { kind: 'omitted' }>
+    entries.splice(remainingIndex, 1, ...expandDiffContextOmissionBySteps(rows, remaining, endSteps, 'end'))
+  }
   return entries
 }

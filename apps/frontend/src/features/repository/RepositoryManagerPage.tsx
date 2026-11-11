@@ -3,7 +3,7 @@ import { errorMessage, message, type MessageContent } from '../../i18n/messages'
 import { useLocale } from '../../i18n/LocaleProvider'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useMemo, useState } from 'react'
-import { ArrowLeft, ChevronRight, Clock3, CloudDownload, Code2, FolderGit2, FolderOpen, GitBranch, Monitor, Moon, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, Clock3, CloudDownload, Code2, FolderGit2, FolderOpen, GitBranch, Monitor, Moon, PanelTop, Plus, RefreshCw, Search, Star, Sun, Trash2, X } from 'lucide-react'
 import { Button } from '../../components/Button'
 import { loadRepositoryDetails, openRepositoryInVscode, pickRepositoryDirectory, type RepositoryDetails } from '../../repository'
 import { AddRepositoryDialog } from './AddRepositoryDialog'
@@ -13,13 +13,15 @@ import { repositoryCacheKey, sameRepositoryPath } from './repositoryPaths'
 import type { RecentRepository } from './repositoryPersistence'
 import type { FavoriteRepository } from './repositorySwitcher'
 
-export function RepositoryManagerPage({ recent, favorites, current, opening, theme, resolvedTheme, onToggleTheme, onBack, onOpen, onRegister, onToggleFavorite, onForget, onNotice }: {
+export function RepositoryManagerPage({ recent, favorites, current, opening, theme, resolvedTheme, rounded, onToggleRounded, onToggleTheme, onBack, onOpen, onRegister, onToggleFavorite, onForget, onNotice }: {
   recent: RecentRepository[]
   favorites: FavoriteRepository[]
   current: Pick<RecentRepository, 'name' | 'path' | 'branch'> | null
   opening: boolean
   theme: 'light' | 'dark' | 'system'
   resolvedTheme: 'light' | 'dark'
+  rounded: boolean
+  onToggleRounded: () => void
   onToggleTheme: () => void
   onBack: () => void
   onOpen: (path: string) => void
@@ -68,7 +70,7 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
   return <section className="repository-manager" aria-label={t('repository:manager.title')}>
     {hasRepositories && <header className="repository-manager-heading">
       <div className="repository-manager-title">{current && <Button variant="icon" tooltip={t('repository:manager.back')} aria-label={t('repository:manager.back')} onClick={onBack}><ArrowLeft size={18}/></Button>}<FolderGit2 size={23}/><div><h1>{t('repository:manager.title')}</h1><p>{t('repository:manager.description')}</p></div></div>
-      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}{t('repository:manager.selectLocal')}</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>{t('repository:add.clone')}</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>{t('repository:add.initialize')}</Button></>}<Button variant="icon" tooltip={t(theme === 'system' ? 'repository:manager.systemThemeHint' : 'repository:manager.themeHint', { theme: t(resolvedTheme === 'dark' ? 'repository:manager.dark' : 'repository:manager.light') })} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button></div>
+      <div className="repository-manager-toolbar">{hasRepositories && <><Button variant="primary" onClick={() => void browse()} disabled={adding || opening}>{adding ? <RefreshCw size={15} className="spin"/> : <FolderOpen size={15}/>}{t('repository:manager.selectLocal')}</Button><Button onClick={() => setDialog('clone')} disabled={adding || opening}><CloudDownload size={15}/>{t('repository:add.clone')}</Button><Button onClick={() => setDialog('init')} disabled={adding || opening}><Plus size={15}/>{t('repository:add.initialize')}</Button></>}<Button variant="icon" tooltip={t(theme === 'system' ? 'repository:manager.systemThemeHint' : 'repository:manager.themeHint', { theme: t(resolvedTheme === 'dark' ? 'repository:manager.dark' : 'repository:manager.light') })} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button><Button variant="icon" active={rounded} tooltip={t(rounded ? 'repository:manager.roundedThemeEnabled' : 'repository:manager.roundedThemeDisabled')} aria-label={t(rounded ? 'repository:manager.roundedThemeEnabled' : 'repository:manager.roundedThemeDisabled')} aria-pressed={rounded} onClick={onToggleRounded}><PanelTop size={17}/></Button></div>
     </header>}
     {hasRepositories ? <div className="repository-manager-body">
       <div className="repository-catalog">
@@ -84,7 +86,7 @@ export function RepositoryManagerPage({ recent, favorites, current, opening, the
       </div>
       {selected ? <RepositoryDetailsPanel key={repositoryCacheKey(selected.path)} item={selected} opening={opening} onOpen={(path) => selected.current ? onBack() : onOpen(path)} onVscode={(path) => void openVscode(path)} onToggleFavorite={onToggleFavorite}/> : <div className="repository-manager-empty"><span><FolderGit2 size={38}/></span><h2>{query ? t('repository:manager.noMatch') : t('repository:manager.emptyTitle')}</h2><p>{query ? t('repository:manager.changeSearch') : t('repository:manager.emptyHint')}</p>{!query && <Button onClick={() => void browse()} disabled={adding}><FolderOpen size={15}/>{t('repository:manager.addFirst')}</Button>}</div>}
       </div> : <div className="repository-manager-welcome">
-      <Button className="repository-welcome-theme" variant="icon" tooltip={t('repository:manager.toggleTheme')} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button>
+      <div className="repository-welcome-theme-actions"><Button variant="icon" tooltip={t('repository:manager.toggleTheme')} aria-label={t('repository:manager.toggleTheme')} onClick={onToggleTheme}>{theme === 'system' ? <Monitor size={17}/> : theme === 'dark' ? <Moon size={17}/> : <Sun size={17}/>}</Button><Button variant="icon" active={rounded} tooltip={t(rounded ? 'repository:manager.roundedThemeEnabled' : 'repository:manager.roundedThemeDisabled')} aria-label={t(rounded ? 'repository:manager.roundedThemeEnabled' : 'repository:manager.roundedThemeDisabled')} aria-pressed={rounded} onClick={onToggleRounded}><PanelTop size={17}/></Button></div>
       <div className="repository-welcome-hero">
         <div className="repository-welcome-brand"><img src="/app-icon.svg" alt="Branchline"/><span>BRANCHLINE</span></div>
         <p className="repository-welcome-kicker">{t('repository:welcome.ready')}</p>

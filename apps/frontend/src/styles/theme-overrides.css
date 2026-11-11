@@ -66,3 +66,131 @@
 .theme-light *:not(.diff-viewer):not(.diff-viewer *) { scrollbar-color: var(--scroll-thumb) var(--scroll-track); }
 .theme-light *::-webkit-scrollbar-thumb { background: var(--scroll-thumb); background-clip: content-box; }
 .theme-light *::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
+
+/* One continuous workbench below a titlebar that blends into the window. */
+.theme-rounded.app-shell { background: var(--rounded-app-background); }
+.theme-rounded.workbench-active::before { content: ''; position: absolute; inset: 40px var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); background: var(--rounded-surface); pointer-events: none; }
+.theme-rounded.theme-light { --muted: #4b5563; --faint: #667085; --line: #d8dee7; --line-soft: #e7ebf0; --text-secondary: #384150; --text-tertiary: #596575; }
+.theme-rounded:not(.theme-light) { --muted: #c7ced8; --faint: #a8b2c0; --line: #3a424d; --line-soft: #303741; --text-secondary: #d1d7e0; --text-tertiary: #a8b2c0; }
+
+.theme-rounded .app-titlebar { inset: 0; width: auto; height: 40px; border: 0; border-radius: 0; box-shadow: none; background: var(--rounded-app-background); }
+.theme-rounded .sidebar-shell { box-sizing: border-box; padding: 0 0 var(--rounded-surface-gap) var(--rounded-surface-gap); }
+.theme-rounded .sidebar-shell.collapsed { padding: 0; }
+.theme-rounded .sidebar { min-width: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.theme-rounded .workspace { position: relative; margin: 0 var(--rounded-surface-gap) var(--rounded-surface-gap) 0; overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.theme-rounded .repository-manager-heading { background: var(--rounded-repository-catalog); }
+.theme-rounded .workspace.empty-repository { margin: 0 var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); }
+.theme-rounded .topbar,
+.theme-rounded .content-tabs,
+.theme-rounded .statusbar { border-color: transparent; box-shadow: none; background: transparent; }
+.theme-rounded .topbar { position: relative; margin: 0 var(--rounded-surface-gap); border: 0; border-bottom: 1px solid var(--rounded-divider); border-radius: 0; }
+.theme-rounded .content-tabs { border-bottom: 1px solid var(--rounded-divider); }
+.theme-rounded .workspace-grid { background: transparent; }
+.theme-rounded .history-pane,
+.theme-rounded .workspace-page,
+.theme-rounded .inspector-pane { border-radius: 0; background: transparent; box-shadow: none; }
+.theme-rounded .history-pane { overflow: hidden; }
+.theme-rounded .workspace-page { margin: 0; }
+.theme-rounded .inspector-pane { border: 0; }
+.theme-rounded .panel-resizer::before { top: 0; bottom: 0; left: 50%; transform: translateX(-50%); background: var(--rounded-divider); box-shadow: none; }
+.theme-rounded .panel-resizer::after { left: 50%; width: 7px; transform: translateX(-50%); }
+.theme-rounded .panel-resizer:hover::before,
+.theme-rounded .panel-resizer.active::before,
+.theme-rounded .panel-resizer:focus-visible::before { background: var(--accent); box-shadow: none; }
+.theme-rounded .inspector-vertical-resizer::before { top: 50%; bottom: auto; left: 0; transform: translateY(-50%); }
+.theme-rounded .inspector-vertical-resizer::after { top: 50%; bottom: auto; left: 0; width: 100%; height: 7px; transform: translateY(-50%); }
+.theme-rounded .sidebar-resizer { width: 100%; height: calc(100% - var(--rounded-surface-gap)); align-self: start; }
+.theme-rounded.sidebar-collapsed .workspace { margin-left: var(--rounded-surface-gap); }
+.theme-rounded .statusbar { border-top: 1px solid var(--rounded-divider); }
+.theme-rounded .commit-columns-header { border-bottom-color: var(--rounded-divider); background: transparent; }
+.theme-rounded .commit-details,
+.theme-rounded .changed-files-panel { background: transparent; }
+.theme-rounded .nav-section { border-bottom-color: var(--rounded-divider); }
+.theme-rounded .sidebar-footer { border-top-color: var(--rounded-divider); }
+.theme-rounded .commit-text-panel { border-color: var(--line-soft); }
+.theme-rounded .changed-files-list button { border-bottom-color: var(--line-soft); }
+.theme-rounded .detail-heading h2 { font-size: 16px; line-height: 1.42; }
+.theme-rounded .identity-row { margin-top: 10px; }
+.theme-rounded .identity-row strong { font-size: 12px; }
+.theme-rounded .identity-row span { font-size: 11px; }
+
+.theme-rounded .staging-page,
+.theme-rounded .stash-page { padding: 4px 8px 8px; }
+.theme-rounded .staging-workspace,
+.theme-rounded .stash-workspace { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.theme-rounded .staging-workspace { grid-template-columns: minmax(300px, var(--staging-control-width, 430px)) 4px minmax(0, 1fr); }
+.theme-rounded .staging-workspace.preview-wide { grid-template-columns: 0 0 minmax(0, 1fr); }
+.theme-rounded .staging-control-pane { padding: 0 8px 4px 0; }
+.theme-rounded .workspace-resizer::before { background: var(--rounded-divider); }
+.theme-rounded .workspace-resizer:hover::before,
+.theme-rounded .workspace-resizer.active::before { background: var(--accent); box-shadow: none; }
+.theme-rounded .workspace-resizer-column::after { left: 50%; width: 7px; transform: translateX(-50%); }
+.theme-rounded .workspace-resizer-row::after { top: 50%; height: 7px; transform: translateY(-50%); }
+.theme-rounded .stage-section { margin-top: 4px; background: transparent; box-shadow: none; }
+.theme-rounded .stage-section-header { border-bottom-color: var(--rounded-divider); background: transparent; }
+.theme-rounded .stage-section + .stage-section { border-top: 1px solid var(--rounded-divider); }
+.theme-rounded .commit-compose { margin-top: 0; padding: 4px 0 0; gap: 6px; }
+.theme-rounded .commit-compose .commit-full-message { border-color: var(--line-soft); background: color-mix(in srgb, var(--rounded-surface) 82%, var(--bg)); }
+.theme-rounded .stash-manager { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.theme-rounded .stash-control-pane { width: min(900px, 100%); padding: 8px 12px 8px 8px; }
+.theme-rounded .stash-graph-handoff { display: none; }
+.theme-rounded .stash-compose { border-color: transparent; border-radius: var(--rounded-control-radius); background: var(--surface-control); }
+.theme-rounded .stash-list-heading { border-bottom-color: var(--rounded-divider); }
+.theme-rounded .stash-list article { min-height: 52px; padding: 4px 7px; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(42px, auto); align-items: center; gap: 10px; border-bottom-color: var(--rounded-divider); }
+.theme-rounded .stash-select { grid-column: 1; grid-row: 1; }
+.theme-rounded .stash-actions { grid-column: 2; grid-row: 1; }
+
+.theme-rounded .workspace-page-heading h2,
+.theme-rounded .workspace-empty strong,
+.theme-rounded .workspace-hint strong,
+.theme-rounded .repository-manager-title h1,
+.theme-rounded .repository-manager-empty h2 { color: var(--rounded-text-primary); }
+.theme-rounded .workspace-page-heading p,
+.theme-rounded .workspace-empty span,
+.theme-rounded .workspace-hint span,
+.theme-rounded .repository-manager-title p,
+.theme-rounded .repository-manager-empty p { color: var(--rounded-text-secondary); }
+
+.theme-rounded .button-secondary,
+.theme-rounded .button-primary,
+.theme-rounded .button-danger,
+.theme-rounded .compact-select-trigger,
+.theme-rounded .filter-button,
+.theme-rounded .repo-switcher { border-radius: var(--rounded-control-radius); }
+.theme-rounded .context-menu,
+.theme-rounded .repo-switcher-menu,
+.theme-rounded .compact-select-popover,
+.theme-rounded .notification-popover,
+.theme-rounded .auto-fetch-popover,
+.theme-rounded .rebase-dialog,
+.theme-rounded .template-editor-dialog,
+.theme-rounded .git-config-dialog,
+.theme-rounded .branch-dialog { border-color: var(--rounded-border); border-radius: var(--rounded-panel-radius); box-shadow: var(--rounded-shadow); }
+.theme-rounded .context-menu { box-shadow: var(--rounded-menu-shadow); }
+.theme-rounded .repository-manager-body,
+.theme-rounded .repository-manager-welcome { border-radius: var(--rounded-panel-radius); }
+.theme-rounded .repository-manager { background: var(--rounded-app-background); }
+.theme-rounded .repository-manager-body { background: var(--rounded-repository-frame); }
+.theme-rounded .repository-catalog { background: var(--rounded-repository-catalog); }
+.theme-rounded .repository-details { background: var(--rounded-repository-catalog); }
+.theme-rounded .repository-catalog-group h2 { color: var(--rounded-text-primary); font-size: 12px; }
+.theme-rounded .repository-catalog-select strong { color: var(--rounded-text-primary); font-size: 14px; }
+.theme-rounded .repository-catalog-select strong small { font-size: 10px; }
+.theme-rounded .repository-catalog-path { color: var(--rounded-text-secondary); font-size: 12px; }
+.theme-rounded .repository-catalog-meta { color: var(--rounded-text-secondary); font-size: 12px; }
+.theme-rounded .repository-catalog,
+.theme-rounded .repository-details,
+.theme-rounded .repository-start-actions,
+.theme-rounded .repository-start-action,
+.theme-rounded .repository-module-card,
+.theme-rounded .repository-remote-card { border-color: var(--rounded-border); }
+.theme-rounded .comparison-result,
+.theme-rounded .merge-list,
+.theme-rounded .structure-list,
+.theme-rounded .history-drawer,
+.theme-rounded .command-log-panel { border-color: var(--rounded-border); border-radius: var(--rounded-panel-radius); box-shadow: var(--rounded-shadow); }
+.theme-rounded .nav-row.active,
+.theme-rounded .tree-row.active,
+.theme-rounded .changed-files-list button.active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent); }
+.theme-rounded .nav-row.active,
+.theme-rounded .tree-row.active { border-radius: 8px; }

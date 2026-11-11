@@ -1,17 +1,61 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { LocaleProvider } from './i18n/LocaleProvider'
 import { renderLocalized } from './test/renderLocalized'
 import App from './App'
+import { loadRepositoryStashFiles } from './repository'
+
+vi.mock('./repository', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./repository')>(),
+  loadRepositoryStashFiles: vi.fn().mockResolvedValue([{ path: 'saved-change.txt', type: 'M', add: 1, del: 0, staged: false, unstaged: false, incoming: false }]),
+}))
+
+const { repositoryFixture } = vi.hoisted(() => ({
+  repositoryFixture: {
+    path: 'C:/repo', name: 'Project 原名', branch: 'feature/原名', commits: [], files: [], branches: ['main', 'feature/search', 'bugfix/parser'], remoteBranches: [], branchTracking: {}, worktrees: [], submodules: [], tags: [], stashes: [], ahead: 0, behind: 0, submoduleCount: 0,
+  },
+}))
 
 vi.mock('./features/repository/useRepositoryWorkspace', () => ({ useRepositoryWorkspace: () => ({
-  repository: { path: 'C:/repo', name: 'Project 原名', branch: 'feature/原名', commits: [], files: [], branches: ['main', 'feature/search', 'bugfix/parser'], remoteBranches: [], branchTracking: {}, worktrees: [], submodules: [], tags: [], stashes: [], ahead: 0, behind: 0, submoduleCount: 0 },
+  repository: repositoryFixture,
   structureRepository: null, parentRepository: null, recentRepositories: [], favoriteRepositories: [],
   openingRepository: false, restoringRepository: false, fetching: false, repositoryNotice: null,
   applySnapshot: vi.fn(), setRepositoryNotice: vi.fn(), autoFetchEnabled: false,
 }) }))
-afterEach(() => { cleanup(); localStorage.clear() })
+beforeEach(() => {
+  Object.assign(repositoryFixture, {
+    path: 'C:/repo', name: 'Project 原名', branch: 'feature/原名', commits: [], files: [], branches: ['main', 'feature/search', 'bugfix/parser'], remoteBranches: [], branchTracking: {}, worktrees: [], submodules: [], tags: [], stashes: [], ahead: 0, behind: 0, submoduleCount: 0,
+  })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: () => undefined })
+})
+afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
+
+it('uses the rounded workbench default instead of the legacy preference', async () => {
+  localStorage.setItem('branchline.rounded.v1', 'false')
+  await renderLocalized(<LocaleProvider><App/></LocaleProvider>, 'en-US')
+
+  expect(document.querySelector('.app-shell')?.classList.contains('theme-rounded')).toBe(true)
+})
+
+it('opens an older stash in the commit graph with its details visible', async () => {
+  Object.assign(repositoryFixture, {
+    commits: [{ id: 'oldstash', fullHash: 'old-stash-hash', title: 'older saved work', message: 'older saved work', author: 'Me', committer: 'Me', authorTime: '2025-01-01', commitTime: '2025-01-01', parents: ['base-hash'], branches: ['stash@{2}'], status: 'stash', files: 0, additions: 0, deletions: 0 }],
+    stashes: [{ reference: 'stash@{2}', hash: 'old-stash-hash', message: 'older saved work', author: 'Me', time: '2025-01-01' }],
+  })
+  await renderLocalized(<LocaleProvider><App/></LocaleProvider>, 'en-US')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Stashes' }))
+  fireEvent.click(screen.getByRole('button', { name: 'View in commit graph' }))
+
+  expect(screen.getByRole('button', { name: /older saved work/ }).classList.contains('selected')).toBe(true)
+  expect(document.querySelector('.inspector-pane')).not.toBeNull()
+  expect(document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')).toBe(false)
+  expect(document.querySelector('.stash-page')).toBeNull()
+  await waitFor(() => expect(document.querySelector('.changed-files-list')?.textContent).toContain('saved-change.txt'))
+  expect(loadRepositoryStashFiles).toHaveBeenCalledWith('C:/repo', 'stash@{2}')
+})
 
 it('places repository switching and the single manager entry in the titlebar', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })

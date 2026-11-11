@@ -103,7 +103,7 @@ describe('repository localization', () => {
     vi.mocked(loadRepositoryDetails).mockResolvedValue({ ...snapshot, remoteBranches: [], remotes: [] } as unknown as RepositoryDetails)
     const openedAt = Date.UTC(2026, 10, 3, 12)
     function SwitchLocale() { const { setPreference } = useLocale(); return <button onClick={() => setPreference('zh-CN')}>switch-locale</button> }
-    await renderLocalized(<LocaleProvider><SwitchLocale/><RepositoryManagerPage recent={[{ name: 'project', path: snapshot.path, branch: 'main', openedAt }]} favorites={[]} current={null} opening={false} theme="system" resolvedTheme="dark" onToggleTheme={vi.fn()} onBack={vi.fn()} onOpen={vi.fn()} onRegister={vi.fn()} onToggleFavorite={vi.fn()} onForget={vi.fn()} onNotice={vi.fn()}/></LocaleProvider>, 'en-US')
+    await renderLocalized(<LocaleProvider><SwitchLocale/><RepositoryManagerPage recent={[{ name: 'project', path: snapshot.path, branch: 'main', openedAt }]} favorites={[]} current={null} opening={false} theme="system" resolvedTheme="dark" rounded={false} onToggleRounded={vi.fn()} onToggleTheme={vi.fn()} onBack={vi.fn()} onOpen={vi.fn()} onRegister={vi.fn()} onToggleFavorite={vi.fn()} onForget={vi.fn()} onNotice={vi.fn()}/></LocaleProvider>, 'en-US')
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
     fireEvent.change(screen.getByRole('textbox', { name: 'Search repositories' }), { target: { value: 'proj' } })
     const before = document.querySelector('time')

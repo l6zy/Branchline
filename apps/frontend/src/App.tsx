@@ -46,7 +46,7 @@ import { formatLocalDateTime } from './dateTime'
 import { isAutoPullBranchSettings, toggleAutoPullBranch as toggleConfiguredAutoPullBranch } from './features/repository/branchSwitch'
 import { useAutoFastForward } from './features/repository/useAutoFastForward'
 import { isBooleanRecord, usePersistentState } from './persistentState'
-import { isThemePreference, nextThemePreference, resolveTheme, type ThemePreference } from './themePreference'
+import { isRoundedPreference, isThemePreference, nextRoundedPreference, nextThemePreference, resolveTheme, type ThemePreference } from './themePreference'
 import { DEFAULT_HISTORY_COLUMN_WIDTHS, DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryColumnWidths, isHistoryVisibleColumns } from './features/history/historyColumns'
 import { committerInitials, committerName, isHistoryCommitVisibleOnSelectedBranches, matchesCommitterFilter, reachableHistoryCommitIds, toggleFilterValue, unloadedHistoryBranches } from './features/history/historyFilters'
 import { acquireOperationLock, releaseOperationLock } from './features/operation/operationLock'
@@ -88,6 +88,7 @@ import {
   Monitor,
   Minus,
   PanelRightOpen,
+  PanelTop,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -335,7 +336,7 @@ function GraphLine({ commit, row, laneCount, graphWidth }: { commit: Commit; row
   const isMerge = !isStash && !isWorking && (row.parentCount > 1 || commit.status === 'merge')
   const title = isWorking ? t('history:app.graph.working') : isStash ? t('history:app.graph.stash', { "id": commit.id }) : isMerge ? t('history:app.graph.merge', { "id": commit.id, "parentCount": row.parentCount }) : row.parentCount === 0 ? t('history:app.graph.endpoint', { "id": commit.id }) : t('history:app.graph.commitLane', { "id": commit.id, "lane1": row.lane + 1 })
   return <Tooltip content={title}><div className="graph-cell"  data-lane={row.lane} data-parent-count={row.parentCount}>
-    <svg className="graph-segments" width={graphWidth} height="32" viewBox={`0 0 ${graphWidth} 32`} aria-hidden="true">
+    <svg className="graph-segments" width={graphWidth} height={COMMIT_ROW_HEIGHT} viewBox={`0 0 ${graphWidth} ${COMMIT_ROW_HEIGHT}`} aria-hidden="true">
       {row.segments.map((segment) => <path key={segment.id} className={`graph-segment ${segment.kind}`} d={segment.path} stroke={segment.color}/>) }
     </svg>
     <span className={`commit-dot ${isMerge ? 'merge' : ''} ${isStash ? 'stash' : ''} ${isWorking ? 'working' : ''} ${row.parentCount === 0 ? 'terminal' : ''}`} style={{ left: x, borderColor: row.color, color: row.color, background: isMerge || isStash || isWorking ? 'transparent' : row.color }}/>
@@ -398,7 +399,7 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
   const searchMatchSet = useMemo(() => new Set(searchMatches), [searchMatches])
   const filtered = useMemo(() => visibleHistoryCommits(baseFiltered, deferredQuery, searchMode), [baseFiltered, deferredQuery, searchMode])
   const selectedVisible = useMemo(() => filtered.some((commit) => commit.id === selected), [filtered, selected])
-  const graphLayout = useMemo(() => buildCommitGraphLayout(filtered, widths.graph), [filtered, widths.graph])
+  const graphLayout = useMemo(() => buildCommitGraphLayout(filtered, widths.graph, COMMIT_ROW_HEIGHT), [filtered, widths.graph])
   const virtualRange = useMemo(() => {
     const overscan = 12
     const start = Math.max(0, Math.floor(scrollTop / COMMIT_ROW_HEIGHT) - overscan)
@@ -476,7 +477,7 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     const startX = event.clientX
     const startWidth = widths[column]
     const onMove = (moveEvent: PointerEvent) => {
-      const delta = moveEvent.clientX - startX
+      const delta = column === 'author' ? startX - moveEvent.clientX : moveEvent.clientX - startX
       const minimum = column === 'graph' ? 120 : column === 'author' ? 128 : column === 'time' ? 88 : column === 'branch' ? 90 : 68
       setWidths((current) => ({ ...current, [column]: Math.max(minimum, startWidth + delta) }))
     }
@@ -498,10 +499,10 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     <div ref={columnsHeaderRef} className="commit-columns-header" style={{ gridTemplateColumns: template }}>
       <div className="column-label">{t('history:app.columns.references')}{resizer('branch')}</div>
       <div className="column-label">{t('history:app.columns.graph')}{resizer('graph')}</div>
-      <div className="column-label message-label"><span className="column-title">{t('history:app.columns.message')}</span><div className="column-actions">{committerFilterButton}<Button variant="icon" onClick={() => { setColumnMenuOpen((value) => !value); setCommitterMenuOpen(false) }} tooltip={t('history:app.columns.configure')} aria-label={t('history:app.columns.configure')}><Settings2 size={14}/></Button></div>{columnMenuOpen && <div className="column-config-menu"><strong>{t('history:app.columns.show')}</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>{t('history:app.columns.time')}</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label><label><input type="checkbox" checked={committerColumnVisible} onChange={(event) => setVisibleColumns((value) => ({ ...value, committer: event.target.checked }))}/>{t('history:app.columns.committer')}</label></div>}{committerFilterMenu}</div>
+      <div className="column-label message-label"><span className="column-title">{t('history:app.columns.message')}</span><div className="column-actions">{committerFilterButton}<Button variant="icon" onClick={() => { setColumnMenuOpen((value) => !value); setCommitterMenuOpen(false) }} tooltip={t('history:app.columns.configure')} aria-label={t('history:app.columns.configure')}><Settings2 size={14}/></Button></div>{columnMenuOpen && <div className="column-config-menu"><strong>{t('history:app.columns.show')}</strong><label><input type="checkbox" checked={visibleColumns.time} onChange={(event) => setVisibleColumns((value) => ({ ...value, time: event.target.checked }))}/>{t('history:app.columns.time')}</label><label><input type="checkbox" checked={visibleColumns.hash} onChange={(event) => setVisibleColumns((value) => ({ ...value, hash: event.target.checked }))}/>Hash</label><label><input type="checkbox" checked={committerColumnVisible} onChange={(event) => setVisibleColumns((value) => ({ ...value, committer: event.target.checked }))}/>{t('history:app.columns.committer')}</label></div>}{committerFilterMenu}{committerColumnVisible && resizer('author')}</div>
       {visibleColumns.time && <div className="column-label">{t('history:app.columns.timeResizable')}{resizer('time')}</div>}
       {visibleColumns.hash && <div className="column-label">Hash{resizer('hash')}</div>}
-      {committerColumnVisible && <div className="column-label author-label"><span className="column-title">{t('history:app.columns.committer')}</span>{resizer('author')}</div>}
+      {committerColumnVisible && <div className="column-label author-label"><span className="column-title">{t('history:app.columns.committer')}</span></div>}
     </div>
     <div className="commit-list" ref={commitListRef} onScroll={(event) => {
       pendingScrollTop.current = event.currentTarget.scrollTop
@@ -722,6 +723,7 @@ export default function App() {
   const [diffFile, setDiffFile] = useState<number | null>(null)
   const [inspectorCollapsed, setInspectorCollapsed] = usePersistentState('branchline.inspectorCollapsed.v2', true, (value): value is boolean => typeof value === 'boolean')
   const [theme, setTheme] = usePersistentState<ThemePreference>('branchline.theme.v1', 'light', isThemePreference)
+  const [rounded, setRounded] = usePersistentState('branchline.rounded.v2', true, isRoundedPreference)
   const [systemDark, setSystemDark] = useState(() => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
   const resolvedTheme = resolveTheme(theme, systemDark)
   const [windowMaximized, setWindowMaximized] = useState(false)
@@ -1290,6 +1292,15 @@ export default function App() {
     setQuery('')
     setBranchFilter([])
     setTimeFilter('all')
+    setRepositoryManagerOpen(false)
+    setInspectorCollapsed(false)
+    setDiffFile(null)
+    setTreeFileView(null)
+    setWideDiff(false)
+    setHistoryTarget(null)
+    setHistoryConflictPath(null)
+    setOperationPath(null)
+    setHistoryRevealSignal((value) => value + 1)
     setSelected(stashCommit.id)
     setWorkspaceView('history')
   }
@@ -1511,7 +1522,7 @@ export default function App() {
   const closeWindow = () => { try { void getCurrentWindow().close().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const themeTitle = theme === 'system' ? t('history:app.theme.system', { "resolvedThemedark": t(resolvedTheme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') }) : t('history:app.theme.selected', { "themedark": t(theme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') })
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun
-  return <main className={`app-shell ${repository && !repositoryManagerOpen ? 'workbench-active' : ''} ${resolvedTheme === 'light' ? 'theme-light' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`} style={repository && !repositoryManagerOpen ? { gridTemplateColumns: sidebarCollapsed ? '0px 0px minmax(0, 1fr)' : `${sidebarWidth}px 1px minmax(0, 1fr)` } : undefined}>
+  return <main className={`app-shell ${repository && !repositoryManagerOpen ? 'workbench-active' : ''} ${repository && !repositoryManagerOpen && sidebarCollapsed ? 'sidebar-collapsed' : ''} ${resolvedTheme === 'light' ? 'theme-light' : ''} ${rounded ? 'theme-rounded' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`} style={repository && !repositoryManagerOpen ? { gridTemplateColumns: sidebarCollapsed ? '0px 0px minmax(0, 1fr)' : `${sidebarWidth}px ${rounded ? 4 : 1}px minmax(0, 1fr)` } : undefined}>
     <div className="app-titlebar" data-tauri-drag-region>
       <div className="titlebar-brand" data-tauri-drag-region><AppMark/><span>Branchline</span></div>
       {repository && !repositoryManagerOpen && <div className="titlebar-repository-controls">
@@ -1543,6 +1554,7 @@ export default function App() {
             {globalMenu && <ContextMenu x={globalMenu.x} y={globalMenu.y} onClose={() => setGlobalMenu(null)}>
               <button onClick={() => setShortcutOpen(true)}><Command size={14}/><span>{t('history:app.shortcuts.view')}</span></button>
               <button onClick={() => setTheme(nextThemePreference)}><ThemeIcon size={14}/><span>{t('history:app.shortcuts.theme')}</span></button>
+              <button onClick={() => setRounded(nextRoundedPreference)} aria-pressed={rounded}><PanelTop size={14}/><span>{t(rounded ? 'repository:manager.roundedThemeEnabled' : 'repository:manager.roundedThemeDisabled')}</span></button>
               <button onClick={() => setNotificationOpen(true)}><Bell size={14}/><span>{t('history:app.notifications.view')}</span></button>
             </ContextMenu>}
             {notificationOpen && <div ref={notificationPopoverRef} className="notification-popover">
@@ -1559,7 +1571,7 @@ export default function App() {
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>{t('history:app.filters.branchHeading')}</span></div><div className="context-menu-options"><button className={branchFilter.length === 0 ? 'selected-option' : ''} onClick={() => { setBranchFilter([]); setFilterMenu(null) }}><Check size={14}/><span>{t('history:app.filters.allBranches')}</span></button>{availableBranches.map((branch) => <label className="history-filter-option" key={branch}><input type="checkbox" checked={branchFilter.includes(branch)} onChange={() => setBranchFilter((values) => toggleFilterValue(values, branch))}/><GitBranch size={14}/><span>{branch}</span></label>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>{t('history:app.filters.timeHeading')}</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
-      <div className={`workspace-grid ${wideDiff && (diffFile !== null || treeFileView !== null) ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
+      <div className={`workspace-grid ${wideDiff && (diffFile !== null || treeFileView !== null) ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? rounded ? 4 : 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
         {workspaceView === 'history' && <section className="history-pane">
           <CommitList revealSignal={historyRevealSignal} key={repository.path} commits={activeCommits} selected={selected} onSelect={(id) => { setSelected(id); setInspectorCollapsed(false) }} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => { const remote = commit.branches?.find((reference) => repository.remoteBranches.includes(reference) || repository.remoteBranches.includes(reference.replace(/^refs\/remotes\//, ''))); const normalized = remote?.replace(/^refs\/remotes\//, ''); void handleMergeReference(remote ?? commit.fullHash ?? commit.id, remote ? message('history:app.references.branchNormalized', { "normalized": normalized ?? remote ?? commit.id }) : message('history:app.references.commit', { "id": commit.id })) }} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRevertCommit={(commit) => void handleRevertCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit, t, locale), mode === 'hash' ? message('history:app.notice.hashCopied', { "statusstashStash": message(commit.status === 'stash' ? 'history:app.references.stash' : 'history:app.details.commitHeading'), "id": commit.id }) : message('history:app.notice.detailsCopied', { "id": commit.status === 'stash' ? 'Stash' : message('history:app.references.commit', { id: commit.id }) }))} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
           {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} onActiveFileChange={setDiffFile} hideFileList loadRows={loadSelectedCommitDiff} loadImage={loadSelectedCommitImage} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
@@ -1630,7 +1642,7 @@ export default function App() {
       <footer className="statusbar">
         <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{(repository.operation ? operationLabel(repository.operation.kind, t) : undefined) ?? t('history:app.notifications.healthy')}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{new Intl.NumberFormat(locale).format(repository.ahead)}</span><span>↓{new Intl.NumberFormat(locale).format(repository.behind)}</span></div>
         <div ref={autoFetchRef} className="statusbar-secondary"><Tooltip content={t('history:app.sidebar.openLog')}><button className="status-command-log" onClick={() => setCommandLogOpen(true)} ><TerminalSquare size={12}/><span>{t('history:app.status.commandLog')}</span></button></Tooltip><span className="status-separator"/><Tooltip content={t('history:app.status.configure')}><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" ><TimerReset size={12}/><span>{t('history:app.status.autoFetch', { "value1": autoFetchEnabled ? t('history:app.status.everyMinutes', { count: fetchIntervalMinutes }) : t('history:app.status.disabled') })}</span></button></Tooltip><span className="status-separator"/><Box size={12}/><span>{t('history:app.notifications.submoduleCount', { "count": repository.submoduleCount })}</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label={t('history:app.status.settings')}><div className="auto-fetch-heading"><div><strong>{t('history:app.status.sync')}</strong><small>{t('history:app.status.syncHint')}</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} tooltip={t('history:app.status.close')} aria-label={t('history:app.status.close')}><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>{t('history:app.status.enableFetch')}</strong><small>{t('history:app.status.fetchHint')}</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>{t('history:app.status.fetchInterval')}</span><CompactSelect className="auto-fetch-interval-select" value={fetchIntervalMinutes} options={[1, 5, 10, 15, 30].map((minutes) => ({ value: minutes, label: t('history:app.status.minutes', { "count": minutes }) }))} onChange={setFetchIntervalMinutes} ariaLabel={t('history:app.status.selectFetch')} disabled={!autoFetchEnabled}/></div><div className="local-polling-settings"><label className="auto-fetch-toggle"><span><strong>{t('history:app.status.polling')}</strong><small>{t('history:app.status.pollHint')}</small></span><input type="checkbox" checked={localPollingEnabled} onChange={(event) => setLocalPollingEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>{t('history:app.status.pollInterval')}</span><CompactSelect className="auto-fetch-interval-select" value={localPollingIntervalSeconds} options={[2, 5, 10, 30].map((seconds) => ({ value: seconds, label: t('history:app.status.seconds', { "count": seconds }) }))} onChange={setLocalPollingIntervalSeconds} ariaLabel={t('history:app.status.selectPolling')} disabled={!localPollingEnabled}/></div></div><div className="auto-fetch-meta"><span>{t('history:app.status.lastFetch')}</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : t('history:app.status.neverFetched')}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? t('history:app.sync.fetching') : t('history:app.shortcuts.fetch')}</Button></div>}</div>
-      </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} resolvedTheme={resolvedTheme} onToggleTheme={() => setTheme(nextThemePreference)} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
+      </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} resolvedTheme={resolvedTheme} rounded={rounded} onToggleRounded={() => setRounded(nextRoundedPreference)} onToggleTheme={() => setTheme(nextThemePreference)} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
     </div>
     {openingRepository && repository && <div className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>{t('history:app.progress.loadingRepo')}</strong><span>{t('history:app.progress.loadingRepoDetail')}</span></div></div>}
     <div className={`operation-indicator ${activeOperation ? 'visible' : ''} ${activeOperation?.key === 'cherry-pick' ? 'cherry-pick' : ''}`} role="status" aria-live="polite" aria-hidden={!activeOperation}>{activeOperation && <><RefreshCw className="spin" size={17}/><div><strong>{renderMessage(activeOperation.label, t)}</strong><span>{renderMessage(activeOperation.detail, t)}</span></div></>}</div>

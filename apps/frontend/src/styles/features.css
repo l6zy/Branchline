@@ -366,11 +366,11 @@
 
 .diff-omitted-action { flex: 1 1 0; width: var(--diff-line-number-width); min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--muted); background: color-mix(in srgb, var(--code-surface) 72%, var(--code-hunk)); font: inherit; cursor: pointer; }
 
-.diff-omitted-action svg { width: 12px; height: 12px; }
+.diff-omitted-action svg { width: 20px; height: 20px; }
 
-.diff-omitted.two-actions .diff-omitted-action svg { width: 15px; height: 15px; }
+.diff-omitted.two-actions .diff-omitted-action svg { width: 20px; height: 20px; }
 
-.diff-omitted.one-action .diff-omitted-action svg { width: 12px; height: 12px; }
+.diff-omitted.one-action .diff-omitted-action svg { width: 20px; height: 20px; }
 
 .diff-omitted-action:hover, .diff-omitted-action:focus-visible { color: var(--accent-text); border-color: var(--accent); background: var(--accent-dim); outline: none; }
 

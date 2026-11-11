@@ -82,6 +82,19 @@
   --operation-hover: #ffe58f;
   --warning-surface: #2b2111;
   --success-surface: #162312;
+  --rounded-panel-radius: 14px;
+  --rounded-control-radius: 9px;
+  --rounded-surface-gap: 4px;
+  --rounded-border: rgba(255, 255, 255, .075);
+  --rounded-shadow: 0 2px 8px rgba(0, 0, 0, .12);
+  --rounded-menu-shadow: 0 12px 32px rgba(0, 0, 0, .3);
+  --rounded-text-primary: #f5f7fa;
+  --rounded-text-secondary: #c4cbd4;
+  --rounded-app-background: #141414;
+  --rounded-surface: #1f1f1f;
+  --rounded-repository-frame: #141414;
+  --rounded-repository-catalog: #1f1f1f;
+  --rounded-divider: rgba(255, 255, 255, .11);
 }
 
 .theme-light {
@@ -157,4 +170,14 @@
   --operation-hover: #874d00;
   --warning-surface: #fffbe6;
   --success-surface: #f6ffed;
+  --rounded-border: rgba(20, 28, 38, .09);
+  --rounded-shadow: 0 2px 8px rgba(27, 39, 54, .035);
+  --rounded-menu-shadow: 0 12px 32px rgba(27, 39, 54, .18);
+  --rounded-text-primary: #171a1f;
+  --rounded-text-secondary: #424a55;
+  --rounded-app-background: #eef1f4;
+  --rounded-surface: #ffffff;
+  --rounded-repository-frame: #e6ebf1;
+  --rounded-repository-catalog: #ffffff;
+  --rounded-divider: rgba(30, 42, 56, .12);
 }

@@ -628,29 +628,11 @@ fn assign_lanes(commits: &mut [RepositoryCommit]) {
 const COMMIT_GRAPH_LIMIT: usize = 2_000;
 const MAX_COMMIT_GRAPH_LIMIT: usize = 20_000;
 
-fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
-    let max_count = format!(
-        "--max-count={}",
-        limit.clamp(COMMIT_GRAPH_LIMIT, MAX_COMMIT_GRAPH_LIMIT)
-    );
-    let output = optional_git_output(
-        path,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "log",
-            "--all",
-            // Keep parents below their children while otherwise preferring
-            // commit-date order. Unlike --topo-order, this does not move an
-            // older side-branch commit ahead of a newer independent merge.
-            "--date-order",
-            &max_count,
-            "--date=iso-strict",
-            "--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%aI%x1f%cI%x1f%D%x1f%B",
-        ],
-    );
+const COMMIT_LOG_FORMAT: &str =
+    "--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%aI%x1f%cI%x1f%D%x1f%B";
 
-    let mut commits: Vec<RepositoryCommit> = output
+fn parse_commit_records(output: &str, stashes: &[RepositoryStash]) -> Vec<RepositoryCommit> {
+    output
         .split('\x1e')
         .filter_map(|record| {
             let record = record.trim_matches(&['\r', '\n'][..]);
@@ -668,8 +650,11 @@ fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
                 .collect();
             let message = fields[9].trim().to_string();
             let title = message.lines().next().unwrap_or_default().to_string();
-            let branches = decorations(fields[8]);
-            let is_stash = branches.iter().any(|reference| reference == "refs/stash");
+            let mut branches = decorations(fields[8]);
+            let stash = stashes.iter().find(|stash| stash.hash == full_hash);
+            if let Some(stash) = stash {
+                branches.push(stash.reference.clone());
+            }
             Some(RepositoryCommit {
                 id: full_hash.chars().take(7).collect(),
                 full_hash,
@@ -688,7 +673,7 @@ fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
                 author_time: fields[6].to_string(),
                 commit_time: fields[7].to_string(),
                 branches,
-                status: if is_stash {
+                status: if stash.is_some() {
                     Some("stash".into())
                 } else if parents.len() > 1 {
                     Some("merge".into())
@@ -700,7 +685,63 @@ fn parse_commits(path: &Path, limit: usize) -> Vec<RepositoryCommit> {
                 deletions: 0,
             })
         })
+        .collect()
+}
+
+fn parse_commits(path: &Path, limit: usize, stashes: &[RepositoryStash]) -> Vec<RepositoryCommit> {
+    let max_count = format!(
+        "--max-count={}",
+        limit.clamp(COMMIT_GRAPH_LIMIT, MAX_COMMIT_GRAPH_LIMIT)
+    );
+    let output = optional_git_output(
+        path,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "--all",
+            // Keep parents below their children while otherwise preferring
+            // commit-date order. Unlike --topo-order, this does not move an
+            // older side-branch commit ahead of a newer independent merge.
+            "--date-order",
+            &max_count,
+            "--date=iso-strict",
+            COMMIT_LOG_FORMAT,
+        ],
+    );
+
+    let mut commits = parse_commit_records(&output, stashes);
+    // `--all` only reaches the current refs/stash tip. Older entries live in
+    // its reflog, and even the tip can fall beyond the normal history limit.
+    let known: HashSet<_> = commits
+        .iter()
+        .map(|commit| commit.full_hash.as_str())
         .collect();
+    let missing: Vec<_> = stashes
+        .iter()
+        .filter(|stash| !known.contains(stash.hash.as_str()))
+        .collect();
+    for batch in missing.chunks(128) {
+        let mut args = vec![
+            "log",
+            "--no-walk=sorted",
+            "--date=iso-strict",
+            COMMIT_LOG_FORMAT,
+        ];
+        args.extend(batch.iter().map(|stash| stash.hash.as_str()));
+        for commit in parse_commit_records(&optional_git_output(path, &args), stashes) {
+            let position = commits
+                .iter()
+                .position(|candidate| {
+                    commit
+                        .parents
+                        .iter()
+                        .any(|parent| parent == &candidate.full_hash)
+                })
+                .unwrap_or(commits.len());
+            commits.insert(position, commit);
+        }
+    }
     let stash_helper_parents: HashSet<String> = commits
         .iter()
         .filter(|commit| commit.status.as_deref() == Some("stash"))
@@ -2071,7 +2112,8 @@ pub fn read_repository_with_commit_limit(
         .unwrap_or(&root_text)
         .to_string();
 
-    let (metadata, commits, files, structure, refs, stashes, commit_template) =
+    let stashes = parse_stashes(root_path);
+    let (metadata, commits, files, structure, refs, commit_template) =
         std::thread::scope(|scope| {
             let metadata = scope.spawn(|| {
                 let mut branch =
@@ -2125,7 +2167,7 @@ pub fn read_repository_with_commit_limit(
                 let superproject_path = superproject_working_tree(root_path);
                 (branch, remote, ahead, behind, superproject_path)
             });
-            let commits = scope.spawn(|| parse_commits(root_path, commit_limit));
+            let commits = scope.spawn(|| parse_commits(root_path, commit_limit, &stashes));
             let files = scope.spawn(|| {
                 let incoming = incoming_changed_paths(root_path);
                 let mut files = parse_changed_files(root_path);
@@ -2144,7 +2186,6 @@ pub fn read_repository_with_commit_limit(
                     parse_tags(root_path),
                 )
             });
-            let stashes = scope.spawn(|| parse_stashes(root_path));
             let commit_template = scope.spawn(|| parse_commit_template(root_path));
             (
                 metadata.join().expect("repository metadata task panicked"),
@@ -2154,7 +2195,6 @@ pub fn read_repository_with_commit_limit(
                     .join()
                     .expect("repository structure task panicked"),
                 refs.join().expect("repository refs task panicked"),
-                stashes.join().expect("stash loading task panicked"),
                 commit_template
                     .join()
                     .expect("commit template task panicked"),
@@ -5715,8 +5755,11 @@ mod tests {
             .expect("create cherry conflict branch");
         fs::write(repository.0.join("README.md"), "feature version\n")
             .expect("write feature version");
-        git_output(&repository.0, &["commit", "-am", "feature conflict", "-m", "picked body"])
-            .expect("commit feature conflict");
+        git_output(
+            &repository.0,
+            &["commit", "-am", "feature conflict", "-m", "picked body"],
+        )
+        .expect("commit feature conflict");
         let cherry_hash = git_output(&repository.0, &["rev-parse", "HEAD"])
             .expect("read conflict cherry hash")
             .trim()
@@ -5732,7 +5775,10 @@ mod tests {
         assert!(snapshot.files.iter().any(|file| file.path == "README.md"));
         let operation = snapshot.operation.expect("cherry-pick operation");
         assert_eq!(operation.kind, "cherry-pick");
-        assert_eq!(operation.message.as_deref(), Some("feature conflict\n\npicked body"));
+        assert_eq!(
+            operation.message.as_deref(),
+            Some("feature conflict\n\npicked body")
+        );
         assert_eq!(operation.conflicts, vec!["README.md"]);
         abort_repository_operation(&path).expect("abort cherry-pick conflict");
     }
@@ -6282,6 +6328,66 @@ mod tests {
         let stash_files = load_stash_files(&path, "stash@{0}").expect("read filtered stash files");
         assert!(stash_files.iter().any(|file| file.path == "README.md"));
         assert!(!stash_files.iter().any(|file| file.path == "vendor/module"));
+    }
+
+    #[test]
+    fn includes_every_saved_stash_in_the_graph_and_hides_its_helper_commits() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        for index in 0..3 {
+            fs::write(
+                repository.0.join("README.md"),
+                format!("stash change {index}\n"),
+            )
+            .expect("write tracked change");
+            fs::write(
+                repository.0.join("untracked.txt"),
+                format!("untracked {index}\n"),
+            )
+            .expect("write untracked change");
+            git_output(
+                &repository.0,
+                &["stash", "push", "-u", "-m", &format!("saved {index}")],
+            )
+            .expect("save stash");
+        }
+        let snapshot = read_repository(&path).expect("load all stash nodes");
+        assert_eq!(snapshot.stashes.len(), 3);
+        for stash in &snapshot.stashes {
+            let position = snapshot
+                .commits
+                .iter()
+                .position(|commit| commit.full_hash == stash.hash)
+                .expect("every stash, including reflog-only entries, has a graph node");
+            let commit = &snapshot.commits[position];
+            assert_eq!(commit.status.as_deref(), Some("stash"));
+            assert!(commit
+                .branches
+                .iter()
+                .any(|reference| reference == &stash.reference || reference == "refs/stash"));
+            assert_eq!(commit.parents.len(), 3);
+            let parent_position = snapshot
+                .commits
+                .iter()
+                .position(|parent| parent.full_hash == commit.parents[0])
+                .expect("stash base remains visible");
+            assert!(position < parent_position, "stash must precede its base");
+            for helper in commit.parents.iter().skip(1) {
+                assert!(!snapshot
+                    .commits
+                    .iter()
+                    .any(|candidate| &candidate.full_hash == helper));
+            }
+            let files = load_stash_files(&path, &stash.reference).expect("inspect older stash");
+            assert!(files.iter().any(|file| file.path == "README.md"));
+            assert!(files.iter().any(|file| file.path == "untracked.txt"));
+        }
+        let unique: HashSet<_> = snapshot
+            .commits
+            .iter()
+            .map(|commit| &commit.full_hash)
+            .collect();
+        assert_eq!(unique.len(), snapshot.commits.len());
     }
 
     #[test]

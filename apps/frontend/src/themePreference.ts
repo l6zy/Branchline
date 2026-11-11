@@ -1,5 +1,6 @@
 export type ThemePreference = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
+export type RoundedPreference = boolean
 
 export function isThemePreference(value: unknown): value is ThemePreference {
   return value === 'light' || value === 'dark' || value === 'system'
@@ -11,4 +12,12 @@ export function nextThemePreference(value: ThemePreference): ThemePreference {
 
 export function resolveTheme(preference: ThemePreference, systemDark: boolean): ResolvedTheme {
   return preference === 'system' ? systemDark ? 'dark' : 'light' : preference
+}
+
+export function isRoundedPreference(value: unknown): value is RoundedPreference {
+  return typeof value === 'boolean'
+}
+
+export function nextRoundedPreference(value: RoundedPreference): RoundedPreference {
+  return !value
 }

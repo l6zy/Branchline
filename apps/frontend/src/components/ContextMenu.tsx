@@ -53,8 +53,12 @@ export function ContextMenu({ x, y, onClose, children }: ContextMenuProps) {
     setClosing(true)
     closeTimer.current = window.setTimeout(() => {
       activating.current = true
-      button.click()
-      activating.current = false
+      try {
+        button.click()
+      } finally {
+        activating.current = false
+        onClose()
+      }
     }, 120)
   }
   const reopenAtPointer = (event: MouseEvent<HTMLDivElement>) => {

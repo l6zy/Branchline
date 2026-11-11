@@ -7,7 +7,7 @@
 .repository-manager-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .repository-manager-body { flex: 1; min-height: 0; display: grid; grid-template-columns: clamp(320px, 34%, 400px) minmax(0, 1fr); }
 .repository-manager-welcome { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 390px) minmax(360px, 560px); align-content: center; justify-content: center; align-items: center; gap: clamp(32px, 7vw, 100px); padding: clamp(32px, 7vh, 76px) clamp(22px, 6vw, 92px); overflow: auto; background: radial-gradient(circle at 38% 30%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 32%), radial-gradient(circle at 78% 72%, color-mix(in srgb, #45e0d0 7%, transparent), transparent 28%), var(--surface-base); }
-.repository-welcome-theme { position: absolute; top: 14px; right: 16px; }
+.repository-welcome-theme-actions { position: absolute; top: 14px; right: 16px; display: flex; gap: 4px; }
 .repository-welcome-hero { max-width: 390px; }
 .repository-welcome-brand { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 30px; color: var(--text-tertiary); letter-spacing: .17em; font-size: 10px; font-weight: 700; }
 .repository-welcome-brand img { width: 28px; height: 28px; border-radius: 8px; box-shadow: 0 5px 16px color-mix(in srgb, var(--accent) 27%, transparent); }
@@ -34,7 +34,7 @@
 .repository-catalog-search input { flex: 1; width: 0; min-width: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font: inherit; font-size: 12px; }
 .repository-catalog-search > span { font-size: 11px; }
 .repository-catalog-list { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 10px; }
-.repository-catalog-group h2 { display: flex; align-items: center; gap: 7px; margin: 0; padding: 10px 8px 5px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.repository-catalog-group h2 { display: flex; align-items: center; gap: 7px; margin: 0; padding: 10px 8px 5px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .repository-catalog-group h2 small { margin-left: auto; color: var(--text-tertiary); font-size: 10px; }
 .repository-catalog-row { position: relative; display: flex; align-items: center; border: 1px solid transparent; border-radius: 6px; margin: 2px 0; }
 .repository-catalog-row:hover { background: var(--surface-hover); }
@@ -42,10 +42,10 @@
 .repository-catalog-select { display: flex; flex: 1; min-width: 0; align-items: flex-start; gap: 8px; text-align: left; padding: 8px; background: transparent; color: var(--text-primary); border: 0; border-radius: 5px; cursor: pointer; }
 .repository-catalog-icon { display: grid; place-items: center; flex: 0 0 26px; height: 26px; background: var(--surface-control); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--accent-text); }
 .repository-catalog-select > span:last-child { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
-.repository-catalog-select strong { display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
-.repository-catalog-select strong small { flex-shrink: 0; font-size: 9px; font-weight: 400; color: var(--accent-text); }
-.repository-catalog-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 10px var(--font-code); }
-.repository-catalog-meta { display: flex;  align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 10px; }
+.repository-catalog-select strong { display: flex; align-items: center; gap: 7px; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.repository-catalog-select strong small { flex-shrink: 0; font-size: 10px; font-weight: 400; color: var(--accent-text); }
+.repository-catalog-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font: 11px var(--font-code); }
+.repository-catalog-meta { display: flex;  align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 11px; }
 .repository-catalog-meta > span { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
 .repository-catalog-actions { display: flex; flex-shrink: 0; margin: 0 4px 0 0; gap: 1px; }
 .repository-catalog-actions .button-icon { width: 25px; height: 25px; min-height: 25px; }

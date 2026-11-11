@@ -2,7 +2,7 @@
 
 .app-shell { position: relative; width: 100%; height: 100%; padding-top: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 40px minmax(0, 1fr); color: var(--text); background: var(--surface-raised); }
 
-.app-shell.workbench-active { grid-template-rows: 40px 54px minmax(0, 1fr); }
+.app-shell.workbench-active { grid-template-rows: 40px 54px minmax(0, 1fr); transition: grid-template-columns .22s ease; }
 
 .app-titlebar { position: absolute; inset: 0 0 auto; height: 40px; display: grid; grid-template-columns: max-content minmax(0, 250px) minmax(16px, 1fr) auto auto; align-items: center; border-bottom: 1px solid var(--line); color: var(--text-secondary); background: var(--surface-chrome); z-index: 1300; user-select: none; gap: 8px }
 
@@ -29,6 +29,8 @@
 .app-shell.panel-resizing, .app-shell.panel-resizing * { cursor: col-resize!important; user-select: none!important; }
 
 .app-shell.panel-resizing-vertical, .app-shell.panel-resizing-vertical * { cursor: row-resize!important; user-select: none!important; }
+
+.app-shell.panel-resizing { transition: none; }
 
 .app-shell.panel-resizing .sidebar-shell { transition: none; }
 
@@ -103,6 +105,8 @@
 
 .workspace-grid { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 1px 360px; transition: grid-template-columns .22s ease; }
 
+.app-shell.panel-resizing .workspace-grid { transition: none; }
+
 .workspace-grid.diff-wide .inspector-pane, .workspace-grid.inspector-collapsed .inspector-pane { opacity: 0; transform: translateX(16px); pointer-events: none; }
 
 .workspace-grid.diff-wide .inspector-resizer, .workspace-grid.inspector-collapsed .inspector-resizer { pointer-events: none; }
@@ -141,7 +145,7 @@
 
 .inspector-pane .changed-files-panel { border-top: 0; }
 
-.workspace-page { min-width: 0; min-height: 0; padding: 20px 22px; overflow: auto; background: var(--surface-base); }
+.workspace-page { min-width: 0; min-height: 0; padding: 12px; overflow: auto; background: var(--surface-base); }
 
 .workspace-empty { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); background: var(--surface-base); }
 

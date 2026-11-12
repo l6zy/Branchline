@@ -106,7 +106,7 @@
 
 .nav-section { padding: 6px; border-bottom: 1px solid var(--line-soft); }
 
-.nav-row, .tree-row { width: 100%; height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 14px; cursor: pointer; }
+.nav-row, .tree-row { width: 100%; height: 32px; padding: 0 8px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 7px; color: var(--text); background: transparent; font-size: 14px; cursor: pointer; }
 
 .nav-row:hover, .tree-row:hover { color: var(--text); background: var(--panel-3); }
 
@@ -522,9 +522,9 @@ kbd { padding: 2px 5px; border: 1px solid var(--kbd-border); border-radius: 4px;
 
 .split-code-side.del .change-sign { color: var(--danger); }
 
-.modal-backdrop { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 1350; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
 
-.confirm-backdrop { z-index: 1200; }
+.confirm-backdrop { z-index: 1360; }
 
 .confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); box-shadow: var(--shadow-dialog); animation: popIn .16s ease-out; }
 

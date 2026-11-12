@@ -241,6 +241,14 @@ describe('semantic style architecture', () => {
     expect(layout).toContain('.operation-indicator.cherry-pick { z-index: 1201; }')
     expect(app).toContain("activeOperation?.key === 'cherry-pick' ? 'cherry-pick' : ''")
   })
+  it('keeps modal backdrops above the custom title bar', () => {
+    const titlebarZIndex = Number(layout.match(/\.app-titlebar \{[^}]*z-index: (\d+)/)?.[1])
+    const modalZIndex = Number(components.match(/\.modal-backdrop \{[^}]*z-index: (\d+)/)?.[1])
+    const confirmZIndex = Number(components.match(/\.confirm-backdrop \{[^}]*z-index: (\d+)/)?.[1])
+    expect(titlebarZIndex).toBeGreaterThan(0)
+    expect(modalZIndex).toBeGreaterThan(titlebarZIndex)
+    expect(confirmZIndex).toBeGreaterThan(modalZIndex)
+  })
 
   it('omits branch navigation and switching from the branch context menu', () => {
     const branchMenu = app.match(/\{contextBranch && <ContextMenu[\s\S]*?\n    <\/ContextMenu>\}/)?.[0] ?? ''

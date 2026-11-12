@@ -69,17 +69,17 @@
 
 /* One continuous workbench below a titlebar that blends into the window. */
 .theme-rounded.app-shell { background: var(--rounded-app-background); }
-.theme-rounded.workbench-active::before { content: ''; position: absolute; inset: 40px var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); background: var(--rounded-surface); pointer-events: none; }
+.theme-rounded.workbench-active::before { content: ''; position: absolute; inset: 40px var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); background: var(--rounded-surface); pointer-events: none; box-shadow: 0 0 4px 1px rgba(0, 0, 0, .05); }
 .theme-rounded.theme-light { --muted: #4b5563; --faint: #667085; --line: #d8dee7; --line-soft: #e7ebf0; --text-secondary: #384150; --text-tertiary: #596575; }
 .theme-rounded:not(.theme-light) { --muted: #c7ced8; --faint: #a8b2c0; --line: #3a424d; --line-soft: #303741; --text-secondary: #d1d7e0; --text-tertiary: #a8b2c0; }
 
-.theme-rounded .app-titlebar { inset: 0; width: auto; height: 40px; border: 0; border-radius: 0; box-shadow: none; background: var(--rounded-app-background); }
+.theme-rounded .app-titlebar { inset: 0; width: auto; height: 40px; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .theme-rounded .sidebar-shell { box-sizing: border-box; padding: 0 0 var(--rounded-surface-gap) var(--rounded-surface-gap); }
 .theme-rounded .sidebar-shell.collapsed { padding: 0; }
 .theme-rounded .sidebar { min-width: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .theme-rounded .workspace { position: relative; margin: 0 var(--rounded-surface-gap) var(--rounded-surface-gap) 0; overflow: hidden; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .theme-rounded .repository-manager-heading { background: var(--rounded-repository-catalog); }
-.theme-rounded .workspace.empty-repository { margin: 0 var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); }
+.theme-rounded .workspace.empty-repository { margin: 0 var(--rounded-surface-gap) var(--rounded-surface-gap); border-radius: var(--rounded-panel-radius); box-shadow: 0 0 4px 1px rgba(0, 0, 0, .05); }
 .theme-rounded .topbar,
 .theme-rounded .content-tabs,
 .theme-rounded .statusbar { border-color: transparent; box-shadow: none; background: transparent; }

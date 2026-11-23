@@ -16,6 +16,22 @@ async function mount() {
   return i18n
 }
 describe('language selector', () => {
+  it('labels the system option using the system language after a manual locale change', async () => {
+    const user = userEvent.setup()
+    const i18n = await mount()
+    await user.click(screen.getByRole('button', { name: '界面语言' }))
+    await user.click(screen.getByRole('option', { name: 'English' }))
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('en-US'))
+
+    await user.click(screen.getByRole('button', { name: 'Interface language' }))
+    const systemOption = screen.getByRole('option', { name: 'System (简体中文)' })
+    expect(systemOption).toBeTruthy()
+    await user.click(systemOption)
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('zh-CN'))
+    expect(document.documentElement.lang).toBe('zh-CN')
+    expect(localStorage.getItem('branchline.locale.v1')).toBe('system')
+  })
+
   it('switches immediately, preserves drafts and remembers the manual preference', async () => {
     const user = userEvent.setup()
     const i18n = await mount()
@@ -40,6 +56,23 @@ describe('language selector', () => {
     const manual = await mount()
     await act(async () => { window.dispatchEvent(new Event('languagechange')) })
     expect(manual.resolvedLanguage).toBe('zh-CN')
+  })
+  it('refreshes the system language when returning from a manual locale', async () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+    const i18n = await mount()
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('en-US'))
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Interface language' }))
+    await user.click(screen.getByRole('option', { name: '简体中文' }))
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('zh-CN'))
+
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+    await user.click(screen.getByRole('button', { name: '界面语言' }))
+    const systemOption = screen.getByRole('option', { name: '跟随系统（简体中文）' })
+    await user.click(systemOption)
+    await waitFor(() => expect(i18n.resolvedLanguage).toBe('zh-CN'))
+    expect(localStorage.getItem('branchline.locale.v1')).toBe('system')
   })
   it('supports keyboard selection and restores focus on Escape', async () => {
     await mount()

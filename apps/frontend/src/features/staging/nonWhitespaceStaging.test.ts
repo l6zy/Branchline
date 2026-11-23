@@ -57,4 +57,27 @@ describe('non-whitespace staging', () => {
     expect(hasNonWhitespaceChanges(filtered)).toBe(false)
     expect(buildNonWhitespacePatch('file.txt', rows, 'M')).toBe('')
   })
+
+  it('does not stage blank-line additions as non-whitespace changes', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: 'first' },
+      { old: null, next: 2, kind: 'add', code: '' },
+      { old: 2, next: 3, kind: 'same', code: 'second' },
+    ]
+
+    expect(buildNonWhitespacePatch('file.txt', rows, 'M')).toBe('')
+  })
+
+  it('omits blank-line additions while staging substantive changes', () => {
+    const rows: RepositoryDiffLine[] = [
+      { old: 1, next: 1, kind: 'same', code: 'first' },
+      { old: null, next: 2, kind: 'add', code: '' },
+      { old: 2, next: null, kind: 'del', code: 'second' },
+      { old: null, next: 3, kind: 'add', code: 'second!' },
+    ]
+
+    const patch = buildNonWhitespacePatch('file.txt', rows, 'M')
+    expect(patch).toContain('-second\n+second!\n')
+    expect(patch).not.toContain('+\n')
+  })
 })

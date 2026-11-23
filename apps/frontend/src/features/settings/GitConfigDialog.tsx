@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FileText, GitBranch, Mail, RefreshCw, Settings2, User, X } from 'lucide-react'
 import { loadGitUserConfig, updateGitUserConfig, type GitUserConfig } from '../../repository'
 import { Button } from '../../components/Button'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 
 type GitConfigDialogProps = {
   open: boolean
@@ -50,7 +51,6 @@ export function GitConfigDialog({ open, onClose, onNotice }: GitConfigDialogProp
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose, open, saving])
 
-  if (!open) return null
   const save = async () => {
     if (!config.userName.trim()) return setError(message('settings:git.validation.name'))
     if (!config.userEmail.includes('@')) return setError(message('settings:git.validation.email'))
@@ -74,7 +74,7 @@ export function GitConfigDialog({ open, onClose, onNotice }: GitConfigDialogProp
     }
   }
 
-  return <div className="modal-backdrop" onPointerDown={() => { if (!saving) onClose() }}>
+  return <AnimatedModal open={open} className="modal-backdrop" onPointerDown={(event) => { if (isMotionBackdropTarget(event) && !saving) onClose() }}>
     <section className="git-config-dialog" role="dialog" aria-modal="true" aria-labelledby="git-config-title" onPointerDown={(event) => event.stopPropagation()}>
       <div className="git-config-heading"><span className="git-config-icon"><Settings2 size={18}/></span><div><h2 id="git-config-title">{t('settings:git.title')}</h2><p>{t('settings:git.description')}</p></div><Button variant="icon" onClick={onClose} disabled={saving} tooltip={t('settings:close')} aria-label={t('settings:close')}><X size={17}/></Button></div>
       <form onSubmit={(event) => { event.preventDefault(); void save() }}>
@@ -86,5 +86,5 @@ export function GitConfigDialog({ open, onClose, onNotice }: GitConfigDialogProp
         <div className="git-config-footer"><span className={error ? 'git-config-error' : ''}>{error ? renderMessage(error, t) : t('settings:git.storageHint')}</span><div><Button type="button" variant="secondary" onClick={onClose} disabled={saving}>{t('settings:cancel')}</Button><Button type="submit" variant="primary" disabled={loading || saving}>{saving ? t('settings:git.saving') : t('settings:git.save')}</Button></div></div>
       </form>
     </section>
-  </div>
+  </AnimatedModal>
 }

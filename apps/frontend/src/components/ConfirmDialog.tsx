@@ -3,6 +3,7 @@ import { AlertTriangle, CircleHelp } from 'lucide-react'
 import { Button, type ButtonVariant } from './Button'
 import { renderMessage, type MessageContent } from '../i18n/messages'
 import { useAppTranslation } from '../i18n/useAppTranslation'
+import { AnimatedModal, isMotionBackdropTarget } from './motion/Motion'
 
 export type ConfirmDialogOptions = {
   title?: MessageContent
@@ -27,10 +28,9 @@ export function ConfirmDialog({ request, onResolve }: { request: ConfirmRequest 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onResolve, request])
-  if (!request) return null
-  const destructive = request.variant === 'danger'
-  return <div className="modal-backdrop confirm-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onResolve(false) }}>
-    <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={`confirm-dialog-title-${request.id}`} onPointerDown={(event) => event.stopPropagation()}>
+  const destructive = request?.variant === 'danger'
+  return <AnimatedModal open={Boolean(request)} className="modal-backdrop confirm-backdrop" onPointerDown={(event) => { if (isMotionBackdropTarget(event) && request) onResolve(false) }}>
+    {request && <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby={`confirm-dialog-title-${request.id}`} onPointerDown={(event) => event.stopPropagation()}>
       <div className={`confirm-dialog-icon ${destructive ? 'danger' : ''}`}>{destructive ? <AlertTriangle size={19}/> : <CircleHelp size={19}/>}</div>
       <div className="confirm-dialog-content">
         <h2 id={`confirm-dialog-title-${request.id}`}>{request.title ? renderMessage(request.title, t) : t(destructive ? 'common:confirmDangerTitle' : 'common:confirmTitle')}</h2>
@@ -40,8 +40,8 @@ export function ConfirmDialog({ request, onResolve }: { request: ConfirmRequest 
         <Button variant="secondary" onClick={() => onResolve(false)}>{request.cancelLabel ? renderMessage(request.cancelLabel, t) : t('common:cancel')}</Button>
         <Button variant={request.variant ?? 'primary'} onClick={() => onResolve(true)}>{request.confirmLabel ? renderMessage(request.confirmLabel, t) : t('common:confirm')}</Button>
       </div>
-    </section>
-  </div>
+    </section>}
+  </AnimatedModal>
 }
 
 export function useConfirmDialog() {

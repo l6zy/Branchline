@@ -11,6 +11,7 @@ import {
 } from './repositoryTree'
 import { isBooleanRecord, usePersistentState } from '../../persistentState'
 import { repositoryCacheKey, sameRepositoryPath } from './repositoryPaths'
+import { AnimatedCollapse } from '../../components/motion/Motion'
 
 function selectionKey(selection: RepositoryStructureSelection) {
   return `${selection.kind}:${'path' in selection ? selection.path : ''}`
@@ -41,7 +42,7 @@ export function RepositoryStructureTree({ repository, activePath, selection, onS
         <Tooltip content={expanded ? t('repository:tree.collapse') : t('repository:tree.expand')}><button type="button" className="tree-expander" onClick={() => toggle(`folder:${node.path}`)} aria-label={t(expanded ? 'repository:tree.collapseName' : 'repository:tree.expandName', { name: node.name })}>{expanded ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button></Tooltip>
         <Tooltip content={t('repository:tree.details')}><button type="button" className="tree-node-content" onClick={() => onSelect(target)}><span className="repository-tree-icon"><FolderTree size={13}/></span><span>{node.name}</span><span className="count">{formatNumber(node.children.length)}</span></button></Tooltip>
         </div>
-        {expanded && <div>{node.children.map((child) => renderSubmoduleNode(child, depth + 1))}</div>}
+        <AnimatedCollapse open={expanded}>{node.children.map((child) => renderSubmoduleNode(child, depth + 1))}</AnimatedCollapse>
       </div>
     }
     const submodule = node.submodule!
@@ -62,13 +63,13 @@ export function RepositoryStructureTree({ repository, activePath, selection, onS
     <div className={rowClass({ kind: 'worktrees' }, 'group')}>
       <Tooltip content={open.worktrees !== false ? t('repository:tree.collapse') : t('repository:tree.expand')}><button type="button" className="tree-expander" onClick={() => toggle('worktrees')} aria-label={open.worktrees !== false ? t('repository:tree.collapseWorktrees') : t('repository:tree.expandWorktrees')}>{open.worktrees !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button></Tooltip><Tooltip content={t('repository:tree.details')}><button type="button" className="tree-node-content" onClick={() => onSelect({ kind: 'worktrees' })}><span className="repository-tree-icon"><GitFork size={13}/></span><span>{t('repository:worktrees')}</span><span className="count">{formatNumber(repository.worktrees.length)}</span></button></Tooltip>
     </div>
-    {open.worktrees !== false && <div>{repository.worktrees.map((worktree) => {
+    <AnimatedCollapse open={open.worktrees !== false}>{repository.worktrees.map((worktree) => {
       const target: RepositoryStructureSelection = { kind: 'worktree', path: worktree.path }
       const current = sameRepositoryPath(worktree.path, activePath)
       const structureRoot = repositoryCacheKey(worktree.path) === repositoryCacheKey(repository.path)
       return <div key={worktree.path} className={rowClass(target)} style={{ paddingLeft: 29 }}><span className="tree-spacer"/><Tooltip content={current ? t('repository:tree.currentWorktree') : structureRoot ? t('repository:tree.returnMain') : t('repository:tree.openWorktree')}><button type="button" className="tree-node-content" onClick={() => onSelect(target)} onDoubleClick={() => { if (!current) onOpenPath(worktree.path, 'worktree') }}><span className="repository-tree-icon"><GitFork size={12}/></span><span>{worktree.path.split(/[\\/]/).pop() || worktree.path}</span>{worktree.locked ? <Lock className="repository-tree-status" size={11}/> : current ? <Check className="repository-tree-status ok" size={12}/> : null}</button></Tooltip></div>
-    })}</div>}
+    })}</AnimatedCollapse>
     <div className={rowClass({ kind: 'submodules' }, 'group')}><Tooltip content={open.submodules !== false ? t('repository:tree.collapse') : t('repository:tree.expand')}><button type="button" className="tree-expander" onClick={() => toggle('submodules')} aria-label={open.submodules !== false ? t('repository:tree.collapseSubmodules') : t('repository:tree.expandSubmodules')}>{open.submodules !== false ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}</button></Tooltip><Tooltip content={t('repository:tree.details')}><button type="button" className="tree-node-content" onClick={() => onSelect({ kind: 'submodules' })}><span className="repository-tree-icon"><Box size={13}/></span><span>{t('repository:submodules.title')}</span><span className="count">{formatNumber(repository.submodules.length)}</span></button></Tooltip></div>
-    {open.submodules !== false && <div>{submoduleTree.map((node) => renderSubmoduleNode(node, 0))}</div>}
+    <AnimatedCollapse open={open.submodules !== false}>{submoduleTree.map((node) => renderSubmoduleNode(node, 0))}</AnimatedCollapse>
   </div>
 }

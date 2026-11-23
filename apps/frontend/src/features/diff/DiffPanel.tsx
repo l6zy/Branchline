@@ -570,6 +570,13 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }, [activeFileInfo?.path, activeIsImage, fileContentOnly, imageMode, loadImage, reloadKey, viewKey])
   const usesLoader = Boolean(loadRows || repositoryPath)
   const sourceRows = usesLoader ? repositoryRows : (activeFileInfo ? (fallbackRows[activeFileInfo.path] ?? fallbackChangeRows) : EMPTY_DIFF_ROWS)
+  const displayedStats = useMemo(() => showWhitespace
+    ? { add: activeFileInfo?.add ?? 0, del: activeFileInfo?.del ?? 0 }
+    : sourceRows.reduce((stats, row) => {
+      if (row.kind === 'add') stats.add += 1
+      if (row.kind === 'del') stats.del += 1
+      return stats
+    }, { add: 0, del: 0 }), [activeFileInfo?.add, activeFileInfo?.del, showWhitespace, sourceRows])
   const canStage = actionScope !== 'staged' && (allowStage || actionScope === 'unstaged')
   const canUnstage = actionScope === 'staged' && Boolean(onUnstagePatch)
   const stageActionsEnabled = canUnstage || (canStage && Boolean(onStagePatch || onRestorePatch))
@@ -1187,7 +1194,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {!hideFileList && <DiffFileList files={files} activeFile={activeFile} mode={fileMode} onSelectFile={selectFile} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders}/>}
       <div className="diff-viewer" ref={overviewRef}>
       <div className={`code-diff ${view}${wrap ? ' wrap' : ''}`}>
-        <div className="file-header"><Tooltip content={activeFileInfo?.path}><div className="file-header-path"><Tooltip content={activeFileInfo?.path}><code>{activeFileInfo?.path ?? t('diff:panel.noFiles')}</code></Tooltip></div></Tooltip>{activeFileInfo && !fileContentOnly && !showImagePreview && <span className="file-header-stats"><i>+{numbers.format(activeFileInfo.add)}</i> <b>-{numbers.format(activeFileInfo.del)}</b></span>}</div>
+        <div className="file-header"><Tooltip content={activeFileInfo?.path}><div className="file-header-path"><Tooltip content={activeFileInfo?.path}><code>{activeFileInfo?.path ?? t('diff:panel.noFiles')}</code></Tooltip></div></Tooltip>{activeFileInfo && !fileContentOnly && !showImagePreview && <span className="file-header-stats"><i>+{numbers.format(displayedStats.add)}</i> <b>-{numbers.format(displayedStats.del)}</b></span>}</div>
         {showImagePreview ? renderImagePreview() : <>
           {activeScope === 'changes' && !usesLoader && <div className="hunk">{t('diff:panel.fullChange')}</div>}
           {diffLoading && !canRenderLoadedRows && <div className="diff-message">{t('diff:panel.loading')}</div>}

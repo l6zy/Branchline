@@ -19,7 +19,7 @@ describe('semantic style architecture', () => {
 
   it('aligns the native title bar with the active theme and gives blame a wide code workspace', () => {
     expect(app).toContain("window.matchMedia?.('(prefers-color-scheme: dark)')")
-    expect(app).toContain('getCurrentWindow().setTheme(resolvedTheme)')
+    expect(app).toContain('getCurrentWindow().setTheme(nativeWindowTheme(resolvedTheme))')
     expect(app).toContain("resolvedTheme === 'light' ? 'theme-light' : ''")
     expect(app).toContain('className="app-titlebar"')
     expect(readFileSync(new URL('../../desktop/tauri.conf.json', import.meta.url), 'utf8')).toContain('"decorations": false')
@@ -62,8 +62,7 @@ describe('semantic style architecture', () => {
     expect(themeOverrides).toContain('.theme-rounded.workbench-active::before { content:')
     expect(themeOverrides).toContain('inset: 40px var(--rounded-surface-gap) var(--rounded-surface-gap);')
     expect(themeOverrides).toContain('.theme-rounded .workspace { position: relative; margin: 0 var(--rounded-surface-gap)')
-    expect(themeOverrides).toContain('.theme-rounded .sidebar-shell { box-sizing: border-box; padding: 0 0 var(--rounded-surface-gap) var(--rounded-surface-gap);')
-    expect(themeOverrides).toContain('.theme-rounded .sidebar { min-width: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }')
+    expect(themeOverrides).toContain('.theme-rounded .sidebar { padding: 0 0 var(--rounded-surface-gap) var(--rounded-surface-gap); border: 0; border-radius: 0; background: transparent; box-shadow: none; }')
     expect(themeOverrides).toContain('.theme-rounded .app-titlebar { inset: 0;')
     expect(themeOverrides).toContain('.theme-rounded .topbar { position: relative; margin: 0 var(--rounded-surface-gap); border: 0; border-bottom: 1px solid var(--rounded-divider); border-radius: 0;')
     expect(themeOverrides).toContain('.theme-rounded .panel-resizer::before { top: 0; bottom: 0; left: 50%; transform: translateX(-50%); background: var(--rounded-divider);')
@@ -73,22 +72,25 @@ describe('semantic style architecture', () => {
     expect(themeOverrides).toContain('.theme-rounded .staging-workspace { grid-template-columns: minmax(300px, var(--staging-control-width, 430px)) 4px minmax(0, 1fr);')
     expect(themeOverrides).toContain('.theme-rounded .stash-manager { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);')
     expect(themeOverrides).toContain('.theme-rounded .stash-graph-handoff { display: none;')
-    expect(themeOverrides).toContain('.theme-rounded .stage-section { margin-top: 4px; border: 0; border-radius: 0; background: transparent; box-shadow: none;')
-    expect(app).toContain('`${sidebarWidth}px ${rounded ? 4 : 1}px minmax(0, 1fr)`')
+    expect(themeOverrides).toContain('.theme-rounded .stage-section { margin-top: 4px;')
+    expect(app).toContain('gridTemplateColumns: `${sidebarCollapsed ? \'0px\' : \'var(--sidebar-width)\'} ${sidebarDividerWidth} minmax(0, 1fr)`')
     expect(app).toContain('${inspectorVisible ? rounded ? 4 : 1 : 0}px')
   })
   it('keeps commit graph geometry aligned with roomier rows and uses a continuous detail reading surface', () => {
     const rowHeight = Number(app.match(/const COMMIT_ROW_HEIGHT = (\d+)/)?.[1])
     const rowRule = features.match(/\.commit-row \{[^}]+\}/)?.[0] ?? ''
-    expect(rowHeight).toBe(36)
+    expect(rowHeight).toBe(32)
     expect(rowRule).toContain(`height: ${rowHeight}px;`)
     expect(app).toContain('height={COMMIT_ROW_HEIGHT}')
     expect(app).toContain('buildCommitGraphLayout(filtered, widths.graph, COMMIT_ROW_HEIGHT)')
-    expect(themeOverrides).toContain('.theme-rounded .commit-text-panel { margin-top: 10px; border: 0; border-radius: 0; background: transparent; }')
-    expect(themeOverrides).toContain('.theme-rounded .commit-text-panel textarea { padding: 10px 0 0; color: var(--rounded-text-primary); background: transparent; font: 12px/1.7 "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; resize: none; }')
+    expect(themeOverrides).toContain('.theme-rounded .commit-text-panel textarea { color: var(--rounded-text-primary); background: transparent; font: 12px/1.7 "Segoe UI Variable", "Segoe UI", "Microsoft YaHei", sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; resize: none; }')
   })
   it('animates sidebar layout changes while keeping column resizing direct', () => {
-    expect(layout.match(/\.app-shell\.workbench-active \{[^}]+\}/)?.[0]).toContain('transition: grid-template-columns .22s ease;')
+    expect(layout).toContain('.app-shell.workbench-active { transition: grid-template-columns .22s ease; }')
+    expect(layout.match(/\.sidebar-shell \{[^}]+\}/)?.[0]).toContain('overflow: hidden;')
+    expect(layout.match(/\.sidebar-shell \{[^}]+\}/)?.[0]).not.toContain('transition:')
+    expect(layout).toContain('width: var(--sidebar-width);')
+    expect(layout).toContain('.app-shell.panel-resizing { transition: none; }')
     expect(layout).toContain('.app-shell.panel-resizing .workspace-grid { transition: none; }')
   })
   it('preserves the original commit graph selection emphasis in the rounded theme', () => {
@@ -96,8 +98,9 @@ describe('semantic style architecture', () => {
     expect(themeOverrides).not.toContain('.theme-rounded .commit-row.selected')
   })
   it('keeps rounded workbench content and the sidebar divider inside the shared surface', () => {
-    expect(app).toContain("&& sidebarCollapsed ? 'sidebar-collapsed' : ''")
-    expect(themeOverrides).toContain('.theme-rounded.sidebar-collapsed .workspace { margin-left: var(--rounded-surface-gap); }')
+    expect(app).toContain("const sidebarDividerWidth = rounded ? 'var(--rounded-surface-gap)'")
+    expect(themeOverrides).not.toContain('.theme-rounded.sidebar-collapsed .workspace')
+    expect(themeOverrides).toContain('.theme-rounded.workbench-active:has(> .sidebar-shell[aria-hidden="true"]) > .workspace { border-bottom-left-radius: var(--rounded-panel-radius); }')
     expect(themeOverrides).toContain('.theme-rounded .sidebar-resizer { width: 100%; height: calc(100% - var(--rounded-surface-gap)); align-self: start; }')
   })
   it('removes both leading grid items when expanding the blame Diff', () => {
@@ -128,9 +131,10 @@ describe('semantic style architecture', () => {
     ]))
   })
   it('loads styles through explicit cascade layers', () => {
-    expect(styles).toContain('@layer tokens, base, layout, components, features, theme-overrides;')
+    expect(styles).toContain('@layer tokens, base, layout, components, features, theme-overrides, motion;')
     expect(styles).toContain("@import './styles/tokens.css' layer(tokens);")
     expect(styles).toContain("@import './styles/theme-overrides.css' layer(theme-overrides);")
+    expect(styles).toContain("@import './components/motion/motion.css' layer(motion);")
   })
 
   it('defines theme-independent semantic tokens for controls and surfaces', () => {
@@ -217,6 +221,7 @@ describe('semantic style architecture', () => {
   })
   it('separates the rounded repository catalog from the page background and improves list readability', () => {
     expect(themeOverrides).toContain('.theme-rounded .repository-manager { background: var(--rounded-app-background); }')
+    expect(tokens).toContain('--rounded-app-background: #eef1f4;')
     expect(tokens).toContain('--rounded-repository-frame: #e6ebf1;')
     expect(tokens).toContain('--rounded-repository-catalog: #ffffff;')
     expect(themeOverrides).toContain('.theme-rounded .repository-catalog { background: var(--rounded-repository-catalog);')
@@ -244,10 +249,19 @@ describe('semantic style architecture', () => {
   it('keeps modal backdrops above the custom title bar', () => {
     const titlebarZIndex = Number(layout.match(/\.app-titlebar \{[^}]*z-index: (\d+)/)?.[1])
     const modalZIndex = Number(components.match(/\.modal-backdrop \{[^}]*z-index: (\d+)/)?.[1])
+    const commandLogZIndex = Number(components.match(/\.command-log-backdrop \{[^}]*z-index: (\d+)/)?.[1])
     const confirmZIndex = Number(components.match(/\.confirm-backdrop \{[^}]*z-index: (\d+)/)?.[1])
     expect(titlebarZIndex).toBeGreaterThan(0)
     expect(modalZIndex).toBeGreaterThan(titlebarZIndex)
+    expect(commandLogZIndex).toBeGreaterThan(titlebarZIndex)
     expect(confirmZIndex).toBeGreaterThan(modalZIndex)
+  })
+
+  it('leaves menu and command-log motion to Motion', () => {
+    const selectRule = components.match(/\.compact-select-popover \{[^}]+\}/)?.[0] ?? ''
+    const commandLogRule = components.match(/\.command-log-panel \{[^}]+\}/)?.[0] ?? ''
+    expect(selectRule).not.toContain('animation:')
+    expect(commandLogRule).not.toContain('animation:')
   })
 
   it('omits branch navigation and switching from the branch context menu', () => {

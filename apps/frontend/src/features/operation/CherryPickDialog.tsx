@@ -5,6 +5,7 @@ import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useEffect, useRef, useState } from 'react'
 import { GitCommitHorizontal, GitMerge, X } from 'lucide-react'
 import { Button } from '../../components/Button'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 
 type CherryPickDialogProps = {
   open: boolean
@@ -37,8 +38,6 @@ export function CherryPickDialog({ open, commit, currentBranch, onClose, onConfi
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  if (!open) return null
-
   const submit = async () => {
     if (submittingRef.current) return
     submittingRef.current = true
@@ -52,7 +51,7 @@ export function CherryPickDialog({ open, commit, currentBranch, onClose, onConfi
     }
   }
 
-  return <div className="modal-backdrop" onPointerDown={() => { if (!submitting) onClose() }}>
+  return <AnimatedModal open={open} className="modal-backdrop" onPointerDown={(event) => { if (isMotionBackdropTarget(event) && !submitting) onClose() }}>
     <section className="branch-dialog cherry-pick-dialog" role="dialog" aria-modal="true" aria-labelledby="cherry-pick-title" onPointerDown={(event) => event.stopPropagation()}>
       <div className="branch-dialog-heading"><span className="branch-dialog-icon"><GitCommitHorizontal size={18}/></span><div><h2 id="cherry-pick-title">{t('operations:cherryPick.title')}</h2><p><Trans t={t} i18nKey="operations:cherryPick.description" values={{ commit: commit.id, branch: currentBranch }} components={{ strong: <strong/> }}/></p></div><Button variant="icon" onClick={onClose} disabled={submitting} tooltip={t('operations:close')} aria-label={t('operations:close')}><X size={17}/></Button></div>
       <div className="cherry-pick-dialog-body">
@@ -61,5 +60,5 @@ export function CherryPickDialog({ open, commit, currentBranch, onClose, onConfi
         <div className="branch-dialog-actions"><Button variant="secondary" onClick={onClose} disabled={submitting}>{t('common:cancel')}</Button><Button variant="primary" onClick={() => void submit()} disabled={submitting}><GitCommitHorizontal size={14}/>{submitting ? t('operations:cherryPick.running') : t('operations:cherryPick.confirm')}</Button></div>
       </div>
     </section>
-  </div>
+  </AnimatedModal>
 }

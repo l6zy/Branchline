@@ -3,6 +3,7 @@ import { useAppTranslation, type AppTranslator } from '../../i18n/useAppTranslat
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch, X } from 'lucide-react'
 import { Button } from '../../components/Button'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 
 type CreateBranchDialogProps = {
   open: boolean
@@ -44,7 +45,6 @@ export function CreateBranchDialog({ open, prefix, currentBranch, onClose, onCre
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose, open, submitting])
 
-  if (!open) return null
   const submit = async () => {
     const value = branch.trim()
     if (validateBranchName(value, t)) return
@@ -54,7 +54,7 @@ export function CreateBranchDialog({ open, prefix, currentBranch, onClose, onCre
     if (created) onClose()
   }
 
-  return <div className="modal-backdrop" onPointerDown={() => { if (!submitting) onClose() }}>
+  return <AnimatedModal open={open} className="modal-backdrop" onPointerDown={(event) => { if (isMotionBackdropTarget(event) && !submitting) onClose() }}>
     <section className="branch-dialog" role="dialog" aria-modal="true" aria-labelledby="create-branch-title" onPointerDown={(event) => event.stopPropagation()}>
       <div className="branch-dialog-heading"><span className="branch-dialog-icon"><GitBranch size={18}/></span><div><h2 id="create-branch-title">{t('operations:branch.create')}</h2><p><Trans t={t} i18nKey="operations:branch.description" values={{ branch: currentBranch }} components={{ strong: <strong/> }}/></p></div><Button variant="icon" onClick={onClose} disabled={submitting} tooltip={t('operations:close')} aria-label={t('operations:close')}><X size={17}/></Button></div>
       <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
@@ -64,5 +64,5 @@ export function CreateBranchDialog({ open, prefix, currentBranch, onClose, onCre
         <div className="branch-dialog-actions"><Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>{t('common:cancel')}</Button><Button type="submit" variant="primary" disabled={Boolean(error) || submitting}><GitBranch size={14}/>{submitting ? t('operations:branch.creating') : t('operations:branch.create')}</Button></div>
       </form>
     </section>
-  </div>
+  </AnimatedModal>
 }

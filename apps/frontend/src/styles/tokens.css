@@ -31,7 +31,7 @@
   --font-code: "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, "Microsoft YaHei UI", "Microsoft YaHei", NSimSun, "Liberation Mono", monospace;
 
   /* Semantic surface, content, state, and elevation tokens. */
-  --surface-base: var(--bg);
+  --surface-base: var(--panel);
   --surface-chrome: var(--panel);
   --surface-control: var(--panel-2);
   --surface-raised: var(--panel);
@@ -99,6 +99,7 @@
 
 .theme-light {
   color-scheme: light;
+  color: #1f1f1f;
   --bg: #f5f5f5;
   --panel: #ffffff;
   --panel-2: #fafafa;
@@ -119,7 +120,7 @@
   --syntax-number: #098658;
   --syntax-type: #267f99;
 
-  --surface-base: var(--bg);
+  --surface-base: var(--panel);
   --surface-chrome: var(--panel-2);
   --surface-control: var(--panel);
   --surface-raised: var(--panel);
@@ -171,7 +172,7 @@
   --warning-surface: #fffbe6;
   --success-surface: #f6ffed;
   --rounded-border: rgba(20, 28, 38, .09);
-  --rounded-shadow: 0 2px 8px rgba(27, 39, 54, .035);
+  --rounded-shadow: 0 2px 8px rgba(27, 39, 54, .135);
   --rounded-menu-shadow: 0 12px 32px rgba(27, 39, 54, .18);
   --rounded-text-primary: #171a1f;
   --rounded-text-secondary: #424a55;

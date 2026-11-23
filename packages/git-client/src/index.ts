@@ -141,6 +141,14 @@ export async function stageRepositoryPatch(repositoryPath: string, patch: string
   return invoke<RepositoryFile[]>('stage_patch', { repositoryPath, patch })
 }
 
+export async function stageRepositoryNonWhitespacePatch(repositoryPath: string, patch: string) {
+  return invoke<RepositoryFile[]>('stage_non_whitespace_patch', { repositoryPath, patch })
+}
+
+export async function loadUnstagedNonWhitespacePatch(repositoryPath: string, filePath: string) {
+  return invoke<string>('load_unstaged_non_whitespace_patch', { repositoryPath, filePath })
+}
+
 export async function restoreRepositoryPatch(repositoryPath: string, patch: string) {
   return invoke<RepositoryFile[]>('restore_patch', { repositoryPath, patch })
 }
@@ -263,6 +271,10 @@ export async function fastForwardRepositoryBranch(repositoryPath: string, branch
 
 export async function pushRepository(repositoryPath: string) {
   return invoke<RepositorySnapshot>('push_repository', { repositoryPath })
+}
+
+export async function pushRepositoryBranch(repositoryPath: string, branch: string) {
+  return invoke<RepositorySnapshot>('push_repository_branch', { repositoryPath, branch })
 }
 
 export async function resetRepositoryToCommit(repositoryPath: string, commit: string) {

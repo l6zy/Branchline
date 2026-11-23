@@ -13,6 +13,7 @@ const handlers = {
   onJumpBranch: vi.fn(),
   onSwitchBranch: vi.fn(),
   onPullBranch: vi.fn(),
+  onPushBranch: vi.fn(),
   onMergeBranch: vi.fn(),
   onDeleteBranch: vi.fn(),
   onCopyBranch: vi.fn(),

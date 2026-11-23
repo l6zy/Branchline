@@ -1,5 +1,5 @@
 /* CSS layers are ordered here once; component files do not depend on import order. */
-@layer tokens, base, layout, components, features, theme-overrides;
+@layer tokens, base, layout, components, features, theme-overrides, motion;
 
 @import './styles/tokens.css' layer(tokens);
 @import './styles/base.css' layer(base);
@@ -9,3 +9,4 @@
 @import './styles/features.css' layer(features);
 @import './styles/repository-manager.css' layer(features);
 @import './styles/theme-overrides.css' layer(theme-overrides);
+@import './components/motion/motion.css' layer(motion);

@@ -62,6 +62,7 @@
       "remote": "Remote",
       "autoFastForward": "Automatic fast-forward",
       "pull": "Pull this branch",
+      "push": "Push this branch",
       "mergeInto": "Merge into {{currentBranch}}",
       "copyName": "Copy branch name",
       "delete": "Delete branch",

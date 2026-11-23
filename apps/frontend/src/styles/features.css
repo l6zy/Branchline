@@ -110,7 +110,7 @@
 .changed-files-list .virtual-file-entry.folder > .file-tree-folder { height: 100%; min-height: 0; }
 .changed-files-list button.unchanged .file-state { color: var(--text-tertiary); background: transparent; }
 
-.commit-text-panel { margin-top: 8px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-base); height: 0; flex: 1; display: flex; flex-direction: column; }
+.commit-text-panel { margin-top: 8px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-base); min-height: 64px; flex: 1; display: flex; flex-direction: column; }
 
 .commit-text-toolbar { min-height: 34px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); background: var(--surface-chrome); }
 
@@ -1204,7 +1204,7 @@
 
 .commit-template-editor > div .button { flex: 0 0 auto; white-space: nowrap; }
 
-.template-editor-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: clamp(16px, 4vw, 48px); background: rgba(0, 0, 0, .58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
+.template-editor-backdrop { position: fixed; inset: 0; z-index: 1350; display: grid; place-items: center; padding: clamp(16px, 4vw, 48px); background: rgba(0, 0, 0, .58); backdrop-filter: blur(3px); animation: fadeIn .16s ease-out; }
 
 .template-editor-dialog { width: min(920px, calc(100vw - 32px)); height: min(760px, calc(100vh - 32px)); max-height: calc(100vh - 32px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); box-shadow: 0 24px 72px rgba(0, 0, 0, .46); animation: popIn .18s ease-out; }
 
@@ -1276,6 +1276,10 @@
 .stage-section-actions button:hover:not(:disabled) { background: var(--accent-dim); }
 
 .stage-section-files { padding: 0; }
+
+.stage-section-files-virtual { max-height: 300px; overflow-y: auto; }
+.stage-section-files-spacer { position: relative; }
+.stage-section-files-virtual .stage-file { position: absolute; right: 0; left: 0; }
 
 .stage-section-files .stage-file:last-child { border-bottom: 0; }
 
@@ -1363,9 +1367,9 @@
 
 .commit-options input { width: auto; padding: 0; accent-color: var(--accent); }
 
-.commit-compose .button-primary { width: 100%; height: 36px; }
+.commit-compose .button-primary { width: 100%; height: 36px; flex: 0 0 36px }
 
-.commit-compose .button-primary span { margin-left: auto; color: #326249; font-size: 10px; }
+.commit-compose .button-primary span { margin-left: auto; font-size: 10px; }
 
 .commit-compose .commit-full-message, .commit-compose .commit-template-editor textarea { min-height: 120px; padding: 8px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); font: 11px/1.55 var(--font-code); }
 

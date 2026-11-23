@@ -51,10 +51,24 @@ it('opens an older stash in the commit graph with its details visible', async ()
 
   expect(screen.getByRole('button', { name: /older saved work/ }).classList.contains('selected')).toBe(true)
   expect(document.querySelector('.inspector-pane')).not.toBeNull()
-  expect(document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')).toBe(false)
-  expect(document.querySelector('.stash-page')).toBeNull()
+  expect(document.querySelector('.motion-page[aria-hidden="false"] > .workspace-grid')?.classList.contains('inspector-collapsed')).toBe(false)
+  expect(document.querySelector('.stash-page')?.closest('.motion-page')?.getAttribute('aria-hidden')).toBe('true')
   await waitFor(() => expect(document.querySelector('.changed-files-list')?.textContent).toContain('saved-change.txt'))
   expect(loadRepositoryStashFiles).toHaveBeenCalledWith('C:/repo', 'stash@{2}')
+})
+
+it('keeps the commit inspector mounted and inert while it closes', async () => {
+  localStorage.setItem('branchline.inspectorCollapsed.v2', 'false')
+  await renderLocalized(<LocaleProvider><App/></LocaleProvider>, 'en-US')
+
+  const panel = document.querySelector('.inspector-pane')
+  expect(panel).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Close details panel' }))
+
+  expect(document.querySelector('.inspector-pane')).toBe(panel)
+  expect(panel?.hasAttribute('inert')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Close details panel' })).toBeNull()
+  await waitFor(() => expect(document.querySelector('.inspector-pane')).toBeNull())
 })
 
 it('places repository switching and the single manager entry in the titlebar', async () => {
@@ -84,12 +98,14 @@ it('keeps the sidebar toggle in the shared toolbar in both states', async () => 
   expect(collapse.closest('.topbar')).toBe(topbar)
 
   fireEvent.click(collapse)
-  expect(sidebar?.classList.contains('collapsed')).toBe(true)
+  expect(sidebar?.hasAttribute('inert')).toBe(true)
+  expect(screen.queryByRole('separator', { name: 'Resize left panel' })).toBeNull()
   const expand = screen.getByRole('button', { name: 'Expand left panel' })
   expect(expand.closest('.topbar')).toBe(topbar)
 
   fireEvent.click(expand)
-  expect(sidebar?.classList.contains('collapsed')).toBe(false)
+  expect(sidebar?.hasAttribute('inert')).toBe(false)
+  expect(screen.getByRole('separator', { name: 'Resize left panel' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Collapse left panel' }).closest('.topbar')).toBe(topbar)
 })
 
@@ -123,10 +139,13 @@ it('filters branch names in the repository sidebar', async () => {
   expect(filter).not.toBeNull()
   fireEvent.change(filter!, { target: { value: 'search' } })
 
-  const localBranches = Array.from(document.querySelectorAll('.branch-tree .tree-row:not(.group)')).map((row) => row.textContent)
-  expect(localBranches.some((name) => name?.includes('search'))).toBe(true)
-  expect(localBranches.some((name) => name?.includes('main'))).toBe(false)
+  const localBranches = () => Array.from(document.querySelectorAll('.branch-tree .tree-row:not(.group)')).map((row) => row.textContent)
+  expect(localBranches()).toContain('main')
+  await waitFor(() => expect(localBranches()).not.toContain('main'))
+  expect(localBranches()).toContain('search')
   expect(Array.from(document.querySelectorAll('.branch-tree .tree-row.group')).some((row) => row.textContent?.includes('feature'))).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Clear branch filter' }))
+  expect(localBranches()).toContain('main')
 })
 
 it('exposes the sidebar splitter as a keyboard-operable separator', async () => {

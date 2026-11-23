@@ -5,11 +5,11 @@ import { CompactSelect } from './CompactSelect'
 
 export function LanguageSelect() {
   const { t } = useTranslation('settings')
-  const { preference, locale, setPreference } = useLocale()
+  const { preference, systemLocale, setPreference, refreshSystemLocale } = useLocale()
   return <div className="titlebar-language">
-    <CompactSelect<LocalePreference> value={preference} onChange={setPreference}
+    <CompactSelect<LocalePreference> value={preference} onChange={setPreference} onOpen={refreshSystemLocale}
       ariaLabel={t('language.label')} options={[
-        { value: 'system', label: t('language.system', { language: locale === 'zh-CN' ? '简体中文' : 'English' }) },
+        { value: 'system', label: t('language.system', { language: systemLocale === 'zh-CN' ? '简体中文' : 'English' }) },
         { value: 'zh-CN', label: '简体中文' },
         { value: 'en-US', label: 'English' },
       ]}/>

@@ -105,8 +105,8 @@ export function RepositoryStructurePanel({ repository, activePath, view, query =
     {selection.kind === 'submodule' && submodule && <div className="structure-detail-grid"><article className="structure-detail-card"><span className="structure-icon"><Box size={18}/></span><h3>{submodule.path}</h3><dl><DetailField label={t('repository:structure.relativePath')}><code>{submodule.path}</code></DetailField><DetailField label={t('repository:structure.absolutePath')}><code>{submoduleAbsolutePath(repository.path, submodule.path)}</code></DetailField><DetailField label={t('repository:submodules.recordedCommit')}><code>{submodule.hash}</code></DetailField><DetailField label={t('repository:submodules.trackingBranch')}>{submodule.branch ?? t('repository:submodules.fixedCommit')}</DetailField><DetailField label={t('repository:structure.status')}><strong>{currentSubmodule ? t('repository:manager.current') : t(statusLabels[submodule.status])}</strong></DetailField></dl><div className="structure-actions"><Button variant="primary" disabled={!availableSubmodule || currentSubmodule} onClick={() => onOpenPath(submoduleAbsolutePath(repository.path, submodule.path), 'submodule')}><FolderGit2 size={14}/>{currentSubmodule ? t('repository:manager.current') : t('repository:openRepository')}</Button>{(submodule.status === 'uninitialized' || submodule.status === 'missing') && <Button variant="secondary" disabled={busy !== null} onClick={() => void run('init', () => initializeRepositorySubmodule(repository.path, submodule.path), message('repository:submodules.initialized'))}><Plus size={14}/>{t('repository:submodules.initialize')}</Button>}<Button variant="secondary" disabled={busy !== null} onClick={() => void run('update', () => updateRepositorySubmodule(repository.path, submodule.path), message('repository:submodules.updated'))}><RefreshCw className={busy === 'update' ? 'spin' : ''} size={14}/>{t('repository:submodules.update')}</Button><Button variant="secondary" disabled={busy !== null} onClick={() => void run('sync', () => syncRepositorySubmodules(repository.path), message('repository:submodules.synced'))}><RotateCcw size={14}/>{t('repository:submodules.sync')}</Button><Button variant="danger" disabled={busy !== null || submodule.status === 'uninitialized'} onClick={() => void deinitializeSubmodule(submodule.path)}><Trash2 size={14}/>{t('repository:submodules.deinitializeAction')}</Button></div></article></div>}
 
     {((selection.kind === 'worktree' && !worktree) || (selection.kind === 'submodule' && !submodule)) && <div className="workspace-hint"><FolderGit2 size={26}/><strong>{t('repository:structure.itemMissing')}</strong><span>{t('repository:structure.selectAgain')}</span></div>}
-    {createOpen && (
-      <CreateWorktreeDialog
+    <CreateWorktreeDialog
+        open={createOpen}
         branches={repository.branches}
         busy={busy === 'create'}
         onClose={() => setCreateOpen(false)}
@@ -114,7 +114,6 @@ export function RepositoryStructurePanel({ repository, activePath, view, query =
           if (await run('create', () => createRepositoryWorktree(repository.path, path, branch, createBranch), message('repository:worktree.created', { path }))) setCreateOpen(false)
         }}
       />
-    )}
     {confirmDialog}
   </section>
 }

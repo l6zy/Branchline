@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRoundedPreference, nextRoundedPreference } from './themePreference'
+import { isRoundedPreference, nativeWindowTheme, nextRoundedPreference } from './themePreference'
 
 describe('rounded theme preference', () => {
   it('accepts only booleans', () => {
@@ -12,5 +12,13 @@ describe('rounded theme preference', () => {
   it('toggles the preference', () => {
     expect(nextRoundedPreference(false)).toBe(true)
     expect(nextRoundedPreference(true)).toBe(false)
+  })
+})
+
+describe('native window theme preference', () => {
+  it('lets the native window follow the operating system in system mode', () => {
+    expect(nativeWindowTheme('system')).toBeNull()
+    expect(nativeWindowTheme('light')).toBe('light')
+    expect(nativeWindowTheme('dark')).toBe('dark')
   })
 })

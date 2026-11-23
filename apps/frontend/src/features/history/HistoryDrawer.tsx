@@ -4,6 +4,7 @@ import { GitCommitHorizontal, History, Rows3, X } from 'lucide-react'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { errorMessage, renderMessage, type MessageContent } from '../../i18n/messages'
 import { Button } from '../../components/Button'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 import { loadFileBlame, loadFileCommitDiff, loadFileHistory, loadLineHistory, loadRepositoryFileImage, type BlameLine, type FileHistoryEntry } from '../../repository'
 import { DiffPanel } from '../diff/DiffPanel'
 import { formatLocalDateTime } from '../../dateTime'
@@ -168,9 +169,8 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
     return loadRepositoryFileImage(repositoryPath, path, 'commit', displayedEntry.hash)
   }, [displayedEntry?.hash, displayedEntry?.parents[0], repositoryPath])
 
-  if (!filePath) return null
-  const fileName = filePath.split(/[\\/]/).pop() || filePath
-  return <div className="drawer-backdrop history-drawer-backdrop" onClick={onClose}><aside className={`history-drawer ${wideDiff ? 'wide-diff' : ''}`} onClick={(event) => event.stopPropagation()}>
+  const fileName = filePath?.split(/[\\/]/).pop() || filePath || ''
+  return <AnimatedModal open={Boolean(filePath)} className="drawer-backdrop history-drawer-backdrop" kind="drawer" onClick={(event) => { if (isMotionBackdropTarget(event)) onClose() }}>{filePath && <aside className={`history-drawer ${wideDiff ? 'wide-diff' : ''}`} onClick={(event) => event.stopPropagation()}>
     <div className="drawer-heading"><div className="history-drawer-title"><span className="eyebrow">{tab === 'line' ? t('history:drawer.lineHistory', { line: activeLineNumber ?? 0 }) : t('history:drawer.tracking')}</span><Tooltip content={filePath}><h2>{fileName}</h2></Tooltip><Tooltip content={filePath}><span className="history-file-path">{filePath}{tab === 'line' && activeLineNumber ? ` · ${t('history:drawer.line', { line: activeLineNumber })}${revision ? ` · ${revision.slice(0, 12)}` : ''}` : ''}</span></Tooltip></div><Button variant="icon" onClick={onClose} tooltip={t('history:drawer.close')} aria-label={t('history:drawer.close')}><X size={18}/></Button></div>
     <div className="history-tabs"><button className={tab === 'history' ? 'active' : ''} onClick={() => changeTab('history')}><History size={14}/>{t('history:drawer.fileHistory')} <span>{numbers.format(history.length)}</span></button><button className={tab === 'blame' ? 'active' : ''} onClick={() => changeTab('blame')}><Rows3 size={14}/>{t('history:drawer.blame')} <span>{numbers.format(blame.length)}</span></button>{activeLineNumber && <button className={tab === 'line' ? 'active' : ''} onClick={() => changeTab('line')}><GitCommitHorizontal size={14}/>{t('history:drawer.lineHistory', { line: activeLineNumber })} <span>{numbers.format(lineHistory.length)}</span></button>}</div>
     {loading && <div className="history-empty">{t('history:drawer.loading')}</div>}
@@ -202,5 +202,5 @@ export function HistoryDrawer({ repositoryPath, filePath, initialTab = 'history'
         </> : <div className="history-empty error">{lineHistoryError ? renderMessage(lineHistoryError, t) : t('history:blame.uncommitted')}</div>}
       </section> : <div className="history-empty blame-detail-empty"><Rows3 size={28}/><strong>{t('history:blame.selectLine')}</strong><span>{t('history:blame.selectDescription')}</span></div>}
     </div>}
-  </aside></div>
+  </aside>}</AnimatedModal>
 }

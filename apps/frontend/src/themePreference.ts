@@ -14,6 +14,10 @@ export function resolveTheme(preference: ThemePreference, systemDark: boolean): 
   return preference === 'system' ? systemDark ? 'dark' : 'light' : preference
 }
 
+export function nativeWindowTheme(preference: ThemePreference): ResolvedTheme | null {
+  return preference === 'system' ? null : preference
+}
+
 export function isRoundedPreference(value: unknown): value is RoundedPreference {
   return typeof value === 'boolean'
 }

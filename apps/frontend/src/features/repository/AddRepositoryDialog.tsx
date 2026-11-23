@@ -3,9 +3,11 @@ import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { useEffect, useRef, useState } from 'react'
 import { CloudDownload, FolderGit2, FolderOpen, Plus, RefreshCw, X } from 'lucide-react'
 import { Button } from '../../components/Button'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 import { createRepository, pickRepositoryDirectory, type RepositoryDetails } from '../../repository'
 
-export function AddRepositoryDialog({ mode, initialParent, onClose, onCreated }: {
+export function AddRepositoryDialog({ open = true, mode, initialParent, onClose, onCreated }: {
+  open?: boolean
   mode: 'clone' | 'init'
   initialParent: string
   onClose: () => void
@@ -22,11 +24,18 @@ export function AddRepositoryDialog({ mode, initialParent, onClose, onCreated }:
   const validName = Boolean(name.trim()) && !/^[.]+$|[<>:"/\\|?*\x00-\x1f]|[. ]$/.test(name)
   const canSubmit = validName && Boolean(parent.trim()) && (mode !== 'clone' || Boolean(source.trim()))
   useEffect(() => {
+    if (!open) return
+    setSource('')
+    setParent(initialParent)
+    setName('')
+    setBusy(false)
+    setError(null)
     const previousFocus = document.activeElement as HTMLElement | null
-    dialogRef.current?.querySelector('input')?.focus()
+    requestAnimationFrame(() => dialogRef.current?.querySelector('input')?.focus())
     return () => { if (previousFocus?.isConnected) previousFocus.focus() }
-  }, [])
+  }, [initialParent, open])
   useEffect(() => {
+    if (!open) return
     if (!busy && !dialogRef.current?.contains(document.activeElement)) dialogRef.current?.querySelector('input')?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -36,7 +45,7 @@ export function AddRepositoryDialog({ mode, initialParent, onClose, onCreated }:
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [busy, onClose])
+  }, [busy, onClose, open])
 
   const browse = async () => {
     try {
@@ -52,7 +61,7 @@ export function AddRepositoryDialog({ mode, initialParent, onClose, onCreated }:
     catch (error) { setError(errorMessage(error)); setBusy(false) }
   }
 
-  return <div className="modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+  return <AnimatedModal open={open} className="modal-backdrop" onPointerDown={(event) => { if (isMotionBackdropTarget(event) && !busy) onClose() }}>
     <section ref={dialogRef} className="branch-dialog repository-add-dialog" role="dialog" aria-modal="true" aria-labelledby="repository-add-title" onKeyDown={(event) => {
       if (event.key === 'Tab') {
         const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)') ?? [])
@@ -72,5 +81,5 @@ export function AddRepositoryDialog({ mode, initialParent, onClose, onCreated }:
         <div className="branch-dialog-actions"><Button type="button" variant="secondary" onClick={onClose} disabled={busy}>{t('repository:cancel')}</Button><Button type="submit" variant="primary" disabled={!canSubmit || busy}>{busy ? <RefreshCw size={14} className="spin"/> : mode === 'clone' ? <CloudDownload size={14}/> : <Plus size={14}/>}<span>{busy ? (mode === 'clone' ? t('repository:add.cloning') : t('repository:add.creating')) : mode === 'clone' ? t('repository:add.clone') : t('repository:add.create')}</span></Button></div>
       </form>
     </section>
-  </div>
+  </AnimatedModal>
 }

@@ -142,10 +142,10 @@ it('clears a virtual file hint after its keyed row scrolls out of the render ran
 it('shows a raw history path and preserves the independently named close action', async () => {
   const onClose = vi.fn()
   const path = 'very/long/原始目录/file.ts'
-  const { container } = await mount(<HistoryDrawer filePath={path} onClose={onClose}/>)
-  expect(container.querySelector('[title]')).toBeNull()
+  await mount(<HistoryDrawer filePath={path} onClose={onClose}/>)
+  expect(document.querySelector('.history-drawer [title]')).toBeNull()
   vi.useFakeTimers()
-  await hover(container.querySelector('.history-file-path')!)
+  await hover(document.querySelector('.history-file-path')!)
   expect(screen.getByRole('tooltip').textContent).toBe(path)
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(onClose).toHaveBeenCalledTimes(1)

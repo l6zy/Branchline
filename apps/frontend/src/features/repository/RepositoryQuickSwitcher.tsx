@@ -1,7 +1,9 @@
 import { Tooltip } from '../../components/tooltip'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedValue } from '../../hooks/useDebouncedValue'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MotionPresence } from '../../components/motion/Motion'
 import { ArrowLeft, Box, Check, ChevronsUpDown, FolderGit2, FolderOpen, GitFork, Search, Star } from 'lucide-react'
 import type { RepositorySnapshot } from '../../repository'
 import type { RecentRepository, RepositoryParent } from './useRepositoryWorkspace'
@@ -40,13 +42,15 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repositor
   const { t } = useAppTranslation()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const appliedQuery = useDebouncedValue(query, 220)
   const [activeIndex, setActiveIndex] = useState(0)
   const [menuPosition, setMenuPosition] = useState({ left: 12, top: 72, width: 420 })
   const rootRef = useRef<HTMLDivElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const attachMenuRef = useCallback((node: HTMLDivElement | null) => { menuRef.current = node }, [])
   const searchRef = useRef<HTMLInputElement>(null)
   const targets = useMemo(() => buildRepositorySwitchTargets(repository, recentRepositories, favorites), [favorites, recentRepositories, repository])
-  const filteredTargets = useMemo(() => filterRepositoryTargets(targets, query), [query, targets])
+  const filteredTargets = useMemo(() => filterRepositoryTargets(targets, appliedQuery), [appliedQuery, targets])
   const quickTargets = useMemo(() => quickAccessRepositoryTargets(targets), [targets])
   const activeTarget = targets.find((target) => target.source === 'current')
   const ActiveIcon = activeTarget ? targetIcon(activeTarget.source) : FolderOpen
@@ -106,7 +110,7 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repositor
     else onOpenRepositoryPath(target.path)
   }
 
-  const shortcutTargets = query.trim() ? [] : quickTargets
+  const shortcutTargets = appliedQuery.trim() ? [] : quickTargets
   const shortcutIds = new Set(shortcutTargets.map((target) => target.id))
   const groups = [
     { id: 'favorites', label: t('repository:switcher.favorites'), items: filteredTargets.filter((target) => target.pinned && target.source !== 'current') },
@@ -135,7 +139,7 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repositor
     </div>
   }
 
-  const menu = open && <div ref={menuRef} className="repo-switcher-menu" style={menuPosition}>
+  const menu = <>
     {parentRepository && <Tooltip content={parentRepository.path}><button type="button" className="parent-repository-action" onClick={() => { closeSwitcher(); onReturnToParentRepository() }}><span className="switcher-icon"><ArrowLeft size={14}/></span><span><strong>{t('repository:switcher.returnParent', { name: parentRepository.name })}</strong><small>{parentRepository.path}</small></span></button></Tooltip>}
     <div className="repository-switch-search"><Search size={14}/><input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0) }} onKeyDown={(event) => {
       if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex((current) => filteredTargets.length ? (current + 1) % filteredTargets.length : 0) }
@@ -149,7 +153,7 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repositor
       {!filteredTargets.length && <div className="repository-switch-empty">{t('repository:manager.noMatch')}</div>}
     </div>
     <button type="button" className="open-repository-action" disabled={openingRepository} onClick={() => { onOpenRepository(); closeSwitcher() }}><span className="switcher-icon"><FolderOpen size={14}/></span><span><strong>{openingRepository ? t('repository:switcher.reading') : t('repository:welcome.openLocal')}</strong><small>{t('repository:switcher.otherHint')}</small></span></button>
-  </div>
+  </>
 
   return <div className="repo-switcher-wrap" ref={rootRef}>
     <Tooltip content={activeTarget ? `${activeTarget.label}\n${activeTarget.path}` : t('repository:welcome.openLocal')}><button type="button" className={`repo-switcher ${open ? 'open' : ''}`} onClick={() => open ? closeSwitcher() : showSwitcher()}>
@@ -157,6 +161,6 @@ export function RepositoryQuickSwitcher({ favorites, onToggleFavorite, repositor
       <div><Tooltip content={activeTarget?.label}><strong>{activeTarget?.label ?? t('repository:welcome.openLocal')}</strong></Tooltip><Tooltip content={activeTarget?.path}><span>{activeTarget?.path ?? t('repository:switcher.choose')}</span></Tooltip></div>
       <ChevronsUpDown size={14}/>
     </button></Tooltip>
-    {menu && createPortal(menu, rootRef.current?.closest('.app-shell') ?? document.body)}
+    {createPortal(<MotionPresence elementRef={attachMenuRef} present={open} className="repo-switcher-menu" style={{ ...menuPosition, transformOrigin: 'top left' }}>{menu}</MotionPresence>, rootRef.current?.closest('.app-shell') ?? document.body)}
   </div>
 }

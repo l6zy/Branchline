@@ -25,6 +25,10 @@ export function hideWhitespaceOnlyReplacements(rows: RepositoryDiffLine[]) {
   const result: RepositoryDiffLine[] = []
   let index = 0
   while (index < rows.length) {
+    if (rows[index].kind !== 'same' && rows[index].code.trim().length === 0) {
+      index += 1
+      continue
+    }
     if (rows[index].kind === 'same') {
       result.push(rows[index])
       index += 1
@@ -66,12 +70,10 @@ export function hideWhitespaceOnlyReplacements(rows: RepositoryDiffLine[]) {
 
 /**
  * Builds a patch that stages every row with a substantive change while keeping
- * whitespace-only replacements out of the index. Callers load `rows` with the
- * whitespace filter enabled, so leading and trailing differences already appear
- * as context rows; `hideWhitespaceOnlyReplacements` also folds differences
- * inside a line.
+ * whitespace-only replacements out of the index. `rows` must retain the full
+ * source diff so omitted whitespace changes do not break patch coordinates.
  */
 export function buildNonWhitespacePatch(filePath: string, rows: RepositoryDiffLine[], fileType?: string) {
   const filtered = hideWhitespaceOnlyReplacements(rows)
-  return hasNonWhitespaceChanges(filtered) ? buildStagePatch(filePath, filtered, fileType, 'stage', filtered) : ''
+  return hasNonWhitespaceChanges(filtered) ? buildStagePatch(filePath, filtered, fileType, 'stage', rows) : ''
 }

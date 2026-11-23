@@ -1,14 +1,42 @@
 import { describe, expect, it } from 'vitest'
-import { captureCommitAnchor, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor } from './historyRefresh'
+import { captureCommitAnchor, findNewHistoryCommitIds, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor, shouldKeepHistoryAtTop } from './historyRefresh'
 
 const commits = (...ids: string[]) => ids.map((id) => ({ id }))
 
 describe('history refresh position', () => {
+  it('identifies commits added by a refresh using their stable identity', () => {
+    expect(findNewHistoryCommitIds(
+      [{ id: 'short-old', fullHash: 'old-hash' }],
+      [{ id: 'working', status: 'working' }, { id: 'short-new', fullHash: 'new-hash' }, { id: 'short-old', fullHash: 'old-hash' }],
+    )).toEqual(new Set(['new-hash']))
+  })
+
+  it('does not report initial history as newly added commits', () => {
+    expect(findNewHistoryCommitIds(null, commits('c3', 'c2', 'c1'))).toEqual(new Set())
+  })
+
+  it('keeps the list at the top only when new commits arrive at the top', () => {
+    expect(shouldKeepHistoryAtTop(true, 2)).toBe(true)
+    expect(shouldKeepHistoryAtTop(false, 2)).toBe(false)
+    expect(shouldKeepHistoryAtTop(true, 0)).toBe(false)
+  })
+
   it('keeps the same visible commit offset when newer commits are inserted above it', () => {
     const before = commits('c5', 'c4', 'c3', 'c2', 'c1')
     const anchor = captureCommitAnchor(before, 2 * 32 + 7, 32)
 
     expect(restoreCommitAnchor(commits('c7', 'c6', ...before.map((commit) => commit.id)), anchor, 32, 0)).toBe(4 * 32 + 7)
+  })
+
+  it('restores the viewport anchor by full hash when the abbreviated hash changes', () => {
+    const before = [{ id: 'abc1234', fullHash: 'abc123456789' }, { id: 'def5678', fullHash: 'def567812345' }]
+    const anchor = captureCommitAnchor(before, 32 + 5, 32)
+
+    expect(restoreCommitAnchor([
+      { id: 'new0000', fullHash: 'new000000000' },
+      { id: 'abc1234', fullHash: 'abc123456789' },
+      { id: 'changed', fullHash: 'def567812345' },
+    ], anchor, 32, 0)).toBe(2 * 32 + 5)
   })
 
   it('keeps the closest previous neighbor when the selected commit disappears', () => {

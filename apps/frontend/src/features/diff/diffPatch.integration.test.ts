@@ -7,15 +7,26 @@ import type { RepositoryDiffLine } from '../../repository'
 import { buildStagePatch, changeBlock, changeLine } from './DiffPanel'
 import { buildNonWhitespacePatch } from '../staging/nonWhitespaceStaging'
 
-function repository(before: string | null, after: string, run: (git: (...args: string[]) => string, path: string) => void) {
+function withRepository(run: (git: (...args: string[]) => string, path: string) => void) {
   const path = mkdtempSync(join(tmpdir(), 'branchline-patch-'))
   const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', windowsHide: true })
   try {
-    git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com'); git('config', 'core.autocrlf', 'false')
-    if (before !== null) { writeFileSync(join(path, 'file.txt'), before); git('add', '.'); git('commit', '-m', 'baseline') }
-    writeFileSync(join(path, 'file.txt'), after)
+    git('init', '--template=')
+    git('config', 'core.autocrlf', 'false')
     run(git, path)
   } finally { rmSync(path, { recursive: true, force: true }) }
+}
+
+function repository(before: string | null, after: string, run: Parameters<typeof withRepository>[0]) {
+  withRepository((git, path) => {
+    const file = join(path, 'file.txt')
+    if (before !== null) {
+      writeFileSync(file, before)
+      git('add', '--', 'file.txt')
+    }
+    writeFileSync(file, after)
+    run(git, path)
+  })
 }
 
 function apply(path: string, patch: string, reverse = false, cached = true) {
@@ -246,6 +257,19 @@ describe('selected diff patches applied by Git', () => {
       expect(git('show', ':file.txt')).toBe('first\nsecond!\nthird\n')
       expect(readFileSync(join(path, 'file.txt'), 'utf8')).toBe('  first  \nsecond!\nthird\n')
     })
+
+    repository('first\nsecond\nthird\n', 'first\n\nsecond!\nthird\n', (git, path) => {
+      const rows: RepositoryDiffLine[] = [
+        { old: 1, next: 1, kind: 'same', code: 'first' },
+        { old: null, next: 2, kind: 'add', code: '' },
+        { old: 2, next: null, kind: 'del', code: 'second' },
+        { old: null, next: 3, kind: 'add', code: 'second!' },
+        { old: 3, next: 4, kind: 'same', code: 'third' },
+      ]
+      apply(path, buildNonWhitespacePatch('file.txt', rows, 'M'))
+      expect(git('show', ':file.txt')).toBe('first\nsecond!\nthird\n')
+      expect(readFileSync(join(path, 'file.txt'), 'utf8')).toBe('first\n\nsecond!\nthird\n')
+    })
   })
 
   it('leaves internal whitespace-only edits unstaged while staging code changes', () => {
@@ -276,13 +300,10 @@ describe('selected diff patches applied by Git', () => {
   })
 
   it('applies a combined non-whitespace patch for multiple files', () => {
-    const path = mkdtempSync(join(tmpdir(), 'branchline-patch-'))
-    const git = (...args: string[]) => execFileSync('git', ['-C', path, ...args], { encoding: 'utf8', windowsHide: true })
-    try {
-      git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.com'); git('config', 'core.autocrlf', 'false')
+    withRepository((git, path) => {
       writeFileSync(join(path, 'a.txt'), 'one\ntwo\n')
       writeFileSync(join(path, 'b.txt'), 'three\nfour\n')
-      git('add', '.'); git('commit', '-m', 'baseline')
+      git('add', '--', 'a.txt', 'b.txt')
       writeFileSync(join(path, 'a.txt'), '  one  \ntwo!\n')
       writeFileSync(join(path, 'b.txt'), 'three\n  four!  \n')
       const aRows: RepositoryDiffLine[] = [
@@ -300,7 +321,7 @@ describe('selected diff patches applied by Git', () => {
       expect(git('show', ':b.txt')).toBe('three\n  four!  \n')
       expect(readFileSync(join(path, 'a.txt'), 'utf8')).toBe('  one  \ntwo!\n')
       expect(readFileSync(join(path, 'b.txt'), 'utf8')).toBe('three\n  four!  \n')
-    } finally { rmSync(path, { recursive: true, force: true }) }
+    })
   })
 
   it('unstages substantive changes while keeping hidden staged whitespace', () => {

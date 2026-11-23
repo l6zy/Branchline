@@ -255,6 +255,30 @@ pub async fn stage_patch(
 }
 
 #[tauri::command]
+pub async fn stage_non_whitespace_patch(
+    repository_path: String,
+    patch: String,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::stage_non_whitespace_patch(&repository_path, &patch)
+    })
+    .await
+    .map_err(|error| task_error("stage_non_whitespace_patch", error))?
+}
+
+#[tauri::command]
+pub async fn load_unstaged_non_whitespace_patch(
+    repository_path: String,
+    file_path: String,
+) -> Result<String, ApplicationError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::load_unstaged_non_whitespace_patch(&repository_path, &file_path)
+    })
+    .await
+    .map_err(|error| task_error("load_unstaged_non_whitespace_patch", error))?
+}
+
+#[tauri::command]
 pub async fn restore_patch(
     repository_path: String,
     patch: String,
@@ -599,6 +623,19 @@ pub async fn push_repository(
     })
     .await
     .map_err(|error| task_error("push_repository", error))?
+}
+
+#[tauri::command]
+pub async fn push_repository_branch(
+    repository_path: String,
+    branch: String,
+) -> Result<RepositorySnapshot, ApplicationError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git::push_repository_branch(&repository_path, &branch)?;
+        git::read_repository(&repository_path)
+    })
+    .await
+    .map_err(|error| task_error("push_repository_branch", error))?
 }
 
 #[tauri::command]

@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react'
 import { GitFork, X } from 'lucide-react'
 import { Button } from '../../components/Button'
 import { CompactSelect } from '../../components/CompactSelect'
+import { AnimatedModal, isMotionBackdropTarget } from '../../components/motion/Motion'
 
-export function CreateWorktreeDialog({ branches, busy, onClose, onSubmit }: {
+export function CreateWorktreeDialog({ open = true, branches, busy, onClose, onSubmit }: {
+  open?: boolean
   branches: string[]
   busy: boolean
   onClose: () => void
@@ -14,9 +16,10 @@ export function CreateWorktreeDialog({ branches, busy, onClose, onSubmit }: {
   const [path, setPath] = useState('')
   const [mode, setMode] = useState<'existing' | 'new'>('existing')
   const [branch, setBranch] = useState(branches[0] ?? '')
+  useEffect(() => { if (open) { setPath(''); setMode('existing'); setBranch(branches[0] ?? '') } }, [open])
   useEffect(() => { if (mode === 'existing' && !branches.includes(branch)) setBranch(branches[0] ?? '') }, [branch, branches, mode])
   const valid = path.trim().length > 0 && branch.trim().length > 0
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}>
+  return <AnimatedModal open={open} className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (isMotionBackdropTarget(event) && !busy) onClose() }}>
     <section className="branch-dialog worktree-dialog" role="dialog" aria-modal="true" aria-label={t('repository:worktree.create')}>
       <div className="branch-dialog-heading"><span className="branch-dialog-icon"><GitFork size={18}/></span><div><h2>{t('repository:worktree.create')}</h2><p>{t('repository:worktree.createHint')}</p></div><Button variant="icon" onClick={onClose} disabled={busy} tooltip={t('repository:close')} aria-label={t('repository:close')}><X size={16}/></Button></div>
       <form onSubmit={(event) => { event.preventDefault(); if (valid) void onSubmit(path.trim(), branch.trim(), mode === 'new') }}>
@@ -27,5 +30,5 @@ export function CreateWorktreeDialog({ branches, busy, onClose, onSubmit }: {
         <div className="branch-dialog-actions"><Button type="button" variant="secondary" onClick={onClose} disabled={busy}>{t('repository:cancel')}</Button><Button type="submit" variant="primary" disabled={!valid || busy}>{busy ? t('repository:worktree.creating') : t('repository:worktree.create')}</Button></div>
       </form>
     </section>
-  </div>
+  </AnimatedModal>
 }

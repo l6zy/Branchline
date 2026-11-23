@@ -189,28 +189,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|value| value.as_ref().to_string_lossy().to_string())
-        .collect();
-    let started = SystemTime::now();
-    let mut command = Command::new("git");
-    command.arg("-C").arg(path).args(&args);
-    #[cfg(target_os = "windows")]
-    command.creation_flags(0x08000000);
-    let output = command
-        .output()
-        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
-    record_command(path, &args, &output, started);
-    if !output.status.success() {
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if message.is_empty() {
-            ApplicationError::new("git.commandFailed")
-        } else {
-            ApplicationError::native(message)
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(String::from_utf8_lossy(&command_output_bytes(path, args)?).into_owned())
 }
 
 fn command_output_bytes<I, S>(path: &Path, args: I) -> Result<Vec<u8>, ApplicationError>
@@ -222,15 +201,43 @@ where
         .into_iter()
         .map(|value| value.as_ref().to_string_lossy().to_string())
         .collect();
+    command_output_with_input(path, &args, None)
+}
+
+fn command_output_with_input(
+    path: &Path,
+    args: &[String],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, ApplicationError> {
     let started = SystemTime::now();
     let mut command = Command::new("git");
-    command.arg("-C").arg(path).args(&args);
+    command.arg("-C").arg(path).args(args);
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
-    let output = command
-        .output()
-        .map_err(|error| ApplicationError::new("git.start").cause(error))?;
-    record_command(path, &args, &output, started);
+    let (output, written) = if let Some(input) = input {
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| ApplicationError::new("git.start").cause(error))?;
+        let mut stdin = child.stdin.take().expect("piped git stdin");
+        // Drain both output streams while writing, even if Git reports an early error.
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(move || stdin.write_all(input));
+            let output = child.wait_with_output();
+            (output, writer.join().expect("git input writer"))
+        })
+    } else {
+        (
+            Ok(command
+                .output()
+                .map_err(|error| ApplicationError::new("git.start").cause(error))?),
+            Ok(()),
+        )
+    };
+    let output = output.map_err(|error| ApplicationError::new("git.wait").cause(error))?;
+    record_command(path, args, &output, started);
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
@@ -239,6 +246,7 @@ where
             ApplicationError::native(message)
         });
     }
+    written.map_err(|error| ApplicationError::new("git.commandFailed").cause(error))?;
     Ok(output.stdout)
 }
 
@@ -452,17 +460,32 @@ pub fn git_output_owned(path: &Path, args: &[String]) -> Result<String, Applicat
 }
 
 fn git_apply_cached(path: &Path, patch: &str, reverse: bool) -> Result<(), ApplicationError> {
+    git_apply_cached_with_whitespace_option(path, patch, reverse, false)
+}
+
+fn git_apply_cached_ignoring_whitespace(path: &Path, patch: &str) -> Result<(), ApplicationError> {
+    git_apply_cached_with_whitespace_option(path, patch, false, true)
+}
+
+fn git_apply_cached_with_whitespace_option(
+    path: &Path,
+    patch: &str,
+    reverse: bool,
+    ignore_context_whitespace: bool,
+) -> Result<(), ApplicationError> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(path).args([
-        "apply",
-        "--cached",
-        "--recount",
-        "--whitespace=nowarn",
-        "-",
-    ]);
+    command
+        .arg("-C")
+        .arg(path)
+        .args(["apply", "--cached", "--recount", "--whitespace=nowarn"]);
     if reverse {
         command.arg("--reverse");
     }
+    if ignore_context_whitespace {
+        command.arg("--unidiff-zero");
+        command.arg("--ignore-whitespace");
+    }
+    command.arg("-");
     #[cfg(target_os = "windows")]
     command.creation_flags(0x08000000);
     let mut child = command
@@ -1069,6 +1092,32 @@ fn hunk_start(header: &str, marker: char) -> Option<usize> {
         .and_then(|value| value.parse::<usize>().ok())
 }
 
+fn equal_ignoring_whitespace(left: &str, right: &str) -> bool {
+    left.chars()
+        .filter(|character| !character.is_whitespace())
+        .eq(right.chars().filter(|character| !character.is_whitespace()))
+}
+
+fn has_non_whitespace_diff(path: &Path, args: &[String]) -> bool {
+    let mut filtered_args = args.to_vec();
+    let separator = filtered_args
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(filtered_args.len());
+    filtered_args.splice(
+        separator..separator,
+        [
+            "--ignore-all-space".to_string(),
+            "--ignore-blank-lines".to_string(),
+        ],
+    );
+    !optional_git_output(
+        path,
+        &filtered_args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )
+    .is_empty()
+}
+
 fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
     let mut rows: Vec<DiffLine> = Vec::new();
     let mut old_line = 0usize;
@@ -1146,6 +1195,11 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
         return rows;
     }
 
+    let rows: Vec<DiffLine> = rows
+        .into_iter()
+        .filter(|row| row.kind == "same" || !row.code.trim().is_empty())
+        .collect();
+
     let mut normalized = Vec::with_capacity(rows.len());
     let mut index = 0;
     while index < rows.len() {
@@ -1176,7 +1230,7 @@ fn parse_diff_text(diff: &str, show_whitespace: bool) -> Vec<DiffLine> {
             let deletion = deletions.get(pair_index).map(|(_, row)| row);
             let addition = additions.get(pair_index).map(|(_, row)| row);
             if let (Some(deletion), Some(addition)) = (deletion, addition) {
-                if deletion.code.trim() == addition.code.trim() {
+                if equal_ignoring_whitespace(&deletion.code, &addition.code) {
                     normalized.append(&mut pending_deletions);
                     normalized.append(&mut pending_additions);
                     normalized.push(DiffLine {
@@ -1223,6 +1277,12 @@ pub fn parse_diff(
     .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path.into());
+    if !show_whitespace
+        && git_success(path, &["ls-files", "--error-unmatch", "--", file_path])
+        && !has_non_whitespace_diff(path, &args)
+    {
+        return Ok(Vec::new());
+    }
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
     let mut rows = parse_diff_text(&diff, show_whitespace);
     if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", file_path]) {
@@ -1253,6 +1313,7 @@ pub fn parse_diff(
                     old_no_newline: false,
                     new_no_newline: !content.ends_with('\n') && index + 1 == line_count,
                 })
+                .filter(|row| show_whitespace || !row.code.trim().is_empty())
                 .collect();
         }
     }
@@ -1277,9 +1338,13 @@ pub fn parse_unstaged_diff(
     .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path.clone());
+    let is_tracked = git_success(path, &["ls-files", "--error-unmatch", "--", &file_path]);
+    if !show_whitespace && is_tracked && !has_non_whitespace_diff(path, &args) {
+        return Ok(Vec::new());
+    }
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
     let mut rows = parse_diff_text(&diff, show_whitespace);
-    if rows.is_empty() && !git_success(path, &["ls-files", "--error-unmatch", "--", &file_path]) {
+    if rows.is_empty() && !is_tracked {
         let root = path
             .canonicalize()
             .map_err(|error| ApplicationError::new("repository.access").cause(error))?;
@@ -1307,10 +1372,62 @@ pub fn parse_unstaged_diff(
                     old_no_newline: false,
                     new_no_newline: !content.ends_with('\n') && index + 1 == line_count,
                 })
+                .filter(|row| show_whitespace || !row.code.trim().is_empty())
                 .collect();
         }
     }
     Ok(rows)
+}
+
+pub fn load_unstaged_non_whitespace_patch(
+    repository_path: &str,
+    file_path: &str,
+) -> Result<String, ApplicationError> {
+    let root = repository_root(repository_path)?;
+    let file_path = validated_file_path(file_path)?;
+    let patch = git_output(
+        &root,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--no-color",
+            "--ignore-all-space",
+            "--ignore-blank-lines",
+            "--unified=0",
+            "--",
+            &file_path,
+        ],
+    )?;
+    if patch.is_empty() {
+        return Ok(patch);
+    }
+    let mut has_content_change = false;
+    let patch = patch
+        .lines()
+        .filter(|line| {
+            if line.starts_with("+++") || line.starts_with("---") {
+                return true;
+            }
+            let Some(code) = line.strip_prefix('+').or_else(|| line.strip_prefix('-')) else {
+                return true;
+            };
+            if code.trim().is_empty() {
+                return false;
+            }
+            has_content_change = true;
+            true
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !has_content_change {
+        return Ok(String::new());
+    }
+    Ok(if patch.is_empty() {
+        patch
+    } else {
+        format!("{patch}\n")
+    })
 }
 
 pub fn parse_staged_diff(
@@ -1332,6 +1449,9 @@ pub fn parse_staged_diff(
     .collect::<Vec<_>>();
     args.push("--".into());
     args.push(file_path);
+    if !show_whitespace && !has_non_whitespace_diff(path, &args) {
+        return Ok(Vec::new());
+    }
     let diff = optional_git_output(path, &args.iter().map(String::as_str).collect::<Vec<_>>());
     Ok(parse_diff_text(&diff, show_whitespace))
 }
@@ -1670,7 +1790,7 @@ fn parse_branches(path: &Path) -> Vec<String> {
         path,
         &[
             "for-each-ref",
-            "--format=%(refname:short)",
+            "--format=%(refname:strip=2)",
             "refs/heads",
             "refs/remotes",
         ],
@@ -1688,7 +1808,11 @@ fn parse_branches(path: &Path) -> Vec<String> {
 pub(crate) fn parse_remote_branches(path: &Path) -> Vec<String> {
     optional_git_output(
         path,
-        &["for-each-ref", "--format=%(refname:short)", "refs/remotes"],
+        &[
+            "for-each-ref",
+            "--format=%(refname:strip=2)",
+            "refs/remotes",
+        ],
     )
     .lines()
     .map(str::trim)
@@ -1700,7 +1824,7 @@ pub(crate) fn parse_remote_branches(path: &Path) -> Vec<String> {
 pub(crate) fn parse_local_branches(path: &Path) -> Vec<String> {
     optional_git_output(
         path,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        &["for-each-ref", "--format=%(refname:strip=2)", "refs/heads"],
     )
     .lines()
     .map(str::trim)
@@ -1731,7 +1855,7 @@ fn parse_branch_tracking(path: &Path) -> HashMap<String, RepositoryBranchTrackin
         path,
         &[
             "for-each-ref",
-            "--format=%(refname:short)\t%(upstream:short)",
+            "--format=%(refname:strip=2)\t%(upstream:short)",
             "refs/heads",
         ],
     );
@@ -2609,6 +2733,40 @@ pub fn push_repository(repository_path: &str) -> Result<(), ApplicationError> {
     git_output(&root, &["push"]).map(|_| ())
 }
 
+pub fn push_repository_branch(repository_path: &str, branch: &str) -> Result<(), ApplicationError> {
+    let root = repository_root(repository_path)?;
+    let local_ref = format!("refs/heads/{branch}");
+    if !git_success(&root, &["show-ref", "--verify", "--quiet", &local_ref]) {
+        return Err(ApplicationError::new("branch.localMissing").param("branch", branch));
+    }
+    let upstream = git_output(
+        &root,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:remotename)%00%(upstream:remoteref)",
+            &local_ref,
+        ],
+    )?;
+    if let Some((remote, remote_ref)) = upstream
+        .lines()
+        .next()
+        .and_then(|line| line.split_once('\0'))
+    {
+        if !remote.is_empty() && !remote_ref.is_empty() {
+            let refspec = format!("{local_ref}:{remote_ref}");
+            return git_output(&root, &["push", "--", remote, &refspec]).map(|_| ());
+        }
+    }
+    if optional_git_output(&root, &["remote", "get-url", "origin"])
+        .trim()
+        .is_empty()
+    {
+        return Err(ApplicationError::new("repository.originMissing"));
+    }
+    let refspec = format!("{local_ref}:{local_ref}");
+    git_output(&root, &["push", "--set-upstream", "--", "origin", &refspec]).map(|_| ())
+}
+
 pub fn reset_repository_to_commit(
     repository_path: &str,
     commit: &str,
@@ -3212,24 +3370,40 @@ pub fn stage_files(
 ) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
     let file_paths = validated_file_args(file_paths)?;
-    for file_path in &file_paths {
-        if !unresolved_paths(&root).iter().any(|path| path == file_path) {
-            continue;
-        }
-        let target = repository_file_target(&root, file_path)?;
-        if !force
-            && std::fs::read_to_string(&target)
+    if !force {
+        let unresolved: HashSet<_> = unresolved_paths(&root).into_iter().collect();
+        for file_path in file_paths.iter().filter(|path| unresolved.contains(*path)) {
+            let target = repository_file_target(&root, file_path)?;
+            if fs::read_to_string(&target)
                 .ok()
                 .is_some_and(|content| has_conflict_markers(&content))
-        {
-            return Err(ApplicationError::new("conflict.resolveAll")
-                .param("file_path", file_path.to_string()));
+            {
+                return Err(ApplicationError::new("conflict.resolveAll")
+                    .param("file_path", file_path.to_string()));
+            }
         }
     }
-    let mut args = vec!["add".to_string(), "--".to_string()];
-    args.extend(file_paths);
-    git_output_owned(&root, &args)?;
+    git_with_literal_paths(&root, &["add"], &file_paths)?;
     Ok(parse_changed_files(&root))
+}
+
+fn git_with_literal_paths(
+    root: &Path,
+    command: &[&str],
+    paths: &[String],
+) -> Result<(), ApplicationError> {
+    let args = ["--literal-pathspecs"]
+        .into_iter()
+        .chain(command.iter().copied())
+        .chain(["--pathspec-from-file=-", "--pathspec-file-nul"])
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+    }
+    command_output_with_input(root, &args, Some(&input)).map(|_| ())
 }
 
 pub fn stage_patch(
@@ -3264,6 +3438,32 @@ pub fn stage_patch(
         return Err(ApplicationError::new("patch.stagePathRequired"));
     }
     git_apply_cached(&root, &patch, false)?;
+    Ok(parse_changed_files(&root))
+}
+
+pub fn stage_non_whitespace_patch(
+    repository_path: &str,
+    patch: &str,
+) -> Result<Vec<RepositoryFile>, ApplicationError> {
+    let root = repository_root(repository_path)?;
+    let patch = patch.trim_start_matches('\u{feff}');
+    if patch.trim().is_empty() {
+        return Err(ApplicationError::new("patch.stageSelectionRequired"));
+    }
+    let mut file_count = 0;
+    for line in patch.lines() {
+        if let Some(path) = line
+            .strip_prefix("+++ b/")
+            .or_else(|| line.strip_prefix("--- a/"))
+        {
+            validated_file_path(path)?;
+            file_count += 1;
+        }
+    }
+    if file_count == 0 {
+        return Err(ApplicationError::new("patch.stagePathRequired"));
+    }
+    git_apply_cached_ignoring_whitespace(&root, patch)?;
     Ok(parse_changed_files(&root))
 }
 
@@ -3349,18 +3549,10 @@ pub fn unstage_files(
     file_paths: &[String],
 ) -> Result<Vec<RepositoryFile>, ApplicationError> {
     let root = repository_root(repository_path)?;
-    let mut args = vec![
-        "restore".to_string(),
-        "--staged".to_string(),
-        "--".to_string(),
-    ];
-    args.extend(validated_file_args(file_paths)?);
-    if git_output_owned(&root, &args).is_ok() {
-        return Ok(parse_changed_files(&root));
+    let file_paths = validated_file_args(file_paths)?;
+    if git_with_literal_paths(&root, &["restore", "--staged"], &file_paths).is_err() {
+        git_with_literal_paths(&root, &["reset", "HEAD"], &file_paths)?;
     }
-    let mut fallback = vec!["reset".to_string(), "HEAD".to_string(), "--".to_string()];
-    fallback.extend(file_paths.iter().cloned());
-    git_output_owned(&root, &fallback)?;
     Ok(parse_changed_files(&root))
 }
 
@@ -4373,7 +4565,7 @@ pub fn preview_branch_prefix(
     }
     let mut branches: Vec<String> = optional_git_output(
         &root,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        &["for-each-ref", "--format=%(refname:strip=2)", "refs/heads"],
     )
     .lines()
     .map(str::trim)
@@ -4495,6 +4687,32 @@ mod tests {
     }
 
     #[test]
+    fn keeps_local_branch_names_unqualified_when_a_case_variant_tag_exists() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let branch = "release_rdbms_oceanbase_guass";
+        git_output(&repository.0, &["config", "core.ignoreCase", "true"])
+            .expect("configure case-insensitive refs");
+        git_output(&repository.0, &["branch", branch]).expect("create local branch");
+        git_output(&repository.0, &["tag", "release_RDBMS_oceanbase_guass"])
+            .expect("create case-variant tag");
+
+        assert!(parse_local_branches(&repository.0)
+            .iter()
+            .any(|name| name == branch));
+        assert!(parse_branches(&repository.0)
+            .iter()
+            .any(|name| name == branch));
+        switch_repository_branch(&path, branch).expect("switch to local branch");
+        assert_eq!(
+            git_output(&repository.0, &["branch", "--show-current"])
+                .expect("read current branch")
+                .trim(),
+            branch
+        );
+    }
+
+    #[test]
     fn repository_state_token_changes_with_worktree_and_history() {
         let repository = test_repository();
         let clean = repository_state_token(&repository.0.to_string_lossy())
@@ -4536,6 +4754,125 @@ mod tests {
             .expect("read regular diff")
             .iter()
             .any(|row| row.code.trim() == "first" && row.kind != "same"));
+    }
+
+    #[test]
+    fn ignores_blank_line_changes_when_whitespace_is_hidden() {
+        let repository = test_repository();
+        fs::write(repository.0.join("README.md"), "first\nsecond\n")
+            .expect("write baseline with two lines");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
+        git_output(&repository.0, &["commit", "-m", "two-line baseline"]).expect("commit baseline");
+        fs::write(repository.0.join("README.md"), "first\n\nsecond\n").expect("add a blank line");
+
+        let rows = parse_unstaged_diff(&repository.0, "README.md", false)
+            .expect("read whitespace-filtered diff");
+
+        assert!(rows.is_empty());
+        assert!(parse_unstaged_diff(&repository.0, "README.md", true)
+            .expect("read regular diff")
+            .iter()
+            .any(|row| row.code.is_empty() && row.kind == "add"));
+    }
+
+    #[test]
+    fn ignores_internal_whitespace_changes_when_whitespace_is_hidden() {
+        let repository = test_repository();
+        fs::write(
+            repository.0.join("README.md"),
+            "using System;\nusing Example;\n",
+        )
+        .expect("write baseline with compact spacing");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
+        git_output(&repository.0, &["commit", "-m", "spacing baseline"]).expect("commit baseline");
+        fs::write(
+            repository.0.join("README.md"),
+            "using  System;\nusing Example;\n",
+        )
+        .expect("change internal whitespace");
+
+        let hidden = parse_unstaged_diff(&repository.0, "README.md", false)
+            .expect("read whitespace-filtered diff");
+        let visible =
+            parse_unstaged_diff(&repository.0, "README.md", true).expect("read regular diff");
+
+        assert!(hidden.iter().all(|row| row.kind == "same"));
+        assert!(visible.iter().any(|row| row.kind != "same"));
+    }
+
+    #[test]
+    fn hides_large_format_only_rewrites_when_whitespace_is_hidden() {
+        let repository = test_repository();
+        let before = (0..240)
+            .map(|index| format!("call_{index}(first, second);\n\n"))
+            .collect::<String>();
+        let after = (0..240)
+            .map(|index| format!("call_{index} ( first , second ) ;\n"))
+            .collect::<String>();
+        fs::write(repository.0.join("README.md"), &before).expect("write formatted baseline");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage formatted baseline");
+        git_output(&repository.0, &["commit", "-m", "format baseline"]).expect("commit baseline");
+        fs::write(repository.0.join("README.md"), &after).expect("rewrite formatting");
+
+        let rows = parse_unstaged_diff(&repository.0, "README.md", false)
+            .expect("read whitespace-filtered diff");
+
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn non_whitespace_patch_uses_git_alignment_for_whitespace_only_file_changes() {
+        let repository = test_repository();
+        fs::write(
+            repository.0.join("README.md"),
+            "first\nusing System;\ncall(one,two)\nlast\n",
+        )
+        .expect("write baseline content");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
+        git_output(&repository.0, &["commit", "-m", "patch baseline"]).expect("commit baseline");
+        fs::write(
+            repository.0.join("README.md"),
+            " first \n\nusing  System;\ncall( one, two )\n last\n",
+        )
+        .expect("change only whitespace and line alignment");
+
+        let patch =
+            load_unstaged_non_whitespace_patch(&repository.0.to_string_lossy(), "README.md")
+                .expect("load non-whitespace patch");
+
+        assert!(patch.is_empty(), "unexpected patch:\n{patch}");
+    }
+
+    #[test]
+    fn non_whitespace_patch_stages_code_change_without_adjacent_whitespace_changes() {
+        let repository = test_repository();
+        fs::write(
+            repository.0.join("README.md"),
+            "first\nusing System;\ncall(one,two)\nlast\n",
+        )
+        .expect("write baseline content");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage baseline");
+        git_output(&repository.0, &["commit", "-m", "patch baseline"]).expect("commit baseline");
+        fs::write(
+            repository.0.join("README.md"),
+            " first \n\nusing  System;\ncall( one, two! )\n last\n",
+        )
+        .expect("change code and whitespace");
+
+        let path = repository.0.to_string_lossy().to_string();
+        let patch = load_unstaged_non_whitespace_patch(&path, "README.md")
+            .expect("load non-whitespace patch");
+        assert!(!patch.lines().any(|line| line == "+" || line == "-"));
+        stage_non_whitespace_patch(&path, &patch).expect("stage non-whitespace patch");
+
+        assert_eq!(
+            git_output(&repository.0, &["show", ":README.md"]).expect("read index file"),
+            "first\nusing System;\ncall( one, two! )\nlast\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.0.join("README.md")).expect("read worktree file"),
+            " first \n\nusing  System;\ncall( one, two! )\n last\n"
+        );
     }
 
     #[test]
@@ -4965,6 +5302,117 @@ mod tests {
         assert!(preview_branch_prefix(&path, "feat")
             .expect("preview deleted prefix")
             .is_empty());
+    }
+
+    #[test]
+    fn pushes_a_named_local_branch_to_its_upstream_without_switching_branches() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let remote = TestRepository(repository.0.with_extension("publish.git"));
+        fs::create_dir_all(&remote.0).expect("create publish remote directory");
+        git_output(&remote.0, &["init", "--bare"]).expect("init publish remote");
+        let remote_path = remote.0.to_string_lossy().to_string();
+        git_output(&repository.0, &["remote", "add", "publish", &remote_path])
+            .expect("add publish remote");
+        let original_branch =
+            git_output(&repository.0, &["branch", "--show-current"]).expect("read original branch");
+        git_output(&repository.0, &["checkout", "-b", "feature/local-push"])
+            .expect("create local branch");
+        git_output(
+            &repository.0,
+            &["push", "publish", "HEAD:refs/heads/review/remote-name"],
+        )
+        .expect("seed upstream branch");
+        git_output(
+            &repository.0,
+            &[
+                "branch",
+                "--set-upstream-to=publish/review/remote-name",
+                "feature/local-push",
+            ],
+        )
+        .expect("configure upstream");
+        fs::write(repository.0.join("README.md"), "local branch update\n")
+            .expect("write local branch update");
+        git_output(&repository.0, &["add", "README.md"]).expect("stage local branch update");
+        git_output(&repository.0, &["commit", "-m", "local branch update"])
+            .expect("commit local branch update");
+        git_output(&repository.0, &["checkout", original_branch.trim()])
+            .expect("return to original branch");
+
+        push_repository_branch(&path, "feature/local-push").expect("push named branch");
+
+        let local_head = git_output(&repository.0, &["rev-parse", "feature/local-push"])
+            .expect("read local head");
+        let remote_head = git_output(&remote.0, &["rev-parse", "refs/heads/review/remote-name"])
+            .expect("read upstream head");
+        assert_eq!(local_head.trim(), remote_head.trim());
+        assert_eq!(
+            git_output(&repository.0, &["branch", "--show-current"])
+                .expect("read current branch")
+                .trim(),
+            original_branch.trim()
+        );
+    }
+
+    #[test]
+    fn publishes_a_branch_without_upstream_to_origin() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let remote = TestRepository(repository.0.with_extension("origin.git"));
+        fs::create_dir_all(&remote.0).expect("create origin directory");
+        git_output(&remote.0, &["init", "--bare"]).expect("init origin");
+        let remote_path = remote.0.to_string_lossy().to_string();
+        git_output(&repository.0, &["remote", "add", "origin", &remote_path]).expect("add origin");
+        git_output(&repository.0, &["branch", "feature/publish"]).expect("create local branch");
+
+        push_repository_branch(&path, "feature/publish").expect("publish named branch");
+
+        let upstream = git_output(
+            &repository.0,
+            &[
+                "rev-parse",
+                "--symbolic-full-name",
+                "feature/publish@{upstream}",
+            ],
+        )
+        .expect("read configured upstream");
+        assert_eq!(upstream.trim(), "refs/remotes/origin/feature/publish");
+        assert_eq!(
+            push_repository_branch(&path, "origin/feature/publish")
+                .unwrap_err()
+                .code,
+            "branch.localMissing"
+        );
+    }
+
+    #[test]
+    fn stages_and_unstages_a_large_batch_of_literal_paths() {
+        let repository = test_repository();
+        let path = repository.0.to_string_lossy().to_string();
+        let mut paths = vec!["[draft] notes.txt".to_string()];
+        paths
+            .extend((0..390).map(|index| format!("{index:03}-{}.txt", "long filename ".repeat(6))));
+        assert!(paths.iter().map(|path| path.len() + 3).sum::<usize>() > 32_767);
+        for file in paths.iter().map(String::as_str).chain(["d notes.txt"]) {
+            fs::write(repository.0.join(file), "content\n").expect("write worktree file");
+        }
+
+        let staged = stage_files(&path, &paths, false).expect("stage batch");
+        assert_eq!(
+            staged.iter().filter(|file| file.staged).count(),
+            paths.len()
+        );
+        assert!(staged
+            .iter()
+            .any(|file| file.path == "[draft] notes.txt" && file.staged));
+        assert!(staged
+            .iter()
+            .any(|file| file.path == "d notes.txt" && !file.staged));
+
+        let unstaged = unstage_files(&path, &paths).expect("unstage batch");
+        assert_eq!(unstaged.len(), paths.len() + 1);
+        assert!(unstaged.iter().all(|file| !file.staged && file.unstaged));
     }
 
     #[test]

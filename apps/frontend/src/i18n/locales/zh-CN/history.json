@@ -62,6 +62,7 @@
       "remote": "远程",
       "autoFastForward": "自动快进",
       "pull": "拉取对应分支",
+      "push": "推送对应分支",
       "mergeInto": "合并到 {{currentBranch}}",
       "copyName": "复制分支名",
       "delete": "删除分支",

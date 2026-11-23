@@ -5,14 +5,17 @@ import type { Locale } from './i18n/localePreference'
 import { operationLabel, operationMessage } from './i18n/operationLabels'
 import { useAppTranslation } from './i18n/useAppTranslation'
 import { getShortcutModifier } from './platformShortcut'
-import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryFileImage, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
+import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
+import { useDebouncedValue } from './hooks/useDebouncedValue'
+import { applyRepositoryStash, cherryPickRepositoryCommit, createRepositoryBranch, createRepositoryTag, deleteBranchPrefix, deleteRepositoryBranch, dropRepositoryStash, loadFileCommitDiff, loadRepository, loadRepositoryFileImage, loadRepositoryHistory, loadRepositoryCommitFiles, loadRepositoryCommitFileContent, loadRepositoryCommitTreeFiles, loadRepositoryCommitStats, loadRepositoryFileDiff, loadRepositoryStashFileDiff, loadRepositoryStashFiles, mergeRepositoryReference, previewBranchPrefix, pullRepositoryBranch, pushRepository, pushRepositoryBranch, rebaseRepositoryOnto, resetRepositoryToCommit, revertRepositoryCommit, switchRepositoryBranch, undoLastCommit, type RepositoryCommitStats, type RepositoryDiffLine, type RepositoryFile, type RepositorySnapshot } from './repository'
 import { ContextMenu } from './components/ContextMenu'
 import { Button } from './components/Button'
 import { LanguageSelect } from './components/LanguageSelect'
 import { CompactSelect } from './components/CompactSelect'
 import { useConfirmDialog } from './components/ConfirmDialog'
+import { AnimatedCollapse, AnimatedModal, AnimatedPage, AnimatedTabBar, isMotionBackdropTarget, MotionPresence, useInertRef } from './components/motion/Motion'
 import { useRepositoryWorkspace } from './features/repository/useRepositoryWorkspace'
 import { StagingPage } from './features/staging/StagingPage'
 import { HistoryDrawer } from './features/history/HistoryDrawer'
@@ -34,7 +37,7 @@ import { StashPage } from './features/stash/StashPage'
 import { RebaseDialog } from './features/operation/RebaseDialog'
 import { CherryPickDialog } from './features/operation/CherryPickDialog'
 import { buildCommitGraphLayout, lanePosition, type CommitGraphRow } from './features/graph/commitGraphLayout'
-import { captureCommitAnchor, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor, type CommitViewportAnchor } from './features/history/historyRefresh'
+import { captureCommitAnchor, findNewHistoryCommitIds, resolveCommitSelection, resolveCommitSelectionAfterRefresh, restoreCommitAnchor, shouldKeepHistoryAtTop, type CommitViewportAnchor } from './features/history/historyRefresh'
 import { trackedRemoteReference, visibleCommitReferences, type BranchTrackingMap } from './features/history/historyReferences'
 import { matchingCommitIds, nextSearchMatch, retainUnchangedSearchSummary, visibleHistoryCommits, type HistorySearchMode, type HistorySearchSummary } from './features/history/historySearch'
 import { createWorkingTreeCommit, resolveWorkingTreeParent, WORKING_TREE_COMMIT_ID } from './features/history/workingTreeCommit'
@@ -46,7 +49,7 @@ import { formatLocalDateTime } from './dateTime'
 import { isAutoPullBranchSettings, toggleAutoPullBranch as toggleConfiguredAutoPullBranch } from './features/repository/branchSwitch'
 import { useAutoFastForward } from './features/repository/useAutoFastForward'
 import { isBooleanRecord, usePersistentState } from './persistentState'
-import { isRoundedPreference, isThemePreference, nextRoundedPreference, nextThemePreference, resolveTheme, type ThemePreference } from './themePreference'
+import { isRoundedPreference, isThemePreference, nativeWindowTheme, nextRoundedPreference, nextThemePreference, resolveTheme, type ThemePreference } from './themePreference'
 import { DEFAULT_HISTORY_COLUMN_WIDTHS, DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryColumnWidths, isHistoryVisibleColumns } from './features/history/historyColumns'
 import { committerInitials, committerName, isHistoryCommitVisibleOnSelectedBranches, matchesCommitterFilter, reachableHistoryCommitIds, toggleFilterValue, unloadedHistoryBranches } from './features/history/historyFilters'
 import { acquireOperationLock, releaseOperationLock } from './features/operation/operationLock'
@@ -195,7 +198,7 @@ function formatCommitListTime(commit: Commit, locale: Locale) {
   return timestamp === null ? commit.time : new Intl.DateTimeFormat(locale, { year: new Date(timestamp).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(timestamp)
 }
 
-export function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktreeBranches = {}, currentBranch, autoPullBranches = [], pullingBranches = [], onToggleAutoPull, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; worktreeBranches?: Record<string, string>; currentBranch?: string; autoPullBranches?: string[]; pullingBranches?: string[]; onToggleAutoPull: (branch: string) => void; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
+export function BranchTree({ branches, remoteBranches = [], branchTracking = {}, worktreeBranches = {}, currentBranch, autoPullBranches = [], pullingBranches = [], onToggleAutoPull, onCreateBranch, onDeletePrefix, onJumpBranch, onSwitchBranch, onPullBranch, onPushBranch, onMergeBranch, onDeleteBranch, onCopyBranch }: { branches: string[]; remoteBranches?: string[]; branchTracking?: Record<string, { upstream?: string; ahead: number; behind: number }>; worktreeBranches?: Record<string, string>; currentBranch?: string; autoPullBranches?: string[]; pullingBranches?: string[]; onToggleAutoPull: (branch: string) => void; onCreateBranch: (prefix?: string) => void; onDeletePrefix: (prefix: string) => void; onJumpBranch: (branch: string) => void; onSwitchBranch: (branch: string) => void; onPullBranch: (branch: string) => void; onPushBranch: (branch: string) => void; onMergeBranch: (branch: string) => void; onDeleteBranch: (branch: string) => void; onCopyBranch: (branch: string) => void }) {
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
@@ -203,7 +206,8 @@ export function BranchTree({ branches, remoteBranches = [], branchTracking = {},
   const [contextBranch, setContextBranch] = useState<{ branch: string; x: number; y: number } | null>(null)
   const [contextPrefix, setContextPrefix] = useState<{ prefix: string; x: number; y: number } | null>(null)
   const [branchQuery, setBranchQuery] = useState('')
-  const normalizedBranchQuery = branchQuery.trim().toLocaleLowerCase()
+  const appliedBranchQuery = useDebouncedValue(branchQuery, 220)
+  const normalizedBranchQuery = appliedBranchQuery.trim().toLocaleLowerCase()
   const toggle = (key: string) => setOpen((value) => ({ ...value, [key]: !value[key] }))
   const openContextMenu = (event: React.MouseEvent, branch: string) => {
     event.preventDefault()
@@ -248,12 +252,12 @@ export function BranchTree({ branches, remoteBranches = [], branchTracking = {},
     <div className="section-title"><span>{t('history:app.branches.heading')}</span><Tooltip content={t('history:app.branches.create')}><button className="section-add" onClick={() => onCreateBranch()} aria-label={t('history:app.branches.create')}><Plus size={14}/></button></Tooltip></div>
     <label className="branch-filter"><Search size={13}/><input type="search" aria-label={t('history:app.branches.filter')} placeholder={t('history:app.branches.filter')} value={branchQuery} onChange={(event) => setBranchQuery(event.target.value)}/>{branchQuery && <button type="button" onClick={() => setBranchQuery('')} aria-label={t('history:app.branches.clearFilter')}><X size={13}/></button>}</label>
     <button className="tree-row group" onClick={() => toggle('local')}>{open.local || normalizedBranchQuery ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<GitBranch size={14}/><span>{t('history:app.branches.local')}</span><span className="count">{new Intl.NumberFormat(locale).format(normalizedBranchQuery ? visibleBranchNames.length : branchNames.length)}</span></button>
-    {(open.local || normalizedBranchQuery) && <div className="tree-children">
+    <AnimatedCollapse open={Boolean(open.local || normalizedBranchQuery)} className="tree-children">
       {(grouped[''] ?? []).map((branch) => <Tooltip content={branch} key={branch}><button className={`tree-row ${branch === currentBranch ? 'active' : ''} ${pullingBranches.includes(branch) ? 'pulling' : ''}`}  onClick={() => onJumpBranch(branch)} onDoubleClick={() => { if (!pullingBranches.includes(branch)) onSwitchBranch(branch) }} onContextMenu={(event) => openContextMenu(event, branch)}  aria-disabled={pullingBranches.includes(branch)}><span className="tree-spacer"/><CircleDot size={12}/><span>{branch}</span>{branchStatus(branch)}{worktreeBranches[branch] && <Tooltip content={`Worktree: ${worktreeBranches[branch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[branch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(branch)}</button></Tooltip>)}
-      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><Tooltip content={t('history:app.branches.groupHint')}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} >{open[prefix] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button></Tooltip>{(open[prefix] || normalizedBranchQuery) && <div className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''} ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}{worktreeBranches[fullBranch] && <Tooltip content={`Worktree: ${worktreeBranches[fullBranch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[fullBranch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(fullBranch)}</button> })}</div>}</div>)}
-    </div>}
+      {Object.entries(grouped).filter(([prefix]) => prefix).map(([prefix, children]) => <div key={prefix}><Tooltip content={t('history:app.branches.groupHint')}><button className="tree-row group nested" onClick={() => toggle(prefix)} onContextMenu={(event) => openPrefixMenu(event, prefix)} >{open[prefix] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<FolderGit2 size={13}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button></Tooltip><AnimatedCollapse open={Boolean(open[prefix] || normalizedBranchQuery)} className="tree-children compact">{children.map((branch) => { const fullBranch = `${prefix}/${branch}`; return <button className={`tree-row ${fullBranch === currentBranch ? 'active' : ''} ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}{worktreeBranches[fullBranch] && <Tooltip content={`Worktree: ${worktreeBranches[fullBranch]}`}><span className="branch-worktree"  aria-label={`Worktree: ${worktreeBranches[fullBranch]}`}><GitFork size={12}/></span></Tooltip>}{incomingBadge(fullBranch)}</button> })}</AnimatedCollapse></div>)}
+    </AnimatedCollapse>
     <button className="tree-row group" onClick={() => toggle('remote')}>{open.remote || normalizedBranchQuery ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}<CloudDownload size={14}/><span>{t('history:app.branches.remote')}</span><span className="count">{new Intl.NumberFormat(locale).format(normalizedBranchQuery ? visibleRemoteBranches.length : remoteBranches.length)}</span></button>
-    {(open.remote || normalizedBranchQuery) && <div className="tree-children remote-tree">{Object.entries(remoteGroups).map(([remote, remoteBranchNames]) => {
+    <AnimatedCollapse open={Boolean(open.remote || normalizedBranchQuery)} className="tree-children remote-tree">{Object.entries(remoteGroups).map(([remote, remoteBranchNames]) => {
       const remoteKey = `remote:${remote}`
       const groupedRemoteBranches = remoteBranchNames.reduce<Record<string, string[]>>((groups, branch) => {
         const [prefix, ...rest] = branch.split('/')
@@ -261,16 +265,17 @@ export function BranchTree({ branches, remoteBranches = [], branchTracking = {},
         groups[key] = [...(groups[key] ?? []), rest.length ? rest.join('/') : branch]
         return groups
       }, {})
-      return <div key={remote}><button className="tree-row group nested remote-root" onClick={() => toggle(remoteKey)}>{open[remoteKey] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<CloudDownload size={13}/><span>{remote}</span><span className="count">{new Intl.NumberFormat(locale).format(remoteBranchNames.length)}</span></button>{(open[remoteKey] || normalizedBranchQuery) && <div className="tree-children compact remote-children">
+      return <div key={remote}><button className="tree-row group nested remote-root" onClick={() => toggle(remoteKey)}>{open[remoteKey] || normalizedBranchQuery ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}<CloudDownload size={13}/><span>{remote}</span><span className="count">{new Intl.NumberFormat(locale).format(remoteBranchNames.length)}</span></button><AnimatedCollapse open={Boolean(open[remoteKey] || normalizedBranchQuery)} className="tree-children compact remote-children">
         {(groupedRemoteBranches[''] ?? []).map((branch) => { const fullBranch = `${remote}/${branch}`; return <Tooltip content={fullBranch} key={fullBranch}><button className={`tree-row ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`}  onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)}  aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}</button></Tooltip> })}
-        {Object.entries(groupedRemoteBranches).filter(([prefix]) => prefix).map(([prefix, children]) => { const prefixKey = `${remoteKey}:${prefix}`; return <div key={prefix}><button className="tree-row group remote-prefix" onClick={() => toggle(prefixKey)}>{open[prefixKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<FolderGit2 size={12}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button>{open[prefixKey] && <div className="tree-children compact remote-prefix-children">{children.map((branch) => { const fullBranch = `${remote}/${prefix}/${branch}`; return <button className={`tree-row ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}</button> })}</div>}</div> })}
-      </div>}</div>
-    })}</div>}
+        {Object.entries(groupedRemoteBranches).filter(([prefix]) => prefix).map(([prefix, children]) => { const prefixKey = `${remoteKey}:${prefix}`; return <div key={prefix}><button className="tree-row group remote-prefix" onClick={() => toggle(prefixKey)}>{open[prefixKey] ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}<FolderGit2 size={12}/><span>{prefix}</span><span className="count">{new Intl.NumberFormat(locale).format(children.length)}</span></button><AnimatedCollapse open={Boolean(open[prefixKey])} className="tree-children compact remote-prefix-children">{children.map((branch) => { const fullBranch = `${remote}/${prefix}/${branch}`; return <button className={`tree-row ${pullingBranches.includes(fullBranch) ? 'pulling' : ''}`} key={fullBranch} onClick={() => onJumpBranch(fullBranch)} onDoubleClick={() => { if (!pullingBranches.includes(fullBranch)) onSwitchBranch(fullBranch) }} onContextMenu={(event) => openContextMenu(event, fullBranch)} aria-disabled={pullingBranches.includes(fullBranch)}><span className="tree-spacer"/><GitBranch size={12}/><span>{branch}</span>{branchStatus(fullBranch)}</button> })}</AnimatedCollapse></div> })}
+      </AnimatedCollapse></div>
+    })}</AnimatedCollapse>
     {normalizedBranchQuery && !visibleBranchNames.length && !visibleRemoteBranches.length && <div className="branch-filter-empty">{t('history:app.branches.noMatches')}</div>}
     {contextBranch && <ContextMenu x={contextBranch.x} y={contextBranch.y} onClose={() => setContextBranch(null)}>
       <div className="context-menu-title"><GitBranch size={13}/><span>{contextBranch.branch}</span></div>
       {!remoteBranchSet.has(contextBranch.branch) && <button aria-pressed={autoPullBranches.includes(contextBranch.branch)} onClick={() => { onToggleAutoPull(contextBranch.branch); setContextBranch(null) }}><RefreshCw size={14}/><span>{t('history:app.branches.autoFastForward')}</span>{autoPullBranches.includes(contextBranch.branch) && <Check size={13}/>}</button>}
       <button onClick={() => { onPullBranch(contextBranch.branch); setContextBranch(null) }}><RefreshCw size={14}/><span>{t('history:app.branches.pull')}</span></button>
+      {!remoteBranchSet.has(contextBranch.branch) && <button type="button" onClick={() => { onPushBranch(contextBranch.branch); setContextBranch(null) }}><CloudUpload size={14}/><span>{t('history:app.branches.push')}</span></button>}
       <button onClick={() => { onMergeBranch(contextBranch.branch); setContextBranch(null) }} disabled={contextBranch.branch === currentBranch}><GitMerge size={14}/><span>{t('history:app.branches.mergeInto', { "currentBranch": currentBranch ?? t('history:app.branches.current') })}</span></button>
       <div className="context-menu-separator"/>
       <button onClick={() => { onCopyBranch(contextBranch.branch); setContextBranch(null) }}><Copy size={14}/><span>{t('history:app.branches.copyName')}</span></button>
@@ -301,6 +306,7 @@ type SidebarProps = {
   onJumpBranch: (branch: string) => void
   onSwitchBranch: (branch: string) => void
   onPullBranch: (branch: string) => void
+  onPushBranch: (branch: string) => void
   onMergeBranch: (branch: string) => void
   onDeleteBranch: (branch: string) => void
   onCopyBranch: (branch: string) => void
@@ -312,13 +318,13 @@ type SidebarProps = {
   onOpenGitConfig: () => void
 }
 
-function Sidebar({ repository, structureRepository, openingRepository, activeView, structureSelection, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onCreateBranch, onDeleteBranchPrefix, onJumpBranch, onSwitchBranch, onPullBranch, onMergeBranch, onDeleteBranch, onCopyBranch, autoPullBranches, pullingBranches, onToggleAutoPullBranch, onSelectView, onSelectStructure, onOpenGitConfig }: SidebarProps) {
+function Sidebar({ repository, structureRepository, openingRepository, activeView, structureSelection, onOpenRepository, onOpenRepositoryPath, onOpenSubmodulePath, onCreateBranch, onDeleteBranchPrefix, onJumpBranch, onSwitchBranch, onPullBranch, onPushBranch, onMergeBranch, onDeleteBranch, onCopyBranch, autoPullBranches, pullingBranches, onToggleAutoPullBranch, onSelectView, onSelectStructure, onOpenGitConfig }: SidebarProps) {
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
   return <aside className="sidebar">
     <nav>{repository ? <>
-      <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} worktreeBranches={Object.fromEntries(repository.worktrees.filter((worktree) => worktree.branch && worktree.path.replace(/[\\/]+$/, '').toLocaleLowerCase() !== repository.path.replace(/[\\/]+$/, '').toLocaleLowerCase()).map((worktree) => [worktree.branch as string, worktree.path]))} currentBranch={repository.branch} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPull={onToggleAutoPullBranch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
+      <BranchTree branches={repository.branches} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} worktreeBranches={Object.fromEntries(repository.worktrees.filter((worktree) => worktree.branch && worktree.path.replace(/[\\/]+$/, '').toLocaleLowerCase() !== repository.path.replace(/[\\/]+$/, '').toLocaleLowerCase()).map((worktree) => [worktree.branch as string, worktree.path]))} currentBranch={repository.branch} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPull={onToggleAutoPullBranch} onCreateBranch={onCreateBranch} onDeletePrefix={onDeleteBranchPrefix} onJumpBranch={onJumpBranch} onSwitchBranch={onSwitchBranch} onPullBranch={onPullBranch} onPushBranch={onPushBranch} onMergeBranch={onMergeBranch} onDeleteBranch={onDeleteBranch} onCopyBranch={onCopyBranch}/>
       <RepositoryStructureTree repository={structureRepository ?? repository} activePath={repository.path} selection={structureSelection} onSelect={onSelectStructure} onOpenPath={(path, kind) => { if (kind === 'submodule') onOpenSubmodulePath(path); else onOpenRepositoryPath(path) }}/>
       <div className="nav-section structure-tags-section"><button className={`nav-row ${activeView === 'tags' ? 'active' : ''}`} onClick={() => onSelectView('tags')}><Tag size={15}/><span>{t('history:app.navigation.tags')}</span><span className="nav-badge muted">{new Intl.NumberFormat(locale).format(repository.tags.length)}</span></button></div>
     </> : <div className="sidebar-empty-state"><FolderOpen size={24}/><strong>{t('history:app.sidebar.noRepository')}</strong><span>{t('history:app.sidebar.openHint')}</span><button onClick={onOpenRepository} disabled={openingRepository}>{openingRepository ? t('history:app.sidebar.opening') : t('history:app.sidebar.open')}</button></div>}</nav>
@@ -359,12 +365,21 @@ function commitDay(commit: Commit, locale: Locale) {
 function CommitList({ revealSignal, commits, selected, onSelect, query, searchMode, searchAction, onSearchSummaryChange, branchFilter, timeFilter, currentBranch, remoteBranches, branchTracking, tags, stashReferences, inspectorCollapsed, onToggleInspector, onMergeCommit, onCherryPickCommit, onResetCommit, onRevertCommit, onRebaseCommit, onTagCommit, onCompareCommit, onCopyCommit, onApplyStash, onPopStash, onDropStash }: { revealSignal: number; commits: Commit[]; selected: string; onSelect: (id: string) => void; query: string; searchMode: HistorySearchMode; searchAction: SearchNavigationAction; onSearchSummaryChange: (summary: SearchSummary) => void; branchFilter: string[]; timeFilter: TimeFilter; currentBranch: string; remoteBranches: string[]; branchTracking: BranchTrackingMap; tags: string[]; stashReferences: Record<string, string>; inspectorCollapsed: boolean; onToggleInspector: () => void; onMergeCommit: (commit: Commit) => void; onCherryPickCommit: (commit: Commit) => void; onResetCommit: (commit: Commit) => void; onRevertCommit: (commit: Commit) => void; onRebaseCommit: (commit: Commit) => void; onTagCommit: (commit: Commit) => void; onCompareCommit: (commit: Commit) => void; onCopyCommit: (commit: Commit, mode: 'hash' | 'details') => void; onApplyStash: (reference: string) => void; onPopStash: (reference: string) => void; onDropStash: (reference: string) => void }) {
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
+  const reducedMotion = useReducedMotion()
 
   const [widths, setWidths] = usePersistentState('branchline.historyColumnWidths.v1', DEFAULT_HISTORY_COLUMN_WIDTHS, isHistoryColumnWidths)
   const [visibleColumns, setVisibleColumns] = usePersistentState('branchline.historyVisibleColumns.v1', DEFAULT_HISTORY_VISIBLE_COLUMNS, isHistoryVisibleColumns)
   const [columnMenuOpen, setColumnMenuOpen] = useState(false)
   const [committerFilter, setCommitterFilter] = useState<string[]>([])
   const [committerMenuOpen, setCommitterMenuOpen] = useState(false)
+  const seenCommitIds = useRef(new Set<string>())
+  const historyBaseline = useRef<Commit[] | null>(null)
+  const pendingTopRefresh = useRef<{ wasAtTop: boolean; count: number } | null>(null)
+  const pendingNewCommitTimer = useRef<number | null>(null)
+  const [newCommitIds, setNewCommitIds] = useState<ReadonlySet<string>>(() => new Set())
+  const previousRevealSignal = useRef(revealSignal)
+  const revealActive = previousRevealSignal.current !== revealSignal
+  previousRevealSignal.current = revealSignal
   useEffect(() => { setCommitterFilter([]) }, [revealSignal])
   const [contextCommit, setContextCommit] = useState<{ commit: Commit; x: number; y: number } | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -400,6 +415,30 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
   const filtered = useMemo(() => visibleHistoryCommits(baseFiltered, deferredQuery, searchMode), [baseFiltered, deferredQuery, searchMode])
   const selectedVisible = useMemo(() => filtered.some((commit) => commit.id === selected), [filtered, selected])
   const graphLayout = useMemo(() => buildCommitGraphLayout(filtered, widths.graph, COMMIT_ROW_HEIGHT), [filtered, widths.graph])
+  useLayoutEffect(() => {
+    if (historyBaseline.current === null) {
+      historyBaseline.current = commits
+      return
+    }
+    if (historyBaseline.current === commits) return
+
+    const addedIds = findNewHistoryCommitIds(historyBaseline.current, commits)
+    historyBaseline.current = commits
+    if (pendingNewCommitTimer.current !== null) window.clearTimeout(pendingNewCommitTimer.current)
+    pendingTopRefresh.current = addedIds.size > 0
+      ? { wasAtTop: (commitListRef.current?.scrollTop ?? 0) <= 1, count: addedIds.size }
+      : null
+    setNewCommitIds(addedIds)
+    pendingNewCommitTimer.current = addedIds.size
+      ? window.setTimeout(() => {
+        setNewCommitIds(new Set())
+        pendingNewCommitTimer.current = null
+      }, 900)
+      : null
+  }, [commits])
+  useEffect(() => () => {
+    if (pendingNewCommitTimer.current !== null) window.clearTimeout(pendingNewCommitTimer.current)
+  }, [])
   const virtualRange = useMemo(() => {
     const overscan = 12
     const start = Math.max(0, Math.floor(scrollTop / COMMIT_ROW_HEIGHT) - overscan)
@@ -407,6 +446,9 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     return { start, end }
   }, [filtered.length, listHeight, scrollTop])
   const visibleCommits = filtered.slice(virtualRange.start, virtualRange.end)
+  useEffect(() => {
+    for (const commit of visibleCommits) seenCommitIds.current.add(commit.fullHash ?? commit.id)
+  }, [newCommitIds, visibleCommits])
   const searchMatchIndex = searchMatches.indexOf(selected)
   const searchMatchCount = searchMatches.length
   useEffect(() => {
@@ -451,13 +493,17 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
   useLayoutEffect(() => {
     const element = commitListRef.current
     if (!element) return
-    const nextTop = restoreCommitAnchor(filtered, viewportAnchor.current, COMMIT_ROW_HEIGHT, element.scrollTop)
+    const pendingRefresh = pendingTopRefresh.current
+    const nextTop = pendingRefresh && shouldKeepHistoryAtTop(pendingRefresh.wasAtTop, pendingRefresh.count)
+      ? 0
+      : restoreCommitAnchor(filtered, viewportAnchor.current, COMMIT_ROW_HEIGHT, element.scrollTop)
+    pendingTopRefresh.current = null
     if (nextTop !== element.scrollTop) element.scrollTop = nextTop
     const restoredTop = element.scrollTop
     pendingScrollTop.current = restoredTop
     viewportAnchor.current = captureCommitAnchor(filtered, restoredTop, COMMIT_ROW_HEIGHT)
     setScrollTop((current) => current === restoredTop ? current : restoredTop)
-  }, [filtered])
+  }, [commits, filtered])
   useEffect(() => {
     const index = filtered.findIndex((commit) => commit.id === selected)
     const element = commitListRef.current
@@ -521,7 +567,8 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
       const timeDivider = visibleIndex > 0 && currentDay && currentDay.key !== previousDay?.key ? currentDay.label : null
       const graphRow = graphLayout.rows[visibleIndex]
       const rowStyle = { gridTemplateColumns: template, '--time-divider-left': `${widths.branch + widths.graph + 8}px` } as React.CSSProperties
-      return <button key={commit.id} data-commit-id={commit.id} className={`commit-row ${commit.status === 'working' ? 'working-tree' : ''} ${selected === commit.id ? 'selected' : ''} ${searchMatchSet.has(commit.id) ? 'search-match' : ''} ${selected === commit.id && searchMatchSet.has(commit.id) ? 'search-current' : ''} ${timeDivider ? 'time-break' : ''}`} style={rowStyle} onClick={() => onSelect(commit.id)} onContextMenu={(event) => { event.preventDefault(); if (commit.status === 'working') return; onSelect(commit.id); setContextCommit({ commit, x: event.clientX, y: event.clientY }) }}>
+      const rowProps = { 'data-commit-id': commit.id, className: `commit-row ${commit.status === 'working' ? 'working-tree' : ''} ${selected === commit.id ? 'selected' : ''} ${searchMatchSet.has(commit.id) ? 'search-match' : ''} ${selected === commit.id && searchMatchSet.has(commit.id) ? 'search-current' : ''} ${timeDivider ? 'time-break' : ''}`, style: rowStyle, onClick: () => onSelect(commit.id), onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => { event.preventDefault(); if (commit.status === 'working') return; onSelect(commit.id); setContextCommit({ commit, x: event.clientX, y: event.clientY }) } }
+      const rowContent = <>
         {timeDivider && <span className="time-divider-label">{timeDivider}</span>}
         <div className="branch-cell">{commit.status === 'working' ? <span className="ref ref-working"><FileDiff size={11}/><span>{t('history:app.details.worktree')}</span></span> : visibleCommitReferences(commit.branches ?? [], remoteBranchSet, branchTracking).map((branch) => refTag(branch, graphRow.color, commit.branches ?? []))}</div>
         <GraphLine commit={commit} row={graphRow} laneCount={graphLayout.laneCount} graphWidth={widths.graph}/>
@@ -531,7 +578,12 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
         {visibleColumns.time && <Tooltip content={formatLocalDateTime(commit.commitTime ?? commit.authorTime ?? commit.time, true, locale)}><div className="optional-cell time-cell" >{formatCommitListTime(commit, locale)}</div></Tooltip>}
         {visibleColumns.hash && <div className="optional-cell hash-cell">{commit.id}</div>}
         {committerColumnVisible && <div className={`author-cell ${committerFilter.includes(committerName(commit)) ? 'filtered-author' : ''}`}><div className="avatar tiny">{committerInitials(committerName(commit))}</div><span>{committerName(commit)}</span></div>}
-      </button>
+      </>
+      const identity = commit.fullHash ?? commit.id
+      const isNewCommit = newCommitIds.has(identity)
+      const seen = seenCommitIds.current.has(identity)
+      const shouldAnimate = !reducedMotion && (isNewCommit || !seen && revealActive)
+      return <motion.button key={identity} layout="position" layoutDependency={visibleIndex} {...rowProps} initial={shouldAnimate ? { opacity: 0, y: -COMMIT_ROW_HEIGHT } : false} animate={{ opacity: 1, y: 0, transition: reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 430, damping: 34, delay: isNewCommit ? Math.min(visibleIndex * 0.035, 0.28) : 0 } }} transition={{ layout: reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 34 } }}>{rowContent}</motion.button>
     })}
     {virtualRange.end < filtered.length && <div className="commit-list-spacer" style={{ height: (filtered.length - virtualRange.end) * COMMIT_ROW_HEIGHT }}/>}
     {filtered.length === 0 && <div className="empty-search">{commits.length ? <Search size={24}/> : <GitCommitHorizontal size={24}/>}<strong>{commits.length ? t('history:app.graph.noMatches') : t('history:app.emptyRepository')}</strong><span>{commits.length ? t('history:app.graph.searchHint') : t('history:app.graph.emptyHint')}</span></div>}
@@ -564,6 +616,25 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
       </>}
     </ContextMenu>}
   </div>
+}
+
+function CommitInspector({ visible, detailsHeight, children }: { visible: boolean; detailsHeight: number; children: ReactNode }) {
+  const isPresent = useIsPresent()
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  const interactive = visible && isPresent
+  const inertRef = useInertRef<HTMLElement>(interactive)
+  const hidden = { opacity: 0, x: reducedMotion ? 0 : 16 }
+  return <motion.section
+    id="inspector-pane"
+    className="inspector-pane"
+    ref={inertRef}
+    aria-hidden={!interactive}
+    style={{ gridTemplateRows: `${detailsHeight}px 1px minmax(0, 1fr)` }}
+    initial={reducedMotion ? false : hidden}
+    animate={visible ? { opacity: 1, x: 0 } : hidden}
+    exit={hidden}
+    transition={reducedMotion ? { duration: 0 } : { duration: 0.22, opacity: { duration: 0.16 }, ease: [0.25, 0.1, 0.25, 1] }}
+  >{children}</motion.section>
 }
 
 function CommitDetails({ commit, stashReference, onClose, onOpenParent }: { commit: Commit; stashReference?: string | null; onClose: () => void; onOpenParent: (hash: string) => void }) {
@@ -629,11 +700,13 @@ function ChangedFilesPanel({ files, treePaths, treeError, loading, activeFile, o
 
   const [fileMode, setFileMode] = usePersistentState('branchline.changedFilesMode.v1', 'list', isFileMode)
   const [fileQuery, setFileQuery] = useState('')
-  const allFilesTree = useMemo(() => fileMode === 'all' && treePaths ? buildCommitFileTree(treePaths, files, true) : null, [fileMode, treePaths, files])
-  const displayFiles = fileMode === 'all' ? allFilesTree?.files ?? [] : files
-  const filteredFiles = useMemo(() => filterCommitFilesByPath(displayFiles, fileQuery), [displayFiles, fileQuery])
+  const appliedFileQuery = useDebouncedValue(fileQuery, 220)
+  const effectiveFileMode = fileMode === 'all' && treePaths ? 'all' : fileMode === 'all' ? 'tree' : fileMode
+  const allFilesTree = useMemo(() => effectiveFileMode === 'all' && treePaths ? buildCommitFileTree(treePaths, files, true) : null, [effectiveFileMode, treePaths, files])
+  const displayFiles = effectiveFileMode === 'all' ? allFilesTree?.files ?? [] : files
+  const filteredFiles = useMemo(() => filterCommitFilesByPath(displayFiles, appliedFileQuery), [appliedFileQuery, displayFiles])
   const changedPaths = useMemo(() => allFilesTree ? new Set(allFilesTree.files.filter((file) => file.changed).map((file) => file.path)) : undefined, [allFilesTree])
-  const activeFilePath = activeFile === null ? null : fileMode === 'all'
+  const activeFilePath = activeFile === null ? null : effectiveFileMode === 'all'
     ? allFilesTree?.files.find((file) => file.changeIndex === activeFile)?.path ?? null
     : files[activeFile]?.path ?? null
   const activeFilteredFile = activeCommitFileIndex(filteredFiles, activeFilePath)
@@ -649,12 +722,12 @@ function ChangedFilesPanel({ files, treePaths, treeError, loading, activeFile, o
     return Array.from(folders)
   }, [displayFiles])
   return <section className={`changed-files-panel ${treeError ? 'has-tree-error' : ''}`}>
-    <div className="changed-files-heading"><div className="changed-files-title"><FileDiff size={15}/><strong>{fileMode === 'all' ? t('history:app.files.all') : treePaths ? t('history:app.files.commit') : t('history:app.files.changed')}</strong><span>{loading ? '…' : new Intl.NumberFormat(locale).format(filteredFiles.length)}</span></div><div className="changed-files-actions">{treePaths && <div className="segmented compact-segmented icon-segmented" role="group" aria-label={t('history:app.files.view')}><Tooltip content={t('history:app.files.list')}><button type="button" className={fileMode === 'list' ? 'active' : ''} aria-pressed={fileMode === 'list'} onClick={() => setFileMode('list')}  aria-label={t('history:app.files.list')}><List size={14}/></button></Tooltip><Tooltip content={t('history:app.files.tree')}><button type="button" className={fileMode === 'tree' ? 'active' : ''} aria-pressed={fileMode === 'tree'} onClick={() => setFileMode('tree')}  aria-label={t('history:app.files.tree')}><FolderTree size={14}/></button></Tooltip><Tooltip content={t('history:app.files.showAll')}><button type="button" className={fileMode === 'all' ? 'active' : ''} aria-pressed={fileMode === 'all'} onClick={() => setFileMode('all')}  aria-label={t('history:app.files.showAll')}><Files size={14}/></button></Tooltip></div>}<Button variant="icon" disabled={loading || !displayFiles.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.files.more')} aria-label={t('history:app.files.more')}><MoreHorizontal size={15}/></Button></div><div className="changed-files-search"><Search size={13}/><input type="text" value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder={t('history:app.files.searchPlaceholder')} aria-label={t('history:app.files.filter')}/>{fileQuery && <Tooltip content={t('history:app.files.clearFilter')}><button type="button" onClick={() => setFileQuery('')}  aria-label={t('history:app.files.clearFilter')}><X size={13}/></button></Tooltip>}</div></div>
+    <div className="changed-files-heading"><div className="changed-files-title"><FileDiff size={15}/><strong>{effectiveFileMode === 'all' ? t('history:app.files.all') : treePaths ? t('history:app.files.commit') : t('history:app.files.changed')}</strong><span>{loading ? '…' : new Intl.NumberFormat(locale).format(filteredFiles.length)}</span></div><div className="changed-files-actions"><div className="segmented compact-segmented icon-segmented" role="group" aria-label={t('history:app.files.view')}><Tooltip content={t('history:app.files.list')}><button type="button" className={fileMode === 'list' ? 'active' : ''} aria-pressed={fileMode === 'list'} onClick={() => setFileMode('list')}  aria-label={t('history:app.files.list')}><List size={14}/></button></Tooltip><Tooltip content={t('history:app.files.tree')}><button type="button" className={fileMode === 'tree' ? 'active' : ''} aria-pressed={fileMode === 'tree'} onClick={() => setFileMode('tree')}  aria-label={t('history:app.files.tree')}><FolderTree size={14}/></button></Tooltip>{treePaths && <Tooltip content={t('history:app.files.showAll')}><button type="button" className={fileMode === 'all' ? 'active' : ''} aria-pressed={fileMode === 'all'} onClick={() => setFileMode('all')}  aria-label={t('history:app.files.showAll')}><Files size={14}/></button></Tooltip>}</div><Button variant="icon" disabled={loading || !displayFiles.length} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMoreMenu({ x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.files.more')} aria-label={t('history:app.files.more')}><MoreHorizontal size={15}/></Button></div><div className="changed-files-search"><Search size={13}/><input type="text" value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} placeholder={t('history:app.files.searchPlaceholder')} aria-label={t('history:app.files.filter')}/>{fileQuery && <Tooltip content={t('history:app.files.clearFilter')}><button type="button" onClick={() => setFileQuery('')}  aria-label={t('history:app.files.clearFilter')}><X size={13}/></button></Tooltip>}</div></div>
     {treeError && <div className="commit-tree-error" role="alert">{t('history:app.files.treeError', { "treeError": renderMessage(treeError, t) })}</div>}
     {loading ? <div className="changed-files-list"><div className="changed-files-empty"><RefreshCw className="spin" size={15}/><span>{t('history:app.files.loading')}</span></div></div>
-      : !displayFiles.length ? <div className="changed-files-list"><div className="changed-files-empty"><FileDiff size={15}/><span>{fileMode === 'all' ? t('history:app.files.emptyAll') : t('history:app.files.emptyChanges')}</span></div></div>
+      : !displayFiles.length ? <div className="changed-files-list"><div className="changed-files-empty"><FileDiff size={15}/><span>{effectiveFileMode === 'all' ? t('history:app.files.emptyAll') : t('history:app.files.emptyChanges')}</span></div></div>
         : !filteredFiles.length ? <div className="changed-files-list"><div className="changed-files-empty"><Search size={15}/><span>{t('history:app.files.noMatches')}</span></div></div>
-          : <DiffFileList files={filteredFiles} activeFile={activeFilteredFile} mode={fileMode === 'list' ? 'list' : 'tree'} changedPaths={fileMode === 'all' ? changedPaths : undefined} onSelectFile={(index) => { const file = filteredFiles[index]; if (file) onOpenFile(fileMode === 'all' ? allFilesTree?.files.find((item) => item.path === file.path)?.changeIndex ?? null : files.indexOf(file), file) }} className="changed-files-list" fileRowHeight={44} folderRowHeight={25} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders} showOpenIndicator onFileContextMenu={(event, file) => { event.preventDefault(); setContextFile({ file, x: event.clientX, y: event.clientY }) }}/>}
+          : <DiffFileList files={filteredFiles} activeFile={activeFilteredFile} mode={fileMode === 'list' ? 'list' : 'tree'} changedPaths={effectiveFileMode === 'all' ? changedPaths : undefined} onSelectFile={(index) => { const file = filteredFiles[index]; if (file) onOpenFile(effectiveFileMode === 'all' ? allFilesTree?.files.find((item) => item.path === file.path)?.changeIndex ?? null : files.indexOf(file), file) }} className="changed-files-list" fileRowHeight={44} folderRowHeight={25} collapsedFolders={collapsedFolders} onCollapsedFoldersChange={setCollapsedFolders} showOpenIndicator onFileContextMenu={(event, file) => { event.preventDefault(); setContextFile({ file, x: event.clientX, y: event.clientY }) }}/>}
     {moreMenu && <ContextMenu x={moreMenu.x} y={moreMenu.y} onClose={() => setMoreMenu(null)}><div className="context-menu-title"><FileDiff size={13}/><span>{t('history:app.files.actions')}</span></div><button onClick={() => { setCollapsedFolders({}); setMoreMenu(null) }}><ChevronDown size={14}/><span>{t('history:app.files.expandAll')}</span></button><button onClick={() => { setCollapsedFolders(Object.fromEntries(fileFolders.map((folder) => [folder, true]))); setMoreMenu(null) }}><ChevronRight size={14}/><span>{t('history:app.files.collapseAll')}</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(filteredFiles.map((file) => file.path).join('\n')).catch(() => undefined); setMoreMenu(null) }}><Copy size={14}/><span>{t('history:app.files.copyPaths')}</span></button><button onClick={() => { navigator.clipboard?.writeText(files.map((file) => `${file.type} ${file.path} (+${file.add} -${file.del})`).join('\n')).catch(() => undefined); setMoreMenu(null) }}><FileText size={14}/><span>{t('history:app.files.copySummary')}</span></button></ContextMenu>}
     {contextFile && <ContextMenu x={contextFile.x} y={contextFile.y} onClose={() => setContextFile(null)}><div className="context-menu-title"><FileText size={13}/><span>{contextFile.file.path}</span></div><button onClick={() => { onOpenHistory(contextFile.file.path, 'history'); setContextFile(null) }}><History size={14}/><span>{t('history:app.files.history')}</span></button><button onClick={() => { onOpenHistory(contextFile.file.path, 'blame'); setContextFile(null) }}><Rows3 size={14}/><span>{t('history:app.files.blame')}</span></button><div className="context-menu-separator"/><button onClick={() => { navigator.clipboard?.writeText(contextFile.file.path).catch(() => undefined); setContextFile(null) }}><Copy size={14}/><span>{t('history:app.files.copyPath')}</span></button></ContextMenu>}
   </section>
@@ -664,7 +737,6 @@ function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () => void
   const { t, i18n } = useAppTranslation()
   const locale = (i18n.resolvedLanguage ?? 'zh-CN') as Locale
 
-  if (!open) return null
   const modifier = getShortcutModifier()
   const shortcuts = [
     [`${modifier} F`, t('history:app.shortcuts.search')],
@@ -677,10 +749,10 @@ function ShortcutOverlay({ open, onClose }: { open: boolean; onClose: () => void
     [`${modifier} /`, t('history:app.shortcuts.theme')],
     ['?', t('history:app.shortcuts.show')],
   ]
-  return <div className="shortcut-backdrop" onClick={onClose}><section className="shortcut-dialog" onClick={(event) => event.stopPropagation()}>
+  return <AnimatedModal open={open} className="shortcut-backdrop" onClick={(event) => { if (isMotionBackdropTarget(event)) onClose() }}>{open && <section className="shortcut-dialog" onClick={(event) => event.stopPropagation()}>
     <div className="drawer-heading"><div><span className="eyebrow">{t('history:app.shortcuts.navigation')}</span><h2>{t('history:app.shortcuts.heading')}</h2></div><Button variant="icon" onClick={onClose}><X size={18}/></Button></div>
     <div className="shortcut-list">{shortcuts.map(([key, label]) => <div className="shortcut-row" key={key}><span>{label}</span><kbd>{key}</kbd></div>)}</div>
-  </section></div>
+  </section>}</AnimatedModal>
 }
 
 export default function App() {
@@ -689,6 +761,7 @@ export default function App() {
   const { repository, structureRepository, parentRepository, recentRepositories, favoriteRepositories, registerRepository, toggleFavorite, forgetRepository, openingRepository, restoringRepository, fetching, repositoryNotice, pauseRepositoryNotice, resumeRepositoryNotice, setRepositoryNotice, applySnapshot, applyStructureSnapshot, openRepository, openRepositoryPath, openSubmodulePath, returnToParentRepository, fetchNow, autoFetchEnabled, fetchIntervalMinutes, localPollingEnabled, localPollingIntervalSeconds, setAutoFetchEnabled, setFetchIntervalMinutes, setLocalPollingEnabled, setLocalPollingIntervalSeconds, lastFetchAt, fetchCompletion } = useRepositoryWorkspace()
   const [repositoryManagerOpen, setRepositoryManagerOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState('branchline.sidebarCollapsed.v1', false, (value): value is boolean => typeof value === 'boolean')
+  const sidebarInertRef = useInertRef<HTMLDivElement>(!sidebarCollapsed)
   const [sidebarWidth, setSidebarWidth] = usePersistentState('branchline.sidebarWidth.v1', 252, isSidebarWidth)
   const [inspectorWidth, setInspectorWidth] = usePersistentState('branchline.inspectorWidth.v1', 360, isInspectorWidth)
   const [detailsHeight, setDetailsHeight] = usePersistentState('branchline.detailsHeight.v1', 330, isDetailsHeight)
@@ -696,6 +769,13 @@ export default function App() {
   const [selected, setSelected] = useState('')
   const [undoCommitMessage, setUndoCommitMessage] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [appliedQueryOverride, setAppliedQueryOverride] = useState<string | null>(null)
+  const debouncedQuery = useDebouncedValue(query, 220)
+  const appliedQuery = appliedQueryOverride ?? debouncedQuery
+  useEffect(() => {
+    setAppliedQueryOverride(null)
+  }, [debouncedQuery])
+  const applySearchImmediately = () => setAppliedQueryOverride(query)
   const [searchMode, setSearchMode] = useState<HistorySearchMode>('locate')
   const [searchAction, setSearchAction] = useState<SearchNavigationAction>({ sequence: 0, direction: 1 })
   const [searchSummary, setSearchSummary] = useState<SearchSummary>({ current: 0, total: 0 })
@@ -734,18 +814,32 @@ export default function App() {
   const [treeFileView, setTreeFileView] = useState<{ path: string; commit: string; file: RepositoryFile } | null>(null)
   useEffect(() => {
     try {
-      void getCurrentWindow().setTheme(resolvedTheme).catch(() => undefined)
+      void getCurrentWindow().setTheme(nativeWindowTheme(resolvedTheme)).catch(() => undefined)
+      if (resolvedTheme === 'light') {
+        document.body.classList.add('theme-light')
+      } else {
+        document.body.classList.remove('theme-light')
+      }
+      if (rounded) {
+        document.body.classList.add('theme-rounded')
+      } else {
+        document.body.classList.remove('theme-rounded')
+      }
     } catch {
       // The native window API is unavailable in the browser preview.
     }
-  }, [resolvedTheme])
+  }, [resolvedTheme, rounded])
   useEffect(() => {
     const media = window.matchMedia?.('(prefers-color-scheme: dark)')
     if (!media) return
     const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches)
     setSystemDark(media.matches)
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', onChange)
+      return () => media.removeEventListener('change', onChange)
+    }
+    media.addListener(onChange)
+    return () => media.removeListener(onChange)
   }, [])
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -838,7 +932,7 @@ export default function App() {
     [activeCommits, repository?.branch],
   )
   const availableBranches = repository?.branches ?? []
-  const tagSearchCount = repository?.tags.filter((tag) => !query.trim() || tag.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).length ?? 0
+  const tagSearchCount = repository?.tags.filter((tag) => !appliedQuery.trim() || tag.toLocaleLowerCase().includes(appliedQuery.trim().toLocaleLowerCase())).length ?? 0
   const stashReferences = useMemo(() => Object.fromEntries((repository?.stashes ?? []).map((stash) => [stash.hash, stash.reference])), [repository?.stashes])
   const selectedCommitBase = activeCommits.find((commit) => commit.id === selected) ?? activeCommits[0] ?? emptyCommit(t)
   const selectedWorkingTree = selectedCommitBase.status === 'working'
@@ -1321,6 +1415,10 @@ export default function App() {
   const handlePush = async () => {
     await executeRepositoryAction((path) => pushRepository(path), message('history:app.notice.pushed', { "branch": repository?.branch ?? '' }), { key: 'push', label: message('history:app.progress.push', { "branch": repository?.branch ?? '' }), detail: message('history:app.progress.pushDetail') })
   }
+  const handlePushBranch = async (branch: string) => {
+    if (!repository) return
+    await executeRepositoryAction((path) => pushRepositoryBranch(path, branch), message('history:app.notice.pushed', { branch }), { key: 'push', label: message('history:app.progress.push', { branch }), detail: message('history:app.progress.pushDetail') })
+  }
   const handleFetch = useCallback(async () => {
     if (!repository || fetching || activeOperation) return
     setActiveOperation({ key: 'fetch', label: message('history:app.progress.fetch'), detail: message('history:app.progress.fetchDetail') })
@@ -1494,7 +1592,7 @@ export default function App() {
           setRepositorySwitcherSignal((current) => current + 1)
         }
       }
-      if (modifier && event.key === '/') { event.preventDefault(); setTheme((value) => value === 'system' ? resolvedTheme === 'dark' ? 'light' : 'dark' : value === 'dark' ? 'light' : 'dark') }
+      if (modifier && event.key === '/') { event.preventDefault(); setTheme(nextThemePreference) }
       if (repositoryManagerOpen || !repository) {
         if (modifier && !event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); document.querySelector<HTMLInputElement>('.repository-catalog-search input')?.focus() }
         return
@@ -1513,16 +1611,20 @@ export default function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleFetch, repositoryManagerOpen, repository, resolvedTheme])
+  }, [handleFetch, repositoryManagerOpen, repository])
   const inspectorVisible = workspaceView === 'history' && !inspectorCollapsed && !(wideDiff && (diffFile !== null || treeFileView !== null))
   const timeFilterLabels: Record<TimeFilter, string> = { all: t('history:app.filters.allTime'), day: t('history:app.filters.day'), week: t('history:app.filters.week'), month: t('history:app.filters.month') }
   const branchFilterLabel = branchFilter.length === 0 ? t('history:app.filters.allBranches') : branchFilter.length === 1 ? branchFilter[0] : t('history:app.filters.branchCount', { "count": branchFilter.length })
   const minimizeWindow = () => { try { void getCurrentWindow().minimize().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const toggleWindowMaximize = () => { try { const appWindow = getCurrentWindow(); void appWindow.toggleMaximize().then(() => appWindow.isMaximized()).then(setWindowMaximized).catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
   const closeWindow = () => { try { void getCurrentWindow().close().catch(() => undefined) } catch { /* Browser preview has no native window. */ } }
-  const themeTitle = theme === 'system' ? t('history:app.theme.system', { "resolvedThemedark": t(resolvedTheme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') }) : t('history:app.theme.selected', { "themedark": t(theme === 'dark' ? 'history:app.theme.dark' : 'history:app.theme.light') })
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun
-  return <main className={`app-shell ${repository && !repositoryManagerOpen ? 'workbench-active' : ''} ${repository && !repositoryManagerOpen && sidebarCollapsed ? 'sidebar-collapsed' : ''} ${resolvedTheme === 'light' ? 'theme-light' : ''} ${rounded ? 'theme-rounded' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`} style={repository && !repositoryManagerOpen ? { gridTemplateColumns: sidebarCollapsed ? '0px 0px minmax(0, 1fr)' : `${sidebarWidth}px ${rounded ? 4 : 1}px minmax(0, 1fr)` } : undefined}>
+  const sidebarDividerWidth = rounded ? 'var(--rounded-surface-gap)' : sidebarCollapsed ? '0px' : '1px'
+  const workbenchStyle = repository && !repositoryManagerOpen ? {
+    '--sidebar-width': `${sidebarWidth}px`,
+    gridTemplateColumns: `${sidebarCollapsed ? '0px' : 'var(--sidebar-width)'} ${sidebarDividerWidth} minmax(0, 1fr)`,
+  } as React.CSSProperties : undefined
+  return <main className={`app-shell ${repository && !repositoryManagerOpen ? 'workbench-active' : ''} ${resolvedTheme === 'light' ? 'theme-light' : ''} ${rounded ? 'theme-rounded' : ''} ${panelResizing === 'details' ? 'panel-resizing-vertical' : panelResizing ? 'panel-resizing' : ''}`} style={workbenchStyle}>
     <div className="app-titlebar" data-tauri-drag-region>
       <div className="titlebar-brand" data-tauri-drag-region><AppMark/><span>Branchline</span></div>
       {repository && !repositoryManagerOpen && <div className="titlebar-repository-controls">
@@ -1538,14 +1640,14 @@ export default function App() {
       </div>
     </div>
     {repository && !repositoryManagerOpen && <>
-      <div id="sidebar-panel" className={`sidebar-shell ${sidebarCollapsed ? 'collapsed' : ''}`} style={{ width: sidebarCollapsed ? 0 : sidebarWidth, flexBasis: sidebarCollapsed ? 0 : sidebarWidth }}>
-        <Sidebar repository={repository} structureRepository={structureRepository} openingRepository={openingRepository} activeView={workspaceView} structureSelection={structureSelection} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onCreateBranch={openCreateBranchDialog} onDeleteBranchPrefix={(prefix) => void handleDeleteBranchPrefix(prefix)} onJumpBranch={handleJumpBranch} onSwitchBranch={(branch) => void handleSwitchBranch(branch)} onPullBranch={(branch) => void handlePullBranch(branch)} onMergeBranch={(branch) => void handleMergeReference(branch)} onDeleteBranch={(branch) => void handleDeleteBranch(branch)} onCopyBranch={(branch) => void copyText(branch, message('history:app.notice.branchNameCopied', { "branch": branch }))} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPullBranch={toggleAutoPullBranch} onSelectView={(view) => { setRepositoryManagerOpen(false); setWorkspaceView(view) }} onSelectStructure={(selection) => { setRepositoryManagerOpen(false); setStructureSelection(selection); setWorkspaceView('structure') }} onOpenGitConfig={() => setGitConfigOpen(true)}/>
+      <div id="sidebar-panel" className="sidebar-shell" ref={sidebarInertRef} aria-hidden={sidebarCollapsed}>
+        <Sidebar repository={repository} structureRepository={structureRepository} openingRepository={openingRepository} activeView={workspaceView} structureSelection={structureSelection} onOpenRepository={handleOpenRepository} onOpenRepositoryPath={handleOpenRepositoryPath} onOpenSubmodulePath={handleOpenSubmodulePath} onCreateBranch={openCreateBranchDialog} onDeleteBranchPrefix={(prefix) => void handleDeleteBranchPrefix(prefix)} onJumpBranch={handleJumpBranch} onSwitchBranch={(branch) => void handleSwitchBranch(branch)} onPullBranch={(branch) => void handlePullBranch(branch)} onPushBranch={(branch) => void handlePushBranch(branch)} onMergeBranch={(branch) => void handleMergeReference(branch)} onDeleteBranch={(branch) => void handleDeleteBranch(branch)} onCopyBranch={(branch) => void copyText(branch, message('history:app.notice.branchNameCopied', { "branch": branch }))} autoPullBranches={autoPullBranches} pullingBranches={pullingBranches} onToggleAutoPullBranch={toggleAutoPullBranch} onSelectView={(view) => { setRepositoryManagerOpen(false); setWorkspaceView(view) }} onSelectStructure={(selection) => { setRepositoryManagerOpen(false); setStructureSelection(selection); setWorkspaceView('structure') }} onOpenGitConfig={() => setGitConfigOpen(true)}/>
       </div>
-      <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" tabIndex={0} aria-orientation="vertical" aria-valuemin={200} aria-valuemax={360} aria-valuenow={Math.round(sidebarWidth)} aria-controls="sidebar-panel" aria-label={t('history:app.layout.resizeSidebar')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'vertical'); if (delta) setSidebarWidth((value) => Math.min(360, Math.max(200, value + delta))) }} onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
+      <span className={`panel-resizer sidebar-resizer ${sidebarCollapsed ? 'hidden' : ''} ${panelResizing === 'sidebar' ? 'active' : ''}`} role="separator" tabIndex={sidebarCollapsed ? -1 : 0} aria-hidden={sidebarCollapsed} aria-orientation="vertical" aria-valuemin={200} aria-valuemax={360} aria-valuenow={Math.round(sidebarWidth)} aria-controls="sidebar-panel" aria-label={t('history:app.layout.resizeSidebar')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'vertical'); if (delta) setSidebarWidth((value) => Math.min(360, Math.max(200, value + delta))) }} onPointerDown={(event) => beginPanelResize('sidebar', event)}/>
     </>}
     {repository && !repositoryManagerOpen && <header className="topbar">
         <div className="branch-context"><Button variant="icon" className="panel-toggle" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} tooltip={t(sidebarCollapsed ? 'history:app.sidebar.expand' : 'history:app.sidebar.collapse')} aria-label={t(sidebarCollapsed ? 'history:app.sidebar.expand' : 'history:app.sidebar.collapse')}>{sidebarCollapsed ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}</Button>{parentRepository && <Tooltip content={t('history:app.navigation.parentRepo', { "path": parentRepository.path })}><button className="parent-repository-chip" onClick={() => void handleReturnToParentRepository()} ><ArrowLeft size={13}/><Box size={13}/><span>{parentRepository.name}</span></button></Tooltip>}{rootRepository && <Tooltip content={t('history:app.navigation.rootRepo', { "path": rootRepository.path })}><button className="parent-repository-chip root-repository-chip" onClick={() => void handleReturnToRootRepository()} ><FolderGit2 size={13}/><span>{t('history:app.navigation.rootRepoLabel', { "name": rootRepository.name })}</span></button></Tooltip>}</div>
-          <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && workspaceView === 'history') { event.preventDefault(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={workspaceView === 'tags' ? t('history:app.search.tags') : repository ? t('history:app.search.commits') : t('history:app.search.openFirst')} disabled={!repository}/>{query ? <><span className="search-result-count">{workspaceView === 'tags' ? t('history:app.search.tagCount', { "count": tagSearchCount }) : searchSummary.total ? `${new Intl.NumberFormat(locale).format(searchSummary.current || 1)}/${new Intl.NumberFormat(locale).format(searchSummary.total)}` : '0/0'}</span>{workspaceView === 'history' && <><Tooltip content={t('history:app.search.previous')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.previous')}><ChevronUp size={13}/></button></Tooltip><Tooltip content={t('history:app.search.next')}><button type="button" onClick={() => setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 }))} disabled={!searchSummary.total} aria-label={t('history:app.search.next')}><ChevronDown size={13}/></button></Tooltip><Tooltip content={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} aria-label={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><ListFilter size={13}/></button></Tooltip></>}<Tooltip content={t('history:app.search.clear')}><button type="button" onClick={() => setQuery('')} aria-label={t('history:app.search.clear')}><X size={13}/></button></Tooltip></> : <kbd>{getShortcutModifier()} F</kbd>}</div>
+          <div className={`global-search ${query ? 'has-query' : ''}`}><Search size={16}/><input ref={searchRef} value={query} onChange={(event) => { setQuery(event.target.value); setAppliedQueryOverride(null) }} onKeyDown={(event) => { if (event.key === 'Enter' && (workspaceView === 'history' || workspaceView === 'tags')) { event.preventDefault(); applySearchImmediately(); if (workspaceView === 'history') setSearchAction((current) => ({ sequence: current.sequence + 1, direction: event.shiftKey ? -1 : 1 })) } }} placeholder={workspaceView === 'tags' ? t('history:app.search.tags') : repository ? t('history:app.search.commits') : t('history:app.search.openFirst')} disabled={!repository}/>{query ? <><span className="search-result-count">{workspaceView === 'tags' ? t('history:app.search.tagCount', { "count": tagSearchCount }) : searchSummary.total ? `${new Intl.NumberFormat(locale).format(searchSummary.current || 1)}/${new Intl.NumberFormat(locale).format(searchSummary.total)}` : '0/0'}</span>{workspaceView === 'history' && <><Tooltip content={t('history:app.search.previous')}><button type="button" onClick={() => { applySearchImmediately(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: -1 })) }} disabled={!searchSummary.total} aria-label={t('history:app.search.previous')}><ChevronUp size={13}/></button></Tooltip><Tooltip content={t('history:app.search.next')}><button type="button" onClick={() => { applySearchImmediately(); setSearchAction((current) => ({ sequence: current.sequence + 1, direction: 1 })) }} disabled={!searchSummary.total} aria-label={t('history:app.search.next')}><ChevronDown size={13}/></button></Tooltip><Tooltip content={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><button type="button" className={searchMode === 'filter' ? 'active' : ''} onClick={() => setSearchMode((current) => current === 'locate' ? 'filter' : 'locate')} aria-label={searchMode === 'locate' ? t('history:app.search.filterMode') : t('history:app.search.locateMode')}><ListFilter size={13}/></button></Tooltip></>}<Tooltip content={t('history:app.search.clear')}><button type="button" onClick={() => { setQuery(''); setAppliedQueryOverride('') }} aria-label={t('history:app.search.clear')}><X size={13}/></button></Tooltip></> : <kbd>{getShortcutModifier()} F</kbd>}</div>
           <div className="top-actions">
             <Button variant="secondary" className="fetch-button sync-action" aria-label={t('history:app.sync.fetch')} onClick={() => void handleFetch()} disabled={!repository || fetching || Boolean(activeOperation)} tooltip={t('history:app.sync.fetchHint')}><RefreshCw size={15} className={fetching ? 'spin' : ''}/><span>{fetching ? t('history:app.sync.fetching') : t('history:app.sync.fetch')}</span></Button>
             <Button variant="secondary" className="fetch-button sync-action" aria-label={t('history:app.sync.pull')} onClick={() => repository && void handlePullBranch(repository.branch)} disabled={!repository || Boolean(activeOperation) || Boolean(repository.operation)} tooltip={repository?.operation ? t('history:app.sync.finishOperation') : repository?.behind ? t('history:app.sync.pullCount', { "count": repository.behind }) : t('history:app.sync.pullHint')}>{activeOperation?.key === 'pull' ? <RefreshCw className="spin" size={15}/> : <CloudDownload size={15}/>}<span>{activeOperation?.key === 'pull' ? t('history:app.sync.pulling') : t('history:app.sync.pull')}</span>{Boolean(repository?.behind) && <small className="sync-count pull-count">{new Intl.NumberFormat(locale).format(repository!.behind)}</small>}</Button>
@@ -1567,13 +1669,16 @@ export default function App() {
       </header>
     }
     <div className={`workspace ${repository && !repositoryManagerOpen ? '' : 'empty-repository'}`}>
-      {repository && !repositoryManagerOpen ? <><div className="content-tabs"><Tooltip content={t('history:app.navigation.historyHint')}><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} ><GitCommitHorizontal size={14}/><span className="tab-label">{t('history:app.navigation.history')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.changesHint')}><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} ><FileDiff size={14}/><span className="tab-label">{t('history:app.navigation.changes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.stashHint')}><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} ><Archive size={14}/><span className="tab-label">{t('history:app.navigation.stashes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.compareHint')}><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} ><GitCompareArrows size={14}/><span className="tab-label">{t('history:app.navigation.compare')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.mergeHint')}><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} ><GitMerge size={14}/><span className="tab-label">{t('history:app.navigation.merge')}</span></button></Tooltip>{repository.operation && <Tooltip content={t('history:app.navigation.operationHint')}><button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} ><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? t('history:app.navigation.rebase') : repository.operation.conflicts.length ? t('history:app.navigation.conflicts') : repository.operation.kind === 'merge' ? t('history:app.navigation.mergeOperation') : repository.operation.kind === 'cherry-pick' ? t('history:app.navigation.cherryPick') : t('history:app.navigation.operation')}</span><span className="tab-badge">{repository.operation.conflicts.length ? new Intl.NumberFormat(locale).format(repository.operation.conflicts.length) : repository.operation.currentStep || '!'}</span></button></Tooltip>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" aria-label={t('history:app.confirm.undoHeading')} disabledAnchorClassName="history-undo-anchor" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} tooltip={t('history:app.actions.undoHint')}><Undo2 size={14}/><span>{t('history:app.confirm.undoHeading')}</span></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.branchHint', { branchFilterLabel })} active={branchFilter.length > 0} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.branchHint', { "branchFilterLabel": branchFilterLabel })}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.timeHint', { timeFilterLabelstimeFilter: timeFilterLabels[timeFilter] })} active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.timeHint', { "timeFilterLabelstimeFilter": timeFilterLabels[timeFilter] })}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</div>
+      <AnimatedPage pageKey={repository && !repositoryManagerOpen ? 'workbench' : !repository && openingRepository ? 'startup' : 'manager'} order={repository && !repositoryManagerOpen ? 1 : 0} className={`workspace-route ${repository && !repositoryManagerOpen ? '' : 'empty'}`}>
+      {repository && !repositoryManagerOpen ? <><AnimatedTabBar activeKey={workspaceView} className="content-tabs"><Tooltip content={t('history:app.navigation.historyHint')}><button className={workspaceView === 'history' ? 'active' : ''} onClick={() => setWorkspaceView('history')} ><GitCommitHorizontal size={14}/><span className="tab-label">{t('history:app.navigation.history')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.changesHint')}><button className={workspaceView === 'changes' ? 'active' : ''} onClick={() => setWorkspaceView('changes')} ><FileDiff size={14}/><span className="tab-label">{t('history:app.navigation.changes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.stashHint')}><button className={workspaceView === 'stash' ? 'active' : ''} onClick={() => setWorkspaceView('stash')} ><Archive size={14}/><span className="tab-label">{t('history:app.navigation.stashes')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.compareHint')}><button className={workspaceView === 'compare' ? 'active' : ''} onClick={() => { setCompareBase(null); setWorkspaceView('compare') }} ><GitCompareArrows size={14}/><span className="tab-label">{t('history:app.navigation.compare')}</span></button></Tooltip><Tooltip content={t('history:app.navigation.mergeHint')}><button className={workspaceView === 'merge' ? 'active' : ''} onClick={() => setWorkspaceView('merge')} ><GitMerge size={14}/><span className="tab-label">{t('history:app.navigation.merge')}</span></button></Tooltip>{repository.operation && <Tooltip content={t('history:app.navigation.operationHint')}><button className={`operation-tab ${workspaceView === 'operation' ? 'active' : ''}`} onClick={() => setWorkspaceView('operation')} ><CircleDot size={14}/><span className="tab-label">{repository.operation.kind === 'rebase' ? t('history:app.navigation.rebase') : repository.operation.conflicts.length ? t('history:app.navigation.conflicts') : repository.operation.kind === 'merge' ? t('history:app.navigation.mergeOperation') : repository.operation.kind === 'cherry-pick' ? t('history:app.navigation.cherryPick') : t('history:app.navigation.operation')}</span><span className="tab-badge">{repository.operation.conflicts.length ? new Intl.NumberFormat(locale).format(repository.operation.conflicts.length) : repository.operation.currentStep || '!'}</span></button></Tooltip>}<div className="tab-spacer"/>{workspaceView === 'history' && <><Button variant="danger" className="history-undo-button" aria-label={t('history:app.confirm.undoHeading')} disabledAnchorClassName="history-undo-anchor" disabled={!currentBranchHead || Boolean(repository.operation) || Boolean(activeOperation)} onClick={() => currentBranchHead && void handleUndoLastCommit(currentBranchHead)} tooltip={t('history:app.actions.undoHint')}><Undo2 size={14}/><span>{t('history:app.confirm.undoHeading')}</span></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.branchHint', { branchFilterLabel })} active={branchFilter.length > 0} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'branch', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.branchHint', { "branchFilterLabel": branchFilterLabel })}><ListFilter size={14}/><span>{branchFilterLabel}</span><ChevronDown size={12}/></Button><Button variant="secondary" className="filter-button" aria-label={t('history:app.filters.timeHint', { timeFilterLabelstimeFilter: timeFilterLabels[timeFilter] })} active={timeFilter !== 'all'} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFilterMenu({ kind: 'time', x: rect.right - 220, y: rect.bottom + 4 }) }} tooltip={t('history:app.filters.timeHint', { "timeFilterLabelstimeFilter": timeFilterLabels[timeFilter] })}><Clock3 size={14}/><span>{timeFilterLabels[timeFilter]}</span><ChevronDown size={12}/></Button></>}</AnimatedTabBar>
       {filterMenu && <ContextMenu x={filterMenu.x} y={filterMenu.y} onClose={() => setFilterMenu(null)}>
         {filterMenu.kind === 'branch' ? <><div className="context-menu-title"><ListFilter size={13}/><span>{t('history:app.filters.branchHeading')}</span></div><div className="context-menu-options"><button className={branchFilter.length === 0 ? 'selected-option' : ''} onClick={() => { setBranchFilter([]); setFilterMenu(null) }}><Check size={14}/><span>{t('history:app.filters.allBranches')}</span></button>{availableBranches.map((branch) => <label className="history-filter-option" key={branch}><input type="checkbox" checked={branchFilter.includes(branch)} onChange={() => setBranchFilter((values) => toggleFilterValue(values, branch))}/><GitBranch size={14}/><span>{branch}</span></label>)}</div></> : <><div className="context-menu-title"><Clock3 size={13}/><span>{t('history:app.filters.timeHeading')}</span></div>{(['all', 'day', 'week', 'month'] as TimeFilter[]).map((value) => <button className={timeFilter === value ? 'selected-option' : ''} key={value} onClick={() => { setTimeFilter(value); setFilterMenu(null) }}><Clock3 size={14}/><span>{timeFilterLabels[value]}</span></button>)}</>}
       </ContextMenu>}
+      <AnimatedPage pageKey={workspaceView} cacheScope={repository.path} order={['history', 'changes', 'stash', 'compare', 'merge', 'operation', 'structure', 'tags'].indexOf(workspaceView)} className="workspace-content-transition">
       <div className={`workspace-grid ${wideDiff && (diffFile !== null || treeFileView !== null) ? 'diff-wide' : ''} ${inspectorCollapsed ? 'inspector-collapsed' : ''}`} style={{ gridTemplateColumns: `minmax(0, 1fr) ${inspectorVisible ? rounded ? 4 : 1 : 0}px ${inspectorVisible ? inspectorWidth : 0}px` }}>
+        <div className="workspace-main-page">
         {workspaceView === 'history' && <section className="history-pane">
-          <CommitList revealSignal={historyRevealSignal} key={repository.path} commits={activeCommits} selected={selected} onSelect={(id) => { setSelected(id); setInspectorCollapsed(false) }} query={query} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => { const remote = commit.branches?.find((reference) => repository.remoteBranches.includes(reference) || repository.remoteBranches.includes(reference.replace(/^refs\/remotes\//, ''))); const normalized = remote?.replace(/^refs\/remotes\//, ''); void handleMergeReference(remote ?? commit.fullHash ?? commit.id, remote ? message('history:app.references.branchNormalized', { "normalized": normalized ?? remote ?? commit.id }) : message('history:app.references.commit', { "id": commit.id })) }} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRevertCommit={(commit) => void handleRevertCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit, t, locale), mode === 'hash' ? message('history:app.notice.hashCopied', { "statusstashStash": message(commit.status === 'stash' ? 'history:app.references.stash' : 'history:app.details.commitHeading'), "id": commit.id }) : message('history:app.notice.detailsCopied', { "id": commit.status === 'stash' ? 'Stash' : message('history:app.references.commit', { id: commit.id }) }))} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
+          <CommitList revealSignal={historyRevealSignal} key={repository.path} commits={activeCommits} selected={selected} onSelect={(id) => { setSelected(id); setInspectorCollapsed(false) }} query={appliedQuery} searchMode={searchMode} searchAction={searchAction} onSearchSummaryChange={handleSearchSummaryChange} branchFilter={branchFilter} timeFilter={timeFilter} currentBranch={repository.branch} remoteBranches={repository.remoteBranches} branchTracking={repository.branchTracking} tags={repository.tags} stashReferences={stashReferences} inspectorCollapsed={inspectorCollapsed} onToggleInspector={() => setInspectorCollapsed((value) => !value)} onMergeCommit={(commit) => { const remote = commit.branches?.find((reference) => repository.remoteBranches.includes(reference) || repository.remoteBranches.includes(reference.replace(/^refs\/remotes\//, ''))); const normalized = remote?.replace(/^refs\/remotes\//, ''); void handleMergeReference(remote ?? commit.fullHash ?? commit.id, remote ? message('history:app.references.branchNormalized', { "normalized": normalized ?? remote ?? commit.id }) : message('history:app.references.commit', { "id": commit.id })) }} onCherryPickCommit={(commit) => void handleCherryPickCommit(commit)} onResetCommit={(commit) => void handleResetCommit(commit)} onRevertCommit={(commit) => void handleRevertCommit(commit)} onRebaseCommit={(commit) => void handleRebaseCommit(commit)} onTagCommit={(commit) => void handleTagCommit(commit)} onCompareCommit={handleCompareCommit} onCopyCommit={(commit, mode) => void copyText(mode === 'hash' ? commit.fullHash ?? commit.id : formatCommitClipboard(commit, t, locale), mode === 'hash' ? message('history:app.notice.hashCopied', { "statusstashStash": message(commit.status === 'stash' ? 'history:app.references.stash' : 'history:app.details.commitHeading'), "id": commit.id }) : message('history:app.notice.detailsCopied', { "id": commit.status === 'stash' ? 'Stash' : message('history:app.references.commit', { id: commit.id }) }))} onApplyStash={(reference) => void handleApplyStash(reference)} onPopStash={(reference) => void handlePopStash(reference)} onDropStash={(reference) => void handleDropStash(reference)}/>
           {diffFile !== null && <div className="history-diff-overlay"><DiffPanel files={selectedCommitFiles} repositoryPath={repository.path} wide={wideDiff} onWideChange={setWideDiff} initialFile={diffFile} onActiveFileChange={setDiffFile} hideFileList loadRows={loadSelectedCommitDiff} loadImage={loadSelectedCommitImage} onOpenLineHistory={(path, line, side) => setHistoryTarget({ path, line, tab: 'line', revision: selectedWorkingTree ? (side === 'old' ? selectedCommit.parent : undefined) : side === 'old' ? (selectedCommit.parents?.[0] ?? selectedCommit.parent ?? selectedStatsKey) : selectedStatsKey })} onClose={() => { setDiffFile(null); setWideDiff(false) }}/></div>}
           {treeFileView && <div className="history-diff-overlay"><DiffPanel key={`commit-file:${treeFileView.commit}:${treeFileView.path}`} files={[treeFileView.file]} wide={wideDiff} onWideChange={setWideDiff} hideFileList fileContentOnly loadRows={(path) => loadSelectedCommitFileContent(path)} loadImage={loadTreeFileImage} viewKey={treeFileView.commit} onOpenLineHistory={(path, line) => setHistoryTarget({ path, line, tab: 'line', revision: treeFileView.commit })} onClose={() => { setTreeFileView(null); setWideDiff(false) }}/></div>}
           {historyConflictPath && repository.operation && <div className="history-diff-overlay history-operation-overlay"><Suspense fallback={<section className="workspace-empty"><RefreshCw className="spin" size={28}/><strong>{t('history:app.progress.loadEditor')}</strong></section>}><OperationPanel repository={repository} onSnapshot={handleSnapshot} onNotice={setRepositoryNotice} initialPath={historyConflictPath} onReturnToChanges={() => { setHistoryConflictPath(null); setOperationPath(null) }} onClose={() => { setHistoryConflictPath(null); setOperationPath(null) }}/></Suspense></div>}
@@ -1610,13 +1715,14 @@ export default function App() {
             selection={structureSelection}
             onOpenPath={(path, kind) => void (kind === 'submodule' ? handleOpenSubmodulePath(path) : handleOpenRepositoryPath(path))}
             onOpenTag={handleJumpTag}
-            query={query}
+            query={appliedQuery}
             onSnapshot={applyStructureSnapshot}
             onNotice={setRepositoryNotice}
           />
         )}
+        </div>
         <span className={`panel-resizer inspector-resizer ${inspectorVisible ? '' : 'hidden'} ${panelResizing === 'inspector' ? 'active' : ''}`} role="separator" tabIndex={inspectorVisible ? 0 : -1} aria-hidden={!inspectorVisible} aria-orientation="vertical" aria-valuemin={300} aria-valuemax={520} aria-valuenow={Math.round(inspectorWidth)} aria-controls="inspector-pane" aria-label={t('history:app.layout.resizeInspector')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'vertical', true); if (delta) setInspectorWidth((value) => Math.min(520, Math.max(300, value + delta))) }} onPointerDown={(event) => beginPanelResize('inspector', event)}/>
-        {workspaceView === 'history' && !inspectorCollapsed && <section id="inspector-pane" className="inspector-pane" style={{ gridTemplateRows: `${detailsHeight}px 1px minmax(0, 1fr)` }}>
+        <AnimatePresence initial={false}>{workspaceView === 'history' && !inspectorCollapsed && <CommitInspector key="inspector" visible={inspectorVisible} detailsHeight={detailsHeight}>
           <CommitDetails commit={selectedCommit} stashReference={selectedStashReference} onOpenParent={(hash) => void handleOpenParent(hash)} onClose={() => setInspectorCollapsed(true)}/>
           <span className={`panel-resizer inspector-vertical-resizer ${panelResizing === 'details' ? 'active' : ''}`} role="separator" tabIndex={0} aria-orientation="horizontal" aria-valuemin={230} aria-valuemax={560} aria-valuenow={Math.round(detailsHeight)} aria-label={t('history:app.layout.resizeDetails')} onKeyDown={(event) => { const delta = getResizeDeltaFromKey(event, 'horizontal'); if (delta) setDetailsHeight((value) => Math.min(560, Math.max(230, value + delta))) }} onPointerDown={beginDetailsResize}/>
           <ChangedFilesPanel key={selectedTreeKey} files={selectedCommitFiles} treePaths={usesCommitTree ? selectedTree?.paths : undefined} treeError={selectedTree?.error} loading={selectedCommitFilesLoading || (usesCommitTree && !selectedTree)} activeFile={diffFile} onOpenFile={(index, file) => {
@@ -1637,25 +1743,27 @@ export default function App() {
             setDiffFile(index)
             setWideDiff(false)
           }} onOpenHistory={(path, tab) => setHistoryTarget({ path, tab, revision: selectedWorkingTree ? undefined : selectedStatsKey })}/>
-        </section>}
+        </CommitInspector>}</AnimatePresence>
       </div>
+      </AnimatedPage>
       <footer className="statusbar">
         <div><span className={repository.operation ? 'status-warning' : 'status-ok'}>{repository.operation ? <AlertTriangle size={11}/> : <Check size={11}/>}</span><span>{(repository.operation ? operationLabel(repository.operation.kind, t) : undefined) ?? t('history:app.notifications.healthy')}</span><span className="status-separator"/><GitBranch size={12}/><span>{repository.operation?.originalBranch ?? repository.branch}</span><span>↑{new Intl.NumberFormat(locale).format(repository.ahead)}</span><span>↓{new Intl.NumberFormat(locale).format(repository.behind)}</span></div>
         <div ref={autoFetchRef} className="statusbar-secondary"><Tooltip content={t('history:app.sidebar.openLog')}><button className="status-command-log" onClick={() => setCommandLogOpen(true)} ><TerminalSquare size={12}/><span>{t('history:app.status.commandLog')}</span></button></Tooltip><span className="status-separator"/><Tooltip content={t('history:app.status.configure')}><button className={`status-fetch-control ${autoFetchOpen ? 'active' : ''}`} onClick={() => setAutoFetchOpen((value) => !value)} aria-expanded={autoFetchOpen} aria-haspopup="dialog" ><TimerReset size={12}/><span>{t('history:app.status.autoFetch', { "value1": autoFetchEnabled ? t('history:app.status.everyMinutes', { count: fetchIntervalMinutes }) : t('history:app.status.disabled') })}</span></button></Tooltip><span className="status-separator"/><Box size={12}/><span>{t('history:app.notifications.submoduleCount', { "count": repository.submoduleCount })}</span><span className="status-separator"/><Code2 size={12}/><span>UTF-8</span>{autoFetchOpen && <div className="auto-fetch-popover" role="dialog" aria-label={t('history:app.status.settings')}><div className="auto-fetch-heading"><div><strong>{t('history:app.status.sync')}</strong><small>{t('history:app.status.syncHint')}</small></div><Button variant="icon" onClick={() => setAutoFetchOpen(false)} tooltip={t('history:app.status.close')} aria-label={t('history:app.status.close')}><X size={14}/></Button></div><label className="auto-fetch-toggle"><span><strong>{t('history:app.status.enableFetch')}</strong><small>{t('history:app.status.fetchHint')}</small></span><input type="checkbox" checked={autoFetchEnabled} onChange={(event) => setAutoFetchEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>{t('history:app.status.fetchInterval')}</span><CompactSelect className="auto-fetch-interval-select" value={fetchIntervalMinutes} options={[1, 5, 10, 15, 30].map((minutes) => ({ value: minutes, label: t('history:app.status.minutes', { "count": minutes }) }))} onChange={setFetchIntervalMinutes} ariaLabel={t('history:app.status.selectFetch')} disabled={!autoFetchEnabled}/></div><div className="local-polling-settings"><label className="auto-fetch-toggle"><span><strong>{t('history:app.status.polling')}</strong><small>{t('history:app.status.pollHint')}</small></span><input type="checkbox" checked={localPollingEnabled} onChange={(event) => setLocalPollingEnabled(event.target.checked)}/><span className="toggle-track" aria-hidden="true"><span/></span></label><div className="auto-fetch-field"><span>{t('history:app.status.pollInterval')}</span><CompactSelect className="auto-fetch-interval-select" value={localPollingIntervalSeconds} options={[2, 5, 10, 30].map((seconds) => ({ value: seconds, label: t('history:app.status.seconds', { "count": seconds }) }))} onChange={setLocalPollingIntervalSeconds} ariaLabel={t('history:app.status.selectPolling')} disabled={!localPollingEnabled}/></div></div><div className="auto-fetch-meta"><span>{t('history:app.status.lastFetch')}</span><strong>{lastFetchAt ? new Date(lastFetchAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : t('history:app.status.neverFetched')}</strong></div><Button variant="secondary" className="auto-fetch-now" onClick={() => void handleFetch()} disabled={fetching || Boolean(activeOperation)}><RefreshCw size={13} className={fetching ? 'spin' : ''}/>{fetching ? t('history:app.sync.fetching') : t('history:app.shortcuts.fetch')}</Button></div>}</div>
       </footer></> : !repository && openingRepository ? <RepositoryStartupScreen repository={restoringRepository}/> : <RepositoryManagerPage recent={recentRepositories} favorites={favoriteRepositories} current={repository} opening={openingRepository} theme={theme} resolvedTheme={resolvedTheme} rounded={rounded} onToggleRounded={() => setRounded(nextRoundedPreference)} onToggleTheme={() => setTheme(nextThemePreference)} onBack={() => setRepositoryManagerOpen(false)} onOpen={(path) => void handleOpenRepositoryPath(path)} onRegister={registerRepository} onToggleFavorite={toggleFavorite} onForget={forgetRepository} onNotice={setRepositoryNotice}/>}
+      </AnimatedPage>
     </div>
-    {openingRepository && repository && <div className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>{t('history:app.progress.loadingRepo')}</strong><span>{t('history:app.progress.loadingRepoDetail')}</span></div></div>}
+    <MotionPresence present={openingRepository && Boolean(repository)} className="repository-loading" role="status" aria-live="polite"><div><RefreshCw className="spin" size={22}/><strong>{t('history:app.progress.loadingRepo')}</strong><span>{t('history:app.progress.loadingRepoDetail')}</span></div></MotionPresence>
     <div className={`operation-indicator ${activeOperation ? 'visible' : ''} ${activeOperation?.key === 'cherry-pick' ? 'cherry-pick' : ''}`} role="status" aria-live="polite" aria-hidden={!activeOperation}>{activeOperation && <><RefreshCw className="spin" size={17}/><div><strong>{renderMessage(activeOperation.label, t)}</strong><span>{renderMessage(activeOperation.detail, t)}</span></div></>}</div>
     <HistoryDrawer repositoryPath={repository?.path} filePath={historyTarget?.path ?? null} initialTab={historyTarget?.tab ?? 'history'} lineNumber={historyTarget?.line} revision={historyTarget?.revision} onClose={() => setHistoryTarget(null)}/>
     <CreateBranchDialog open={Boolean(branchDialog)} prefix={branchDialog?.prefix} currentBranch={repository?.branch ?? ''} onClose={() => setBranchDialog(null)} onCreate={handleCreateBranch}/>
     <RebaseDialog open={Boolean(rebaseDialog)} repository={repository} onto={rebaseDialog?.commit ?? null} targetLabel={rebaseDialog?.label ?? ''} onClose={() => setRebaseDialog(null)} onStart={startRebase}/>
-    {cherryPickDialog && <CherryPickDialog
-      open
-      commit={{ id: cherryPickDialog.commit.id, title: cherryPickDialog.commit.title, parents: cherryPickDialog.parents }}
+    <CherryPickDialog
+      open={Boolean(cherryPickDialog)}
+      commit={{ id: cherryPickDialog?.commit.id ?? '', title: cherryPickDialog?.commit.title ?? '', parents: cherryPickDialog?.parents ?? [] }}
       currentBranch={repository?.branch ?? ''}
       onClose={() => setCherryPickDialog(null)}
       onConfirm={confirmCherryPick}
-    />}
+    />
     <GitConfigDialog open={gitConfigOpen} onClose={() => setGitConfigOpen(false)} onNotice={setRepositoryNotice}/>
     <CommandLogPanel open={commandLogOpen} onClose={() => setCommandLogOpen(false)}/>
     <ShortcutOverlay open={shortcutOpen} onClose={() => setShortcutOpen(false)}/>

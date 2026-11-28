@@ -1,5 +1,7 @@
 import { Tooltip } from '../../components/tooltip'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
+import { flushSync } from 'react-dom'
+import { hasScrollBuffer } from '../../virtualScroll'
 import { AlignJustify, ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronUp, Columns2, Copy, FileCode2, FileText, FolderOpen, History, Image as ImageIcon, List, Maximize2, Minimize2, Minus, Plus, RotateCcw, Undo2, ScanText, Search, X, Pilcrow, WrapText, ZoomIn, ZoomOut } from 'lucide-react'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import { errorMessage, message, renderMessage, type MessageContent } from '../../i18n/messages'
@@ -172,7 +174,8 @@ const IMAGE_ZOOM_STEP = 25
 const IMAGE_CANVAS_PADDING = 28
 const DIFF_VIRTUALIZATION_THRESHOLD = 300
 const DIFF_VIRTUAL_OVERSCAN = 40
-const DIFF_VIRTUAL_RECENTER_ROWS = 32
+const DIFF_SCROLL_BUFFER_ROWS = 8
+const DIFF_MIN_OMISSION_HEIGHT = 24
 const DIFF_BLOCK_ACTION_HEIGHT = 40
 const EMPTY_FALLBACK_ROWS: Record<string, RepositoryDiffLine[]> = {}
 const EMPTY_DIFF_ROWS: RepositoryDiffLine[] = []
@@ -462,6 +465,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIndex, setSearchIndex] = useState(0)
   const [virtualScrollTop, setVirtualScrollTop] = useState(0)
+  const [virtualViewportHeight, setVirtualViewportHeight] = useState(0)
   const [overviewCanScroll, setOverviewCanScroll] = useState(false)
   const [overviewBounds, setOverviewBounds] = useState({ top: 0, bottom: 0 })
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -474,12 +478,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const overviewViewportRef = useRef<HTMLSpanElement>(null)
   const overviewDragging = useRef(false)
   const overviewDragOffset = useRef<number | null>(null)
-  const virtualScrollFrame = useRef(0)
-  const virtualScrollPending = useRef(false)
   const overviewFrame = useRef(0)
   const overviewPending = useRef(false)
-  const pendingVirtualScrollTop = useRef(0)
-  const virtualScrollTopRef = useRef(0)
   useEffect(() => {
     setActiveFile(initialFile)
     setActiveChange(null)
@@ -621,15 +621,14 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }, [sourceRows, splitEntries, unifiedEntries, view])
   const visibleEntryCount = view === 'unified' ? unifiedEntries.length : splitEntries.length
   const virtualized = !wrap && visibleEntryCount > DIFF_VIRTUALIZATION_THRESHOLD
-  const virtualRowHeight = view === 'split'
-    ? diffSplitRowHeight(diffFontSize, stageActionsEnabled)
-    : Math.max(stageActionsEnabled ? 24 : 20, Math.ceil(diffFontSize * 1.5 + 6))
+  const minimumRowHeight = view === 'unified' ? 22 : 20
+  const virtualRowHeight = Math.max(minimumRowHeight, diffSplitRowHeight(diffFontSize, stageActionsEnabled))
   const blockActionCount = Number(canStage && Boolean(onStagePatch)) + Number(canStage && Boolean(onRestorePatch)) + Number(canUnstage)
   const actionEdgeSpace = blockActionCount ? diffActionEdgeSpace(virtualRowHeight, DIFF_BLOCK_ACTION_HEIGHT) : 0
   const entryMetrics = useMemo(() => {
     const entries = view === 'unified' ? unifiedEntries : splitEntries
-    const heights = entries.map((entry, index) => entry.kind === 'omitted' && index > 0 && index + 1 < entries.length
-      ? virtualRowHeight * 2
+    const heights = entries.map((entry, index) => entry.kind === 'omitted'
+      ? Math.max(DIFF_MIN_OMISSION_HEIGHT, virtualRowHeight * (index > 0 && index + 1 < entries.length ? 2 : 1))
       : virtualRowHeight)
     const offsets = [0]
     heights.forEach((height) => offsets.push(offsets[offsets.length - 1] + height))
@@ -661,7 +660,9 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   }, [unifiedEntries, splitEntries, view, virtualRowHeight, virtualized, blockActionCount, actionEdgeSpace, entryMetrics])
   const canRenderLoadedRows = shouldRenderLoadedRows(usesLoader, loadedFileIdentity, activeFileIdentity)
   const virtualStart = virtualized ? Math.max(0, entryIndexAtOffset(entryMetrics.offsets, virtualScrollTop) - DIFF_VIRTUAL_OVERSCAN) : 0
-  const virtualEnd = virtualized ? Math.min(visibleEntryCount, virtualStart + DIFF_VIRTUAL_OVERSCAN * 2 + 80) : visibleEntryCount
+  const virtualEnd = virtualized
+    ? Math.min(visibleEntryCount, entryIndexAtOffset(entryMetrics.offsets, virtualScrollTop + virtualViewportHeight) + DIFF_VIRTUAL_OVERSCAN + 1)
+    : visibleEntryCount
   const virtualTopHeight = virtualized ? entryMetrics.offsets[virtualStart] : 0
   const virtualBottomHeight = Math.max(0, entryMetrics.total - (entryMetrics.offsets[virtualEnd] ?? entryMetrics.total)) + actionEdgeSpace
   const splitTotalHeight = entryMetrics.total + actionEdgeSpace
@@ -693,38 +694,26 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     setLineMenu(null)
     setActiveChange(null)
     setPendingJump(null)
-    virtualScrollTopRef.current = 0
-    setVirtualScrollTop(0)
     setImageZoom(100)
-    requestAnimationFrame(() => {
-      if (codeDiffRef.current) codeDiffRef.current.scrollTop = 0
-      const scroller = splitScrollerRef.current
-      if (scroller) {
-        scroller.scrollTop = 0
-        scroller.style.setProperty('--split-scroll-top', '0px')
-      }
-    })
   }, [activeScope, view, contextLineCount, showImagePreview])
   useEffect(() => {
-    virtualScrollTopRef.current = 0
-    setVirtualScrollTop(0)
     setImageMode('preview')
     setImageZoom(100)
-    requestAnimationFrame(() => {
-      if (codeDiffRef.current) codeDiffRef.current.scrollTop = 0
-      const scroller = splitScrollerRef.current
-      if (scroller) {
-        scroller.scrollTop = 0
-        scroller.style.setProperty('--split-scroll-top', '0px')
-      }
-    })
   }, [activeFile])
+  useLayoutEffect(() => {
+    if (codeDiffRef.current) codeDiffRef.current.scrollTop = 0
+    const scroller = splitScrollerRef.current
+    if (scroller) {
+      scroller.scrollTop = 0
+      scroller.style.setProperty('--split-scroll-top', '0px')
+    }
+    setVirtualScrollTop(0)
+  }, [activeFileIdentity, activeScope, view, contextLineCount, showImagePreview])
   useEffect(() => {
     const top = view === 'split'
       ? splitScrollerRef.current?.scrollTop ?? 0
       : codeDiffRef.current?.scrollTop ?? 0
     if (view === 'split') splitScrollerRef.current?.style.setProperty('--split-scroll-top', `${top}px`)
-    virtualScrollTopRef.current = top
     setVirtualScrollTop(top)
   }, [view, wrap])
   useEffect(() => {
@@ -734,10 +723,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const frame = requestAnimationFrame(() => {
       const top = scroller.scrollTop
       scroller.style.setProperty('--split-scroll-top', `${top}px`)
-      if (virtualized) {
-        virtualScrollTopRef.current = top
-        setVirtualScrollTop(top)
-      }
+      if (virtualized) setVirtualScrollTop(top)
     })
     return () => cancelAnimationFrame(frame)
   }, [view, splitTotalHeight, activeFileIdentity, reloadKey, virtualized])
@@ -757,7 +743,6 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     return () => observer.disconnect()
   }, [view, canRenderLoadedRows, diffError, showImagePreview, wrap])
   useEffect(() => () => {
-    if (virtualScrollFrame.current) cancelAnimationFrame(virtualScrollFrame.current)
     if (overviewFrame.current) cancelAnimationFrame(overviewFrame.current)
   }, [])
   useEffect(() => {
@@ -796,46 +781,26 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     event.preventDefault()
     setLineMenu({ rowIndex, sourceIndex, side, line, code: row.code, x: event.clientX, y: event.clientY })
   }
-  // A wheel or drag produces several scroll events per frame. Only recenter the
-  // virtual window after the viewport has moved far enough to approach the
-  // rendered buffer edge; everything in between is native browser scrolling.
-  const queueVirtualScrollTop = (top: number) => {
+  const updateVirtualWindow = (pane: HTMLDivElement, top: number) => {
     if (!virtualized) return
-    pendingVirtualScrollTop.current = top
-    if (virtualScrollPending.current) return
-    virtualScrollPending.current = true
-    virtualScrollFrame.current = requestAnimationFrame(() => {
-      virtualScrollPending.current = false
-      virtualScrollFrame.current = 0
-      const currentRow = Math.floor(virtualScrollTopRef.current / virtualRowHeight)
-      const nextRow = Math.floor(pendingVirtualScrollTop.current / virtualRowHeight)
-      if (Math.abs(nextRow - currentRow) < DIFF_VIRTUAL_RECENTER_ROWS) return
-      virtualScrollTopRef.current = pendingVirtualScrollTop.current
-      setVirtualScrollTop(pendingVirtualScrollTop.current)
+    const height = pane.clientHeight
+    const buffer = DIFF_SCROLL_BUFFER_ROWS * virtualRowHeight
+    if (hasScrollBuffer(top, height, virtualTopHeight, entryMetrics.offsets[virtualEnd], entryMetrics.total, buffer)) return
+    flushSync(() => {
+      setVirtualViewportHeight(height)
+      setVirtualScrollTop(top)
     })
   }
-  const applySplitScrollTop = (top: number, forceRecenter = false) => {
-    const scroller = splitScrollerRef.current
-    if (!scroller) return
-    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-    const next = Math.max(0, Math.min(max, top))
-    scroller.scrollTop = next
-    scroller.style.setProperty('--split-scroll-top', `${next}px`)
-    if (virtualized) {
-      if (forceRecenter) {
-        virtualScrollTopRef.current = next
-        setVirtualScrollTop(next)
-      } else {
-        queueVirtualScrollTop(next)
-      }
-    }
-    queueOverviewViewport()
+  const setPaneScrollTop = (pane: HTMLDivElement, top: number) => {
+    pane.scrollTop = top
+    if (view === 'split') pane.style.setProperty('--split-scroll-top', `${pane.scrollTop}px`)
   }
-  const handleSplitScroll = (event: UIEvent<HTMLDivElement>) => {
-    const scroller = event.currentTarget
-    scroller.style.setProperty('--split-scroll-top', `${scroller.scrollTop}px`)
+  const handleDiffScroll = (event: UIEvent<HTMLDivElement>) => {
+    const pane = event.currentTarget
+    const top = pane.scrollTop
+    updateVirtualWindow(pane, top)
+    if (view === 'split') pane.style.setProperty('--split-scroll-top', `${top}px`)
     queueOverviewViewport()
-    queueVirtualScrollTop(scroller.scrollTop)
   }
   // The overview sits beside the right pane, whose horizontal scrollbar may differ from the left.
   const activeScrollPane = () => view === 'unified' ? codeDiffRef.current : splitScrollerRef.current
@@ -864,6 +829,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const pane = activeScrollPane()
     const viewer = overviewRef.current
     if (!pane || !viewer) return
+    if (virtualized) setVirtualViewportHeight(pane.clientHeight)
     const bounds = diffOverviewBounds(
       viewer.getBoundingClientRect().top, viewer.clientHeight,
       pane.getBoundingClientRect().top, pane.clientTop, pane.clientHeight,
@@ -877,12 +843,9 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
   const applyOverviewScrollTarget = (target: number) => {
     const pane = activeScrollPane()
     if (!pane) return
-    if (view === 'unified') {
-      pane.scrollTop = target
-      handleCodeDiffScroll({ currentTarget: pane } as UIEvent<HTMLDivElement>)
-    } else {
-      applySplitScrollTop(target)
-    }
+    // Keep the destination rows mounted when the custom thumb moves the pane.
+    updateVirtualWindow(pane, target)
+    setPaneScrollTop(pane, target)
     updateOverviewViewport()
   }
   const scrollOverviewTo = (clientY: number, element: HTMLDivElement) => {
@@ -935,7 +898,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     event.preventDefault()
     applyOverviewScrollTarget(Math.max(0, Math.min(max, target)))
   }
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewer = overviewRef.current
     if (!viewer) return
     updateOverviewMetrics()
@@ -949,46 +912,38 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     }
     return () => observer.disconnect()
   }, [activeFile, diffLoading, diffError, visibleEntryCount, view, virtualized, diffFontSize, activeScope, showWhitespace, canRenderLoadedRows, overviewCanScroll, showImagePreview, wrap])
-  const handleCodeDiffScroll = (event: UIEvent<HTMLDivElement>) => {
-    queueVirtualScrollTop(event.currentTarget.scrollTop)
-    queueOverviewViewport()
-  }
-  const scrollToVirtualEntry = (rowIndex: number) => {
-    const offset = entryMetrics.offsets[rowIndex] ?? rowIndex * virtualRowHeight
-    if (view === 'split') {
-      const top = Math.max(0, offset - (splitScrollerRef.current?.clientHeight ?? 400) / 2)
-      applySplitScrollTop(top, true)
+  const scrollToDiffRow = (rowIndex: number) => {
+    const pane = activeScrollPane()
+    if (!pane) return
+    const max = Math.max(0, pane.scrollHeight - pane.clientHeight)
+    if (max === 0) return
+    if (virtualized) {
+      const offset = entryMetrics.offsets[rowIndex] ?? rowIndex * virtualRowHeight
+      const top = Math.max(0, Math.min(max, offset - pane.clientHeight / 2))
+      setPaneScrollTop(pane, top)
+      setVirtualScrollTop(pane.scrollTop)
+      updateOverviewViewport()
       return
     }
-    const container = codeDiffRef.current
-    if (!container) return
-    container.scrollTop = Math.max(0, offset - container.clientHeight / 2)
-    virtualScrollTopRef.current = container.scrollTop
-    setVirtualScrollTop(container.scrollTop)
-    queueOverviewViewport()
+    const row = pane.querySelector<HTMLElement>(`[data-diff-row-index="${rowIndex}"]`)
+    if (!row) return
+    // The split columns can scroll horizontally. Move only the shared vertical scroller.
+    const viewport = row.closest<HTMLElement>('.split-diff-pane') ?? pane
+    const rowRect = row.getBoundingClientRect()
+    const delta = rowRect.top - viewport.getBoundingClientRect().top - viewport.clientTop
+      - (viewport.clientHeight - rowRect.height) / 2
+    const top = Math.max(0, Math.min(max, pane.scrollTop + delta))
+    pane.scrollTo({ top, behavior: 'smooth' })
   }
   const scrollToChange = (rowIndex: number) => {
     setActiveChange({ fileIndex: activeFile, rowIndex })
-    if (virtualized) {
-      scrollToVirtualEntry(rowIndex)
-      return
-    }
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      panelRef.current?.querySelectorAll<HTMLElement>(`[data-diff-row-index="${rowIndex}"]`).forEach((element) => element.scrollIntoView({ block: 'center', behavior: 'smooth' }))
-    }))
-  }
-  const scrollToSearch = (rowIndex: number) => {
-    if (virtualized) {
-      scrollToVirtualEntry(rowIndex)
-      return
-    }
-    requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>(`[data-diff-row-index="${rowIndex}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+    scrollToDiffRow(rowIndex)
   }
   const jumpSearch = (direction: -1 | 1) => {
     if (!searchMatches.length) return
     const next = (searchIndex + direction + searchMatches.length) % searchMatches.length
     setSearchIndex(next)
-    scrollToSearch(searchMatches[next])
+    scrollToDiffRow(searchMatches[next])
   }
   const adjacentFile = (index: number, direction: -1 | 1) => (index + direction + files.length) % files.length
   const jumpToChange = (direction: -1 | 1) => {
@@ -1100,7 +1055,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     const count = Math.min(20, entry.count)
     const remaining = numbers.format(entry.count)
     const actions = Number(canExpandUp) + Number(canExpandDown)
-    return <div className={`hunk diff-omitted ${actions === 2 ? 'two-actions' : 'one-action'}`} key={key} style={wrap ? undefined : { height: virtualRowHeight * (actions === 2 ? 2 : 1) }}>
+    return <div className={`hunk diff-omitted ${actions === 2 ? 'two-actions' : 'one-action'}`} key={key} style={wrap ? undefined : { height: Math.max(DIFF_MIN_OMISSION_HEIGHT, virtualRowHeight * (actions === 2 ? 2 : 1)) }}>
       {canExpandDown && <Tooltip content={t('diff:context.expandDownHint', { count, remaining })}>
         <button type="button" className="diff-omitted-action" onClick={() => expandOmission(entry, 'start', anchorSourceIndex)} aria-label={t('diff:context.expandDown', { count })}><ChevronDown size={14}/></button>
       </Tooltip>}
@@ -1118,7 +1073,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
     ? (() => { const next = splitEntries[index + 1]; const nextRow = next?.kind === 'row' ? next.row.left ?? next.row.right : undefined; return renderOmission(entry, `omitted-${side}-${index}`, next?.kind === 'row', splitEntries[index - 1]?.kind === 'row', nextRow ? sourceIndexMap.get(nextRow) : undefined) })()
     : (() => { const row = side === 'old' ? entry.row.left : entry.row.right; const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1; const action = renderLineAction(row, sourceIndex); return <div key={`${side}-${index}`} data-diff-row-index={index} data-diff-source-index={sourceIndex} style={wrap ? undefined : { height: virtualRowHeight }} className={`split-code-side${wrap ? ' wrap' : ''} ${row?.kind ?? 'empty'} ${searchMatchSet.has(index) ? 'diff-search-match' : ''} ${searchMatches[searchIndex] === index ? 'diff-search-current' : ''} ${lineMenu?.rowIndex === index && lineMenu.side === side ? 'line-context-active' : ''} ${activeChange?.fileIndex === activeFile && activeChange.rowIndex === index ? 'diff-navigation-active' : ''}`} onContextMenu={(event) => openLineMenu(event, row, index, side, sourceIndex)}>{renderLineNumber(side === 'old' ? row?.old : row?.next)}{action}{row ? <HighlightedCode code={row.code} filePath={activeFileInfo?.path ?? ''} changedRanges={inlineDiffRanges.get(row)}/> : <code/>}</div> })()
   const renderSplitActions = (entry: SplitDiffEntry, index: number) => {
-    if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: virtualRowHeight * (index > 0 && index + 1 < splitEntries.length ? 2 : 1) }} key={`actions-${index}`}/>
+    if (entry.kind === 'omitted') return <div className="split-action-row" style={{ height: entryMetrics.heights[index] }} key={`actions-${index}`}/>
     const row = entry.row.left ?? entry.row.right
     const sourceIndex = row ? sourceIndexMap.get(row) ?? -1 : -1
     const blockStart = blockActionAnchors.has(index)
@@ -1127,7 +1082,7 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
       {blockStart && renderStageActions(block, blockActionAnchors.get(index), 'split')}
     </div>
   }
-  const renderWrapSplit = () => <div ref={setSplitScroller} className="split-diff-panes split-wrap-panes" onScroll={handleSplitScroll}>
+  const renderWrapSplit = () => <div ref={setSplitScroller} className="split-diff-panes split-wrap-panes" onScroll={handleDiffScroll}>
     <div className={`split-wrap-list${stageActionsEnabled ? ' with-actions' : ''}`}>
       {splitEntries.map((entry, index) => {
         if (entry.kind === 'omitted') return <div className="split-wrap-omission" key={`wrap-omitted-${index}`}>{(() => { const next = splitEntries[index + 1]; const nextRow = next?.kind === 'row' ? next.row.left ?? next.row.right : undefined; return renderOmission(entry, `wrap-omitted-${index}`, next?.kind === 'row', splitEntries[index - 1]?.kind === 'row', nextRow ? sourceIndexMap.get(nextRow) : undefined) })()}</div>
@@ -1200,8 +1155,8 @@ export function DiffPanel({ files, repositoryPath, wide, onWideChange, initialFi
           {diffLoading && !canRenderLoadedRows && <div className="diff-message">{t('diff:panel.loading')}</div>}
           {diffError && <div className="diff-message error">{renderMessage(diffError, t)}</div>}
           {!diffLoading && !diffError && visibleEntryCount === 0 && <div className="diff-message">{t('diff:panel.noTextDiff')}</div>}
-          {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-pane${wrap ? ' wrap' : ''}`} ref={codeDiffRef} onScroll={handleCodeDiffScroll}><div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div></div>}
-          {canRenderLoadedRows && !diffError && view === 'split' && (wrap ? renderWrapSplit() : <div ref={setSplitScroller} className="split-diff-panes" onScroll={handleSplitScroll}>
+          {canRenderLoadedRows && !diffError && view === 'unified' && <div className={`unified-diff-pane${wrap ? ' wrap' : ''}`} ref={codeDiffRef} onScroll={handleDiffScroll}><div className={`unified-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{unifiedEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderUnifiedEntry(entry, index + virtualStart))}</div></div>}
+          {canRenderLoadedRows && !diffError && view === 'split' && (wrap ? renderWrapSplit() : <div ref={setSplitScroller} className="split-diff-panes" onScroll={handleDiffScroll}>
             <div className="split-diff-viewport">
               <div className="split-diff-pane split-left" aria-label={t('diff:code.old')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitEntry(entry, index + virtualStart, 'old'))}</div></div>
               {stageActionsEnabled && <div className="split-diff-actions" aria-label={t('diff:actions.label')}><div className={`split-diff-content${virtualized ? ' virtual-diff-list' : ''}`} style={{ paddingTop: virtualized ? virtualTopHeight : undefined, paddingBottom: virtualBottomHeight }}>{splitEntries.slice(virtualStart, virtualEnd).map((entry, index) => renderSplitActions(entry, index + virtualStart))}</div></div>}

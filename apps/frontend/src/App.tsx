@@ -6,6 +6,8 @@ import { operationLabel, operationMessage } from './i18n/operationLabels'
 import { useAppTranslation } from './i18n/useAppTranslation'
 import { getShortcutModifier } from './platformShortcut'
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
+import { hasScrollBuffer } from './virtualScroll'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { useDebouncedValue } from './hooks/useDebouncedValue'
@@ -351,6 +353,8 @@ function GraphLine({ commit, row, laneCount, graphWidth }: { commit: Commit; row
 
 type ColumnKey = 'branch' | 'graph' | 'time' | 'hash' | 'author'
 const COMMIT_ROW_HEIGHT = 32
+const COMMIT_OVERSCAN_ROWS = 12
+const COMMIT_SCROLL_BUFFER = 3 * COMMIT_ROW_HEIGHT
 
 function commitDay(commit: Commit, locale: Locale) {
   const timestamp = commitTimestamp(commit)
@@ -386,8 +390,6 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
   const [listHeight, setListHeight] = useState(600)
   const commitListRef = useRef<HTMLDivElement>(null)
   const columnsHeaderRef = useRef<HTMLDivElement>(null)
-  const scrollFrame = useRef<number | null>(null)
-  const pendingScrollTop = useRef(0)
   const viewportAnchor = useRef<CommitViewportAnchor | null>(null)
   const handledSearchAction = useRef(0)
   const autoLocatedSearch = useRef('')
@@ -440,9 +442,8 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     if (pendingNewCommitTimer.current !== null) window.clearTimeout(pendingNewCommitTimer.current)
   }, [])
   const virtualRange = useMemo(() => {
-    const overscan = 12
-    const start = Math.max(0, Math.floor(scrollTop / COMMIT_ROW_HEIGHT) - overscan)
-    const end = Math.min(filtered.length, Math.ceil((scrollTop + listHeight) / COMMIT_ROW_HEIGHT) + overscan)
+    const start = Math.max(0, Math.floor(scrollTop / COMMIT_ROW_HEIGHT) - COMMIT_OVERSCAN_ROWS)
+    const end = Math.min(filtered.length, Math.ceil((scrollTop + listHeight) / COMMIT_ROW_HEIGHT) + COMMIT_OVERSCAN_ROWS)
     return { start, end }
   }, [filtered.length, listHeight, scrollTop])
   const visibleCommits = filtered.slice(virtualRange.start, virtualRange.end)
@@ -460,7 +461,6 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  useEffect(() => () => { if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current) }, [])
   useEffect(() => {
     onSearchSummaryChange({ current: searchMatchIndex >= 0 ? searchMatchIndex + 1 : 0, total: searchMatchCount })
   }, [onSearchSummaryChange, searchMatchCount, searchMatchIndex])
@@ -500,7 +500,6 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
     pendingTopRefresh.current = null
     if (nextTop !== element.scrollTop) element.scrollTop = nextTop
     const restoredTop = element.scrollTop
-    pendingScrollTop.current = restoredTop
     viewportAnchor.current = captureCommitAnchor(filtered, restoredTop, COMMIT_ROW_HEIGHT)
     setScrollTop((current) => current === restoredTop ? current : restoredTop)
   }, [commits, filtered])
@@ -551,12 +550,12 @@ function CommitList({ revealSignal, commits, selected, onSelect, query, searchMo
       {committerColumnVisible && <div className="column-label author-label"><span className="column-title">{t('history:app.columns.committer')}</span></div>}
     </div>
     <div className="commit-list" ref={commitListRef} onScroll={(event) => {
-      pendingScrollTop.current = event.currentTarget.scrollTop
-      viewportAnchor.current = captureCommitAnchor(filtered, pendingScrollTop.current, COMMIT_ROW_HEIGHT)
-      if (scrollFrame.current !== null) return
-      scrollFrame.current = requestAnimationFrame(() => {
-        scrollFrame.current = null
-        setScrollTop(pendingScrollTop.current)
+      const { scrollTop: top, clientHeight: height } = event.currentTarget
+      viewportAnchor.current = captureCommitAnchor(filtered, top, COMMIT_ROW_HEIGHT)
+      if (hasScrollBuffer(top, height, virtualRange.start * COMMIT_ROW_HEIGHT, virtualRange.end * COMMIT_ROW_HEIGHT, filtered.length * COMMIT_ROW_HEIGHT, COMMIT_SCROLL_BUFFER)) return
+      flushSync(() => {
+        setScrollTop(top)
+        setListHeight(height)
       })
     }}>
     {virtualRange.start > 0 && <div className="commit-list-spacer" style={{ height: virtualRange.start * COMMIT_ROW_HEIGHT }}/>}

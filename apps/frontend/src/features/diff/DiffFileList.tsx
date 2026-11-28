@@ -1,9 +1,11 @@
 import { Tooltip } from '../../components/tooltip'
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type UIEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { ChevronDown, ChevronRight, FolderOpen } from 'lucide-react'
 import { useAppTranslation } from '../../i18n/useAppTranslation'
 import type { RepositoryFile } from '../../repository'
 import { compareCommitTreeEntries } from '../history/commitFileTree'
+import { hasScrollBuffer } from '../../virtualScroll'
 
 type IndexedFile = {
   file: RepositoryFile
@@ -49,6 +51,7 @@ type DiffFileListProps = {
 const FILE_ROW_HEIGHT = 40
 const FOLDER_ROW_HEIGHT = 26
 const VIRTUAL_OVERSCAN = 280
+const SCROLL_BUFFER = 80
 
 function entryAtOffset(offsets: number[], offset: number) {
   let low = 0
@@ -67,7 +70,6 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
   const [internalCollapsedFolders, setInternalCollapsedFolders] = useState<Record<string, boolean>>({})
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 600 })
   const containerRef = useRef<HTMLDivElement>(null)
-  const scrollFrame = useRef<number | null>(null)
   const collapsedFolders = controlledCollapsedFolders ?? internalCollapsedFolders
 
   const indexedFiles = useMemo(() => files.map((file, index) => {
@@ -144,42 +146,41 @@ export const DiffFileList = memo(function DiffFileList({ files, activeFile, mode
   }, [entries])
   const range = useMemo(() => {
     if (!entries.length) return { start: 0, end: 0 }
-    const start = entryAtOffset(offsets, Math.max(0, viewport.scrollTop - VIRTUAL_OVERSCAN))
-    const end = Math.min(entries.length, entryAtOffset(offsets, viewport.scrollTop + viewport.height + VIRTUAL_OVERSCAN) + 1)
+    const scrollTop = Math.min(viewport.scrollTop, Math.max(0, totalHeight - viewport.height))
+    const start = entryAtOffset(offsets, Math.max(0, scrollTop - VIRTUAL_OVERSCAN))
+    const end = Math.min(entries.length, entryAtOffset(offsets, scrollTop + viewport.height + VIRTUAL_OVERSCAN) + 1)
     return { start, end }
-  }, [entries.length, offsets, viewport])
+  }, [entries.length, offsets, totalHeight, viewport])
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-    const updateHeight = () => setViewport((value) => ({ ...value, height: container.clientHeight }))
+    const updateHeight = () => {
+      const { scrollTop, clientHeight: height } = container
+      setViewport((value) => value.height === height ? value : { scrollTop, height })
+    }
     updateHeight()
     const observer = new ResizeObserver(updateHeight)
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current
     const entryIndex = entryIndexByFile.get(activeFile) ?? -1
     if (!container || entryIndex < 0) return
     const top = offsets[entryIndex]
     const bottom = offsets[entryIndex + 1]
+    const previousTop = container.scrollTop
     if (top < container.scrollTop) container.scrollTop = top
     else if (bottom > container.scrollTop + container.clientHeight) container.scrollTop = bottom - container.clientHeight
+    if (container.scrollTop !== previousTop) setViewport({ scrollTop: container.scrollTop, height: container.clientHeight })
   }, [activeFile, entryIndexByFile, offsets])
 
-  useEffect(() => () => {
-    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current)
-  }, [])
-
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget
-    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current)
-    scrollFrame.current = requestAnimationFrame(() => {
-      setViewport({ scrollTop: target.scrollTop, height: target.clientHeight })
-      scrollFrame.current = null
-    })
+    const { scrollTop, clientHeight: height } = event.currentTarget
+    if (hasScrollBuffer(scrollTop, height, offsets[range.start], offsets[range.end], totalHeight, SCROLL_BUFFER)) return
+    flushSync(() => setViewport({ scrollTop, height }))
   }
 
   const toggleFolder = (folder: string) => {

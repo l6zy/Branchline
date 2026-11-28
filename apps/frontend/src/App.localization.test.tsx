@@ -39,6 +39,29 @@ it('uses the rounded workbench default instead of the legacy preference', async 
   expect(document.querySelector('.app-shell')?.classList.contains('theme-rounded')).toBe(true)
 })
 
+it('updates a large commit graph jump during the native scroll event', async () => {
+  const commits = Array.from({ length: 1000 }, (_, index) => ({
+    id: `commit-${index}`, fullHash: `hash-${index}`, title: `Commit ${index}`, author: 'Me', email: 'me@example.test',
+    time: '2025-01-01', parents: index < 999 ? [`hash-${index + 1}`] : [], lane: 0, color: '#123456', avatar: '', files: 0, additions: 0, deletions: 0,
+  }))
+  Object.assign(repositoryFixture, { commits })
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(320)
+  try {
+    const { container } = await renderLocalized(<LocaleProvider><App/></LocaleProvider>, 'en-US')
+    const list = container.querySelector<HTMLElement>('.commit-list')!
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+
+    act(() => {
+      list.scrollTop = 16_000
+      fireEvent.scroll(list)
+      expect(list.querySelector('[data-commit-id="commit-500"]')).toBeTruthy()
+      expect(list.querySelector('[data-commit-id="commit-508"]')).toBeTruthy()
+    })
+  } finally {
+    height.mockRestore()
+  }
+})
+
 it('opens an older stash in the commit graph with its details visible', async () => {
   Object.assign(repositoryFixture, {
     commits: [{ id: 'oldstash', fullHash: 'old-stash-hash', title: 'older saved work', message: 'older saved work', author: 'Me', committer: 'Me', authorTime: '2025-01-01', commitTime: '2025-01-01', parents: ['base-hash'], branches: ['stash@{2}'], status: 'stash', files: 0, additions: 0, deletions: 0 }],
